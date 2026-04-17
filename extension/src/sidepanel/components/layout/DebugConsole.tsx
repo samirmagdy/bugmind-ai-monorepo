@@ -1,6 +1,6 @@
 import React from 'react';
 import { Plus } from 'lucide-react';
-import { useBugMind } from '../../context/BugMindContext';
+import { useBugMind } from '../../hooks/useBugMind';
 
 const DebugConsole: React.FC = () => {
   const { debug: { show: showDebug, setShow: setShowDebug, logs: debugLogs, clear: clearLogs } } = useBugMind();

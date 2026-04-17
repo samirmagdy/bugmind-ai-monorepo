@@ -13,20 +13,23 @@ export class BugMindDB {
     return new Promise((resolve, reject) => {
       const request = indexedDB.open(DB_NAME, DB_VERSION);
 
-      request.onupgradeneeded = (event: any) => {
-        const db = event.target.result;
+      request.onupgradeneeded = (event: IDBVersionChangeEvent) => {
+        const target = event.target as IDBOpenDBRequest;
+        const db = target.result;
         if (!db.objectStoreNames.contains(STORE_NAME)) {
           db.createObjectStore(STORE_NAME); // Key will be tabId (number)
         }
       };
 
-      request.onsuccess = (event: any) => {
-        this.db = event.target.result;
+      request.onsuccess = (event: Event) => {
+        const target = event.target as IDBOpenDBRequest;
+        this.db = target.result;
         resolve();
       };
 
-      request.onerror = (event: any) => {
-        reject('IndexedDB error: ' + event.target.error);
+      request.onerror = (event: Event) => {
+        const target = event.target as IDBOpenDBRequest;
+        reject('IndexedDB error: ' + target.error);
       };
     });
   }
@@ -52,7 +55,7 @@ export class BugMindDB {
       const store = transaction.objectStore(STORE_NAME);
       const request = store.get(tabId);
 
-      request.onsuccess = () => resolve(request.result || []);
+      request.onsuccess = () => resolve((request.result as BugReport[]) || []);
       request.onerror = () => reject(request.error);
     });
   }

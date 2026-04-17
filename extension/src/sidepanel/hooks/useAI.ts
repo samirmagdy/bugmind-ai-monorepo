@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { TabSession, BugReport, Usage, INITIAL_SESSION } from '../types';
+import { TabSession, BugReport, Usage, INITIAL_SESSION, CreatedIssue, JiraUser } from '../types';
 import { apiRequest } from '../services/api';
 import { translateError } from '../utils/ErrorTranslator';
 
@@ -23,11 +23,12 @@ export function useAI(
     try {
       const res = await apiRequest(`${apiBase}/bugs/usage`, { token: authToken });
       if (res.ok) {
-        const data = await res.json();
+        const data = await res.json() as Usage;
         setUsage(data);
       }
-    } catch (err: any) {
-      logDebug('USAGE-ERR', err.message);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      logDebug('USAGE-ERR', errMsg);
     }
   };
 
@@ -35,11 +36,12 @@ export function useAI(
     updateSession({ loading: true });
     try {
       const res = await apiRequest(`${apiBase}/settings/ai`, { token: authToken });
-      const data = await res.json();
+      const data = await res.json() as { custom_model: string; has_custom_key: boolean };
       setCustomModel(data.custom_model || '');
       setHasCustomKeySaved(data.has_custom_key);
-    } catch (err: any) {
-      logDebug('AI-SETTINGS-ERR', err.message);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      logDebug('AI-SETTINGS-ERR', errMsg);
       const translated = translateError(err, 'settings');
       updateSession({ error: translated.description });
     } finally { updateSession({ loading: false }); }
@@ -82,12 +84,15 @@ export function useAI(
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "AI Analysis failed");
-      updateSession({ bugs: data }, currentTabId);
-      logDebug('AI-OK', `Generated ${data.length} reports for tab ${currentTabId}`);
+      if (!res.ok) {
+        throw new Error((data as { detail?: string }).detail || "AI Analysis failed");
+      }
+      updateSession({ bugs: data as BugReport[] }, currentTabId);
+      logDebug('AI-OK', `Generated ${(data as BugReport[]).length} reports for tab ${currentTabId}`);
       fetchUsage();
-    } catch (err: any) {
-      logDebug('AI-ERR', err.message);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      logDebug('AI-ERR', errMsg);
       const translated = translateError(err, 'ai-analysis');
       updateSession({ error: translated.description }, currentTabId);
     } finally {
@@ -114,7 +119,7 @@ export function useAI(
       const rawBody = await res.text();
       if (!res.ok) throw new Error(rawBody || "Manual processing failed");
       
-      const newBug: BugReport = { ...JSON.parse(rawBody), extra_fields: {} };
+      const newBug: BugReport = { ...(JSON.parse(rawBody) as BugReport), extra_fields: {} };
       logDebug('MANUAL-SUCCESS', `Structured: ${newBug.summary}`);
       const existingBugs = session.bugs || [];
       updateSession({ 
@@ -125,8 +130,9 @@ export function useAI(
       });
 
       fetchUsage();
-    } catch (err: any) {
-      logDebug('MANUAL-CRASH', err.message);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      logDebug('MANUAL-CRASH', errMsg);
       const translated = translateError(err, 'ai-manual');
       updateSession({ error: translated.description });
     } finally {
@@ -154,7 +160,7 @@ export function useAI(
           bugs: bugs
         })
       });
-      const data = await res.json();
+      const data = await res.json() as { detail?: string; issues?: CreatedIssue[]; created_count?: number };
       if (!res.ok) throw new Error(data.detail || "Submission failed");
       
       updateSession({ 
@@ -162,8 +168,9 @@ export function useAI(
         createdIssues: data.issues || []
       });
       logDebug('SUBMIT-OK', `Batch of ${data.created_count || (session.bugs || []).length} pushed to Jira`);
-    } catch (err: any) {
-      logDebug('SUBMIT-ERR', err.message);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      logDebug('SUBMIT-ERR', errMsg);
       const translated = translateError(err, 'jira-submit');
       updateSession({ error: translated.description });
     } finally {
@@ -196,17 +203,19 @@ export function useAI(
         signal: searchControllerRef.current.signal
       });
       if (res.ok) {
-        const users = await res.json();
+        const users = await res.json() as JiraUser[];
         if (bugIndex !== undefined) {
           handleUpdateBug(bugIndex, { 
             userSearchResults: users,
             isSearchingUsers: false 
+            // Note: handleUpdateBug will set isSearchingUsers to false via the spread
           });
           return;
         }
       }
-    } catch (err: any) {
-      logDebug('SEARCH-ERR', `User search failed: ${err.message || 'Unknown error'}`);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      logDebug('SEARCH-ERR', `User search failed: ${errMsg}`);
     } finally {
       if (bugIndex !== undefined) {
         handleUpdateBug(bugIndex, { isSearchingUsers: false });

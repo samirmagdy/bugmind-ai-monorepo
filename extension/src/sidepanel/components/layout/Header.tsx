@@ -1,6 +1,6 @@
 import React from 'react';
 import { Bug, Settings, LogOut, Sun, Moon } from 'lucide-react';
-import { useBugMind } from '../../context/BugMindContext';
+import { useBugMind } from '../../hooks/useBugMind';
 
 const Header: React.FC = () => {
   const { session: { theme }, auth: { globalView }, ai: { fetchAISettings }, updateSession, handleLogout } = useBugMind();

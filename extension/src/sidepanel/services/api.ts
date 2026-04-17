@@ -8,21 +8,26 @@ export interface ApiRequestOptions extends RequestInit {
 export const apiRequest = async (
   url: string, 
   options: ApiRequestOptions = {}
-) => {
+): Promise<Response> => {
   const { onUnauthorized, onDebug, token, ...fetchOptions } = options;
   
-  const headers: Record<string, string> = {
-    ...fetchOptions.headers as any,
-  };
+  const headers: Record<string, string> = {};
+  
+  // Safely merge existing headers
+  if (fetchOptions.headers) {
+    const originalHeaders = fetchOptions.headers as Record<string, string>;
+    Object.entries(originalHeaders).forEach(([key, value]) => {
+      headers[key] = value;
+    });
+  }
 
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
   
-  if (fetchOptions.body && (!fetchOptions.headers || !(fetchOptions.headers as any)['Content-Type'])) {
+  if (fetchOptions.body && !headers['Content-Type']) {
     headers['Content-Type'] = 'application/json';
   } else if (!fetchOptions.body) {
-    // Prevent stale Content-Type headers on GET/DELETE requests
     delete headers['Content-Type'];
   }
   
@@ -36,9 +41,10 @@ export const apiRequest = async (
     }
     
     return res;
-  } catch (err: any) {
-    if (err.message !== 'Unauthorized') {
-      if (onDebug) onDebug('API-ERROR', `Request to ${url} failed: ${err.message}`);
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    if (errMsg !== 'Unauthorized') {
+      if (onDebug) onDebug('API-ERROR', `Request to ${url} failed: ${errMsg}`);
     }
     throw err;
   }

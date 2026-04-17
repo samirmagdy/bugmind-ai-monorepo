@@ -1,12 +1,12 @@
 import { X, ChevronDown, Loader2 } from 'lucide-react';
-import { useBugMind } from '../../context/BugMindContext';
+import { useBugMind } from '../../hooks/useBugMind';
 import { IssueType, JiraField } from '../../types';
 
 const SettingsView: React.FC = () => {
   const { 
     session, updateSession, handleSaveSettings, saveFieldSettings, auth: { setGlobalView },
     ai: { customKey, setCustomKey, hasCustomKeySaved, customModel, setCustomModel },
-    jira: { verifySsl, setVerifySsl },
+    jira,
     auth: { apiBase, setApiBase }
   } = useBugMind();
 
@@ -135,9 +135,9 @@ const SettingsView: React.FC = () => {
                       if (pKey && session.instanceUrl && session.issueData) {
                         updateSession({ error: null });
                         if (session.issueTypes.length === 0) {
-                          useBugMind().jira.fetchIssueTypes(pKey, session.instanceUrl, undefined, session.issueData.projectId);
+                          jira.fetchIssueTypes(pKey, session.instanceUrl, undefined, session.issueData.projectId);
                         } else if (session.selectedIssueType) {
-                          useBugMind().jira.fetchJiraMetadata(pKey, session.instanceUrl, session.selectedIssueType.id, undefined, session.issueData.projectId);
+                          jira.fetchJiraMetadata(pKey, session.instanceUrl, session.selectedIssueType.id, undefined, session.issueData.projectId);
                         }
                       }
                     }}
@@ -248,10 +248,10 @@ const SettingsView: React.FC = () => {
                     <input 
                       type="checkbox" 
                       id="verify-ssl-settings"
-                      checked={verifySsl} 
+                      checked={jira.verifySsl} 
                       onChange={e => {
                         const val = e.target.checked;
-                        setVerifySsl(val);
+                        jira.setVerifySsl(val);
                       }}
                       className="w-4 h-4 rounded border-[var(--border-main)] bg-[var(--bg-input)] text-blue-600 focus:ring-blue-500/50"
                     />

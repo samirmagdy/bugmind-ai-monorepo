@@ -1,11 +1,11 @@
-import React, { useEffect, useMemo } from 'react';
-import { useBugMind } from '../../context/BugMindContext';
+import React, { useEffect } from 'react';
+import { useBugMind } from '../../hooks/useBugMind';
 import { 
   Plus, MessageSquare, ChevronDown, 
   Loader2, User, Search, X, Save, Send, AlertCircle, Zap, RefreshCw,
   Compass, ArrowRight, Check
 } from 'lucide-react';
-import { BugReport, JiraField } from '../../types';
+import { BugReport, JiraField, JiraUser, JiraFieldOption } from '../../types';
 import AutoResizeTextarea from '../common/AutoResizeTextarea';
 import { TIMEOUTS } from '../../constants';
 
@@ -15,13 +15,6 @@ const MainView: React.FC = () => {
     ai: { generateBugs, handleManualGenerate, handleUpdateBug, submitBugs, searchUsers } 
   } = useBugMind();
 
-  // Derived search state to prevent redundant effect triggers on unrelated bug edits
-  const searchState = useMemo(() => (session.bugs || []).map((b: BugReport) => ({
-    q: b.userSearchQuery,
-    f: b.activeUserSearchField,
-    s: b.isSearchingUsers,
-    r: b.userSearchResults?.length || 0
-  })), [session.bugs]);
 
   // Trigger user search when query changes with 400ms debounce
   useEffect(() => {
@@ -47,7 +40,7 @@ const MainView: React.FC = () => {
     }, TIMEOUTS.USER_SEARCH_DEBOUNCE);
 
     return () => clearTimeout(timer);
-  }, [searchState, session.instanceUrl, session.issueData?.key, debug.log]); // Precise dependencies
+  }, [session.bugs, session.instanceUrl, session.issueData, debug, searchUsers]);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -161,7 +154,7 @@ const MainView: React.FC = () => {
                   <h4 className="text-base font-black text-[var(--text-main)] tracking-tight">Requirement Focus</h4>
                   <p className="text-[11px] text-[var(--text-muted)] leading-relaxed px-2">
                     BugMind is designed for **User Stories**. 
-                    This issue is identified as a <span className="text-[var(--status-warning)] font-black">{(session.issueData as any)?.typeName || 'Other'}</span>.
+                    This issue is identified as a <span className="text-[var(--status-warning)] font-black">{session.issueData?.typeName || 'Other'}</span>.
                   </p>
                 </div>
                 <button 
@@ -352,16 +345,18 @@ const MainView: React.FC = () => {
                                      <div className="relative">
                                        {currentVal ? (
                                          <div className="flex items-center justify-between bg-blue-500/5 border border-blue-500/10 rounded-xl px-3 py-2.5">
-                                           <div className="flex items-center gap-2">
-                                             {currentVal.avatar ? (
-                                               <img src={currentVal.avatar} className="w-5 h-5 rounded-full" alt="" />
-                                             ) : (
-                                               <div className="w-5 h-5 bg-[var(--bg-input)] rounded-full flex items-center justify-center">
-                                                 <User size={12} className="text-[var(--text-muted)]" />
-                                               </div>
-                                             )}
-                                             <span className="text-xs text-[var(--status-info)] dark:text-blue-100 font-medium">{currentVal.name || 'Selected User'}</span>
-                                           </div>
+                                            <div className="flex items-center gap-2">
+                                              {typeof currentVal === 'object' && currentVal !== null && !Array.isArray(currentVal) && (currentVal as JiraUser).avatar ? (
+                                                <img src={(currentVal as JiraUser).avatar} className="w-5 h-5 rounded-full" alt="" />
+                                              ) : (
+                                                <div className="w-5 h-5 bg-[var(--bg-input)] rounded-full flex items-center justify-center">
+                                                  <User size={12} className="text-[var(--text-muted)]" />
+                                                </div>
+                                              )}
+                                              <span className="text-xs text-[var(--status-info)] dark:text-blue-100 font-medium">
+                                                {typeof currentVal === 'object' && currentVal !== null && !Array.isArray(currentVal) ? ((currentVal as JiraUser).name || 'Selected User') : 'Selected User'}
+                                              </span>
+                                            </div>
                                            <button 
                                              onClick={() => handleUpdateBug(idx, { extra_fields: { ...(bug.extra_fields || {}), [fieldKey]: null } })}
                                              className="text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors"
@@ -398,7 +393,7 @@ const MainView: React.FC = () => {
                                                <span className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest font-black">Searching Jira...</span>
                                              </div>
                                            ) : (bug.userSearchResults && bug.userSearchResults.length > 0) ? (
-                                             bug.userSearchResults.map((u: any) => (
+                                             bug.userSearchResults.map((u) => (
                                                <button 
                                                  key={u.id}
                                                  onClick={() => handleUpdateBug(idx, { 
@@ -435,15 +430,15 @@ const MainView: React.FC = () => {
                                    ) : field.allowed_values ? (
                                      <div className="space-y-2">
                                        <select 
-                                         value={isMulti ? '' : (currentVal?.id || '')}
+                                         value={isMulti ? '' : (typeof currentVal === 'object' && currentVal !== null && !Array.isArray(currentVal) ? ((currentVal as JiraFieldOption).id || '') : '')}
                                          onChange={e => {
                                            const valId = e.target.value;
                                            if (!valId) return;
                                            
                                            let nextVal;
                                            if (isMulti) {
-                                             const existing = Array.isArray(currentVal) ? currentVal : [];
-                                             if (existing.some((v: any) => v.id === valId)) return;
+                                             const existing = Array.isArray(currentVal) ? currentVal as JiraFieldOption[] : [];
+                                             if (existing.some((v) => v.id === valId)) return;
                                              nextVal = [...existing, { id: valId }];
                                            } else {
                                              nextVal = { id: valId };
@@ -457,7 +452,7 @@ const MainView: React.FC = () => {
                                          <option value="" className="bg-[var(--bg-card)] text-[var(--text-muted)]">
                                            {isMulti ? `Add ${field.name}...` : `Select ${field.name}...`}
                                          </option>
-                                         {field.allowed_values.map((opt: any) => (
+                                         {field.allowed_values.map((opt) => (
                                            <option key={opt.id} value={opt.id} className="bg-[var(--bg-card)] text-[var(--text-main)]">
                                              {opt.name || opt.value || opt.label}
                                            </option>
@@ -466,8 +461,8 @@ const MainView: React.FC = () => {
 
                                        {isMulti && Array.isArray(currentVal) && currentVal.length > 0 && (
                                          <div className="flex flex-wrap gap-1.5">
-                                           {currentVal.map((v: any) => {
-                                             const opt = field.allowed_values?.find((o: any) => o.id === v.id);
+                                           {(currentVal as JiraFieldOption[]).map((v) => {
+                                             const opt = field.allowed_values?.find((o) => o.id === v.id);
                                              return (
                                                <div key={v.id} className="bg-blue-500/5 border border-blue-500/20 text-blue-400 px-2 py-1 rounded-lg text-[9px] font-bold flex items-center gap-1.5">
                                                  {opt?.name || opt?.value || opt?.label || v.id}
@@ -476,7 +471,7 @@ const MainView: React.FC = () => {
                                                      handleUpdateBug(idx, { 
                                                        extra_fields: { 
                                                          ...(bug.extra_fields || {}), 
-                                                         [fieldKey]: currentVal.filter((x: any) => x.id !== v.id) 
+                                                         [fieldKey]: (currentVal as JiraFieldOption[]).filter((x) => x.id !== v.id) 
                                                        } 
                                                      });
                                                    }}
@@ -501,7 +496,7 @@ const MainView: React.FC = () => {
                                              e.preventDefault();
                                              const val = (e.target as HTMLInputElement).value.trim();
                                              if (!val) return;
-                                             const existing = Array.isArray(currentVal) ? currentVal : [];
+                                             const existing = Array.isArray(currentVal) ? (currentVal as string[]) : [];
                                              if (existing.includes(val)) return;
                                              handleUpdateBug(idx, { 
                                                extra_fields: { ...(bug.extra_fields || {}), [fieldKey]: [...existing, val] } 
@@ -512,31 +507,35 @@ const MainView: React.FC = () => {
                                        />
                                        {Array.isArray(currentVal) && currentVal.length > 0 && (
                                          <div className="flex flex-wrap gap-1.5">
-                                           {currentVal.map((label: string) => (
-                                             <div key={label} className="bg-[var(--bg-card)] border border-[var(--border-main)] text-[var(--text-main)] px-2 py-1 rounded-lg text-[9px] font-bold flex items-center gap-1.5 shadow-sm">
-                                               {label}
-                                               <button 
-                                                 onClick={() => {
-                                                   handleUpdateBug(idx, { 
-                                                     extra_fields: { 
-                                                       ...(bug.extra_fields || {}), 
-                                                       [fieldKey]: currentVal.filter((x: string) => x !== label) 
-                                                     } 
-                                                   });
-                                                 }}
-                                                 className="hover:text-red-500 transition-colors opacity-60"
-                                               >
-                                                 <Plus size={10} className="rotate-45" />
-                                               </button>
-                                             </div>
-                                           ))}
+                                           {Array.isArray(currentVal) && (currentVal as (string | JiraUser | JiraFieldOption)[]).map((val: string | JiraUser | JiraFieldOption, i: number) => {
+                                             const label = typeof val === 'string' ? val : '';
+                                             if (!label) return null;
+                                             return (
+                                               <div key={`${label}-${i}`} className="bg-[var(--bg-card)] border border-[var(--border-main)] text-[var(--text-main)] px-2 py-1 rounded-lg text-[9px] font-bold flex items-center gap-1.5 shadow-sm">
+                                                 {label}
+                                                 <button 
+                                                   onClick={() => {
+                                                     handleUpdateBug(idx, { 
+                                                       extra_fields: { 
+                                                         ...(bug.extra_fields || {}), 
+                                                         [fieldKey]: (currentVal as string[]).filter((x) => x !== label) 
+                                                       } 
+                                                     });
+                                                   }}
+                                                   className="hover:text-red-500 transition-colors opacity-60"
+                                                 >
+                                                   <Plus size={10} className="rotate-45" />
+                                                 </button>
+                                               </div>
+                                             );
+                                           })}
                                          </div>
                                        )}
                                      </div>
                                    ) : (
                                      <input 
                                        type="text"
-                                       value={currentVal || ''}
+                                       value={typeof currentVal === 'boolean' ? String(currentVal) : (currentVal?.toString() || '')}
                                        onChange={e => handleUpdateBug(idx, { 
                                          extra_fields: { ...(bug.extra_fields || {}), [fieldKey]: e.target.value } 
                                        })}

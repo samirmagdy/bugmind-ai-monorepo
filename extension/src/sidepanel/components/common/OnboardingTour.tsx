@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useBugMind } from '../../context/BugMindContext';
+import { useBugMind } from '../../hooks/useBugMind';
 import { ChevronRight, X, Info, ShieldCheck, Zap } from 'lucide-react';
 
 const OnboardingTour: React.FC = () => {

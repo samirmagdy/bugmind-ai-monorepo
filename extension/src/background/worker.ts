@@ -22,8 +22,9 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   // 2. Clean IndexedDB bug data (inline, since worker can't import sidepanel modules)
   try {
     const request = indexedDB.open('BugMindDB', 1);
-    request.onsuccess = (event: any) => {
-      const db: IDBDatabase = event.target.result;
+    request.onsuccess = (event: Event) => {
+      const target = event.target as IDBOpenDBRequest;
+      const db: IDBDatabase = target.result;
       if (db.objectStoreNames.contains('tab_bugs')) {
         const tx = db.transaction(['tab_bugs'], 'readwrite');
         const store = tx.objectStore('tab_bugs');

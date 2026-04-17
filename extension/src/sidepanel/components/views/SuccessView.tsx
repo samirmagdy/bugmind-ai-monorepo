@@ -1,6 +1,6 @@
 import React from 'react';
 import { CheckCircle, ExternalLink } from 'lucide-react';
-import { useBugMind } from '../../context/BugMindContext';
+import { useBugMind } from '../../hooks/useBugMind';
 
 const SuccessView: React.FC = () => {
   const { session, updateSession } = useBugMind();
@@ -18,7 +18,7 @@ const SuccessView: React.FC = () => {
 
         {session.createdIssues && session.createdIssues.length > 0 && (
           <div className="space-y-2 px-6 max-h-[220px] overflow-y-auto custom-scrollbar">
-            {session.createdIssues.map((issue: any) => (
+            {session.createdIssues.map((issue) => (
               <a 
                 key={issue.key}
                 href={`${session.instanceUrl}/browse/${issue.key}`}

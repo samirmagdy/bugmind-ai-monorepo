@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { TabSession, INITIAL_SESSION } from '../types';
 import { dbService } from '../services/db';
 import { TIMEOUTS } from '../constants';
@@ -9,17 +9,17 @@ export function useSession(log?: (tag: string, msg: string) => void) {
   const [sessionHydrated, setSessionHydrated] = useState(false);
 
   // Helper to get active session
-  const session = currentTabId ? (tabSessions[currentTabId] || INITIAL_SESSION) : INITIAL_SESSION;
+  const session = useMemo(() => currentTabId ? (tabSessions[currentTabId] || INITIAL_SESSION) : INITIAL_SESSION, [currentTabId, tabSessions]);
 
   // Helper to update active session
-  const updateSession = (updates: Partial<TabSession>, tabId?: number) => {
+  const updateSession = useCallback((updates: Partial<TabSession>, tabId?: number) => {
     const id = tabId || currentTabId;
     if (!id) return;
     setTabSessions((prev: Record<number, TabSession>) => ({
       ...prev,
       [id]: { ...(prev[id] || INITIAL_SESSION), ...updates }
     }));
-  };
+  }, [currentTabId]);
 
   useEffect(() => {
     // Set initial tab
@@ -72,11 +72,13 @@ export function useSession(log?: (tag: string, msg: string) => void) {
     // 1. Load metadata from chrome storage (include global onboarding flag)
     chrome.storage.local.get([key, 'bugmind_onboarding_completed'], async (result) => {
       const globalOnboardingDone = !!result['bugmind_onboarding_completed'];
-      let sessionData = { 
+      const rawSession = (result[key] || {}) as Partial<TabSession>;
+      
+      let sessionData: TabSession = { 
         ...INITIAL_SESSION, 
-        ...(result[key] || {}),
+        ...rawSession,
         // Always respect the global onboarding flag so new tabs don't re-show onboarding
-        onboardingCompleted: globalOnboardingDone || (result[key]?.onboardingCompleted ?? false)
+        onboardingCompleted: globalOnboardingDone || (rawSession.onboardingCompleted ?? false)
       };
       
       // 2. Load large bugs array from IndexedDB
@@ -97,34 +99,42 @@ export function useSession(log?: (tag: string, msg: string) => void) {
     });
   }, [currentTabId]);
 
-  // Sync tab session to storage with debounce (Hybrid sync)
-  useEffect(() => {
-    if (!currentTabId || !tabSessions[currentTabId]) return;
-    const key = `bugmind_tab_${currentTabId}`;
+  // Derived state for serialization to avoid complicated dependency logic
+  const serializeTarget = useMemo(() => {
+    if (!currentTabId || !tabSessions[currentTabId]) return null;
     const sessionToSave = { ...tabSessions[currentTabId] };
     const bugsToSave = sessionToSave.bugs;
     
     // Do NOT store bugs or transient UI messages in chrome.storage.local
-    delete (sessionToSave as any).bugs;
-    delete (sessionToSave as any).error;
-    delete (sessionToSave as any).success;
+    const strippedSession: Partial<TabSession> = { ...sessionToSave };
+    delete strippedSession.bugs;
+    delete strippedSession.error;
+    delete strippedSession.success;
     
+    return { key: `bugmind_tab_${currentTabId}`, tabId: currentTabId, session: strippedSession, bugs: bugsToSave };
+  }, [currentTabId, tabSessions]);
+
+  // Sync tab session to storage with debounce (Hybrid sync)
+  useEffect(() => {
+    if (!serializeTarget) return;
+
     const timeout = setTimeout(async () => {
       // 1. Sync metadata to chrome.storage
-      chrome.storage.local.set({ [key]: sessionToSave });
+      chrome.storage.local.set({ [serializeTarget.key]: serializeTarget.session });
       
       // 2. Sync large bugs array to IndexedDB
       try {
-        await dbService.saveBugs(currentTabId, bugsToSave);
-        log?.('DB-SYNC', `Bugs saved to IndexedDB for tab ${currentTabId}`);
-      } catch (err) {
-        log?.('DB-ERR', `Failed to save bugs: ${err instanceof Error ? err.message : String(err)}`);
+        await dbService.saveBugs(serializeTarget.tabId, serializeTarget.bugs);
+        log?.('DB-SYNC', `Bugs saved to IndexedDB for tab ${serializeTarget.tabId}`);
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        log?.('DB-ERR', `Failed to save bugs: ${errMsg}`);
         console.error('Failed to save bugs to IndexedDB', err);
       }
     }, TIMEOUTS.STORAGE_SYNC_DEBOUNCE); 
     
     return () => clearTimeout(timeout);
-  }, [currentTabId, JSON.stringify(currentTabId ? tabSessions[currentTabId] : null)]);
+  }, [serializeTarget, log]);
 
   return {
     tabSessions,

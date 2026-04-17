@@ -148,7 +148,7 @@ function initialize() {
 
   // 3. Mark as injected
   window.__BugMindInjected = "1.2.0";
-  chrome.runtime.onMessage.addListener(messageListener as any); // Type cast needed for third-party event listener sign
+  chrome.runtime.onMessage.addListener(messageListener); 
 
   // 4. Watch for theme changes
   const themeObserver = new MutationObserver(() => {
@@ -169,7 +169,7 @@ function initialize() {
 
   // 5. Cleanup handle for safe handover
   window.__BugMindCleanup = () => {
-    chrome.runtime.onMessage.removeListener(messageListener as any);
+    chrome.runtime.onMessage.removeListener(messageListener);
     themeObserver.disconnect();
     window.__BugMindInjected = null;
   };

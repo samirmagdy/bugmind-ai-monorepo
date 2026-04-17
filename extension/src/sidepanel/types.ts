@@ -1,3 +1,22 @@
+export interface JiraUser {
+  id: string;
+  name: string;
+  avatar?: string;
+}
+
+export interface JiraFieldOption {
+  id: string;
+  name?: string;
+  value?: string;
+  label?: string;
+}
+
+export interface CreatedIssue {
+  id: string;
+  key: string;
+  self: string;
+}
+
 export interface BugReport {
   summary: string;
   description: string;
@@ -5,10 +24,10 @@ export interface BugReport {
   expected_result: string;
   actual_result: string;
   severity: string;
-  extra_fields?: Record<string, any>;
+  extra_fields?: Record<string, string | number | boolean | JiraUser | JiraFieldOption | (JiraUser | JiraFieldOption | string)[] | null>;
   // Isolated search state per bug
   userSearchQuery?: string;
-  userSearchResults?: any[];
+  userSearchResults?: JiraUser[];
   isSearchingUsers?: boolean;
   activeUserSearchField?: string | null;
   lastSearchedQuery?: string;
@@ -31,7 +50,7 @@ export interface TabSession {
   visibleFields: string[];
   aiMapping: Record<string, string>;
   settingsTab: 'ai' | 'jira';
-  createdIssues: any[];
+  createdIssues: CreatedIssue[];
   theme: 'light' | 'dark';
   themeSource: 'auto' | 'manual';
   onboardingCompleted: boolean;
@@ -42,7 +61,7 @@ export interface JiraField {
   name: string;
   type: string;
   required: boolean;
-  allowed_values?: any[];
+  allowed_values?: JiraFieldOption[];
 }
 
 export interface JiraMetadata {
@@ -106,4 +125,3 @@ export interface Usage {
   remaining: number;
   plan: string;
 }
-

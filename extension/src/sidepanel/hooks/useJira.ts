@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { TabSession } from '../types';
+import { TabSession, IssueType, JiraField, JiraMetadata } from '../types';
 import { apiRequest } from '../services/api';
 import { translateError } from '../utils/ErrorTranslator';
 import { obfuscate, deobfuscate } from '../utils/StorageObfuscator';
@@ -23,16 +23,16 @@ export function useJira(
   const [isInitializing, setIsInitializing] = useState(true);
 
   // Persistence logic
-  const saveJiraConfig = (updates: any) => {
+  const saveJiraConfig = (updates: Record<string, string | boolean | undefined>) => {
     chrome.storage.local.get(['bugmind_jira_config'], (res) => {
-      const current = res.bugmind_jira_config || {};
+      const current = (res.bugmind_jira_config as Record<string, string | boolean | undefined>) || {};
       
       // Obfuscate sensitive fields before saving
       const secureUpdates = { ...updates };
-      if (secureUpdates.cloudToken) secureUpdates.cloudToken = obfuscate(secureUpdates.cloudToken);
-      if (secureUpdates.serverToken) secureUpdates.serverToken = obfuscate(secureUpdates.serverToken);
-      if (secureUpdates.cloudUsername) secureUpdates.cloudUsername = obfuscate(secureUpdates.cloudUsername);
-      if (secureUpdates.serverUsername) secureUpdates.serverUsername = obfuscate(secureUpdates.serverUsername);
+      if (typeof secureUpdates.cloudToken === 'string') secureUpdates.cloudToken = obfuscate(secureUpdates.cloudToken);
+      if (typeof secureUpdates.serverToken === 'string') secureUpdates.serverToken = obfuscate(secureUpdates.serverToken);
+      if (typeof secureUpdates.cloudUsername === 'string') secureUpdates.cloudUsername = obfuscate(secureUpdates.cloudUsername);
+      if (typeof secureUpdates.serverUsername === 'string') secureUpdates.serverUsername = obfuscate(secureUpdates.serverUsername);
       
       chrome.storage.local.set({ 'bugmind_jira_config': { ...current, ...secureUpdates } });
     });
@@ -69,12 +69,12 @@ export function useJira(
       
       const res = await apiRequest(url, { token: authToken, onDebug: logDebug });
       if (res.ok) {
-        const types = await res.json();
+        const types = await res.json() as IssueType[];
         logDebug('TYPES-OK', `Found ${types.length} issue types`);
         updateSession({ issueTypes: types }, tabId);
         
         if (!session.selectedIssueType) {
-          const bugType = types.find((t: any) => t.name.toLowerCase().includes('bug'));
+          const bugType = types.find((t: IssueType) => t.name.toLowerCase().includes('bug'));
           if (bugType) {
             updateSession({ selectedIssueType: bugType }, tabId);
           } else if (types.length > 0) {
@@ -82,8 +82,9 @@ export function useJira(
           }
         }
       }
-    } catch (err: any) {
-      logDebug('TYPES-ERROR', err.message);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      logDebug('TYPES-ERROR', errMsg);
       const translated = translateError(err, 'jira-types');
       updateSession({ error: translated.description }, tabId);
     }
@@ -99,18 +100,19 @@ export function useJira(
       
       const res = await apiRequest(url, { token: authToken, onDebug: logDebug });
       if (res.ok) {
-        const data = await res.json();
+        const data = await res.json() as JiraMetadata;
         logDebug('META-OK', `Received ${data.fields?.length || 0} fields`);
         
         const updates: Partial<TabSession> = { jiraMetadata: data };
         if (session.visibleFields.length === 0 && data.fields) {
-          const requiredFields = data.fields.filter((f: any) => f.required).map((f: any) => f.key);
+          const requiredFields = data.fields.filter((f: JiraField) => f.required).map((f: JiraField) => f.key);
           if (requiredFields.length > 0) updates.visibleFields = requiredFields;
         }
         updateSession(updates, tabId);
       }
-    } catch (err: any) {
-      logDebug('META-ERROR', err.message);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      logDebug('META-ERROR', errMsg);
       const translated = translateError(err, 'jira-metadata');
       updateSession({ error: translated.description }, tabId);
     }
@@ -126,18 +128,20 @@ export function useJira(
 
       const res = await apiRequest(url, { token: authToken });
       if (res.ok) {
-        const data = await res.json();
+        const data = await res.json() as { visible_fields?: string[]; ai_mapping?: Record<string, string> };
         updateSession({ 
           visibleFields: data.visible_fields || [],
           aiMapping: data.ai_mapping || {}
         }, tabId);
       }
-    } catch (err) {}
+    } catch (err: unknown) {
+      // Background fetch, ignore errors
+    }
   };
 
   const checkJiraStatus = async (isInit: boolean = false, signal?: AbortSignal, tokenOverride?: string, urlOverride?: string, tabId?: number): Promise<boolean> => {
     if (!isInit) updateSession({ loading: true }, tabId);
-    let targetUrl = urlOverride || session.instanceUrl;
+    const targetUrl = urlOverride || session.instanceUrl;
     logDebug('JIRA-STATUS', `Verifying connection... ${targetUrl || '(global)'}`);
     
     try {
@@ -145,29 +149,31 @@ export function useJira(
       if (targetUrl) url += `?base_url=${encodeURIComponent(targetUrl)}`;
       
       const res = await apiRequest(url, { signal, token: tokenOverride || authToken, onDebug: logDebug });
-      const data = await res.json();
+      const data = await res.json() as { connected?: boolean; connections?: { auth_type?: 'cloud' | 'server'; base_url: string; verify_ssl?: boolean }[] };
       
       if (data.connected || (data.connections && data.connections.length > 0)) {
         logDebug('JIRA-OK', 'Jira connected successfully');
         setJiraConnected(true);
         
         // If we don't have a targetUrl, use the first active connection
-        let activeConn = data.connected ? data : (data.connections && data.connections[0]);
-        if (activeConn) {
-          const platform = activeConn.auth_type || 'cloud';
-          const normalizedBase = normalizeUrl(activeConn.base_url) || targetUrl;
+        const activeConn = data.connections && data.connections[0];
+        if (activeConn || data.connected) {
+          // Special case: if data.connected is true but activeConn is null, it might be the status of the CURRENT requested targetUrl
+          const conn = activeConn || { auth_type: 'cloud', base_url: targetUrl || '', verify_ssl: true };
+          const platform = conn.auth_type || 'cloud';
+          const normalizedBase = normalizeUrl(conn.base_url) || targetUrl;
           
           if (normalizedBase) {
             setJiraPlatform(platform);
             if (platform === 'cloud') setCloudUrl(normalizedBase);
             if (platform === 'server') setServerUrl(normalizedBase);
-            setVerifySsl(activeConn.verify_ssl ?? true);
+            setVerifySsl(conn.verify_ssl ?? true);
             
             // Persist the identified base URL for the form too
             saveJiraConfig({ 
               platform, 
               [platform === 'cloud' ? 'cloudUrl' : 'serverUrl']: normalizedBase,
-              verifySsl: activeConn.verify_ssl ?? true
+              verifySsl: conn.verify_ssl ?? true
             });
 
             updateSession({ view: 'main', instanceUrl: normalizedBase }, tabId);
@@ -180,8 +186,9 @@ export function useJira(
         if (targetUrl) updateSession({ view: 'setup' }, tabId);
         return false;
       }
-    } catch (err: any) {
-      logDebug('JIRA-ERR', `Status check failed: ${err.message}`);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      logDebug('JIRA-ERR', `Status check failed: ${errMsg}`);
       return false;
     } finally {
       if (!isInit) updateSession({ loading: false }, tabId);

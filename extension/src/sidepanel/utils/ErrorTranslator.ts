@@ -3,8 +3,16 @@ export interface TranslatedError {
   description: string;
 }
 
-export function translateError(error: any, context?: string): TranslatedError {
-  const message = typeof error === 'string' ? error : (error?.message || 'Unknown error occurred');
+export function translateError(error: unknown, context?: string): TranslatedError {
+  let message = 'Unknown error occurred';
+  
+  if (typeof error === 'string') {
+    message = error;
+  } else if (error instanceof Error) {
+    message = error.message;
+  } else if (error && typeof error === 'object' && 'message' in error) {
+    message = String((error as { message: unknown }).message);
+  }
   
   // 1. Handle network/general fetch errors
   if (message.includes('Failed to fetch') || message.includes('NetworkError')) {

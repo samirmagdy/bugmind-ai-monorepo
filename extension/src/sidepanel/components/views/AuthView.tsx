@@ -1,5 +1,5 @@
 import React from 'react';
-import { useBugMind } from '../../context/BugMindContext';
+import { useBugMind } from '../../hooks/useBugMind';
 
 const AuthView: React.FC = () => {
   const { 

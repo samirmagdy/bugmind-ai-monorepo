@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { Loader2, AlertCircle, Plus } from 'lucide-react';
 
 // Context
-import { useBugMind } from './context/BugMindContext';
+import { useBugMind } from './hooks/useBugMind';
 
 // Components
 import Header from './components/layout/Header';
@@ -24,7 +24,7 @@ export default function App() {
 
   useEffect(() => {
     checkAuth();
-  }, [auth.authToken]);
+  }, [auth.authToken, checkAuth]);
 
   // Sync logic: Primary refresh when entering main view
   useEffect(() => {
@@ -32,7 +32,7 @@ export default function App() {
       debug.log('INIT-SYNC', 'App entering main view, triggering refresh...');
       refreshIssue();
     }
-  }, [auth.authToken, session.view, auth.globalView]);
+  }, [auth.authToken, session.view, auth.globalView, debug, refreshIssue]);
 
   // Context Discovery Poller: Only runs in background when main view is active
   useEffect(() => {
@@ -46,7 +46,7 @@ export default function App() {
       }, INTERVALS.CONTEXT_DISCOVERY);
       return () => clearInterval(interval);
     }
-  }, [auth.authToken, session.view, auth.globalView, !!session.issueData, session.loading]);
+  }, [auth.authToken, session.view, auth.globalView, session.issueData, session.loading, debug, refreshIssue]);
 
   if (initializing) {
     return (

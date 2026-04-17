@@ -1,5 +1,5 @@
 import React from 'react';
-import { useBugMind } from '../../context/BugMindContext';
+import { useBugMind } from '../../hooks/useBugMind';
 import { ExternalLink } from 'lucide-react';
 
 const SetupView: React.FC = () => {
