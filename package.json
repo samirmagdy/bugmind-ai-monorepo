@@ -2,10 +2,17 @@
   "name": "bugmind-ai-monorepo",
   "version": "1.0.0",
   "private": true,
+  "license": "MIT",
   "scripts": {
     "build": "npm run build --prefix extension",
     "install:extension": "npm install --prefix extension",
     "dev:extension": "npm run dev --prefix extension",
-    "docker:up": "docker-compose up --build"
+    "docker:up": "docker-compose up --build",
+    "release": "standard-version",
+    "release:minor": "standard-version --release-as minor",
+    "release:major": "standard-version --release-as major"
+  },
+  "devDependencies": {
+    "standard-version": "^9.5.0"
   }
 }

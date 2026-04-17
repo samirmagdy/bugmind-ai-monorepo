@@ -1,9 +1,18 @@
 # BugMind AI 🚀
+
+[![CI](https://github.com/samirmagdy/bugmind-ai-monorepo/actions/workflows/ci.yml/badge.svg)](https://github.com/samirmagdy/bugmind-ai-monorepo/actions/workflows/ci.yml)
+[![Release](https://github.com/samirmagdy/bugmind-ai-monorepo/actions/workflows/release.yml/badge.svg)](https://github.com/samirmagdy/bugmind-ai-monorepo/actions/workflows/release.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Version](https://img.shields.io/github/v/release/samirmagdy/bugmind-ai-monorepo)](https://github.com/samirmagdy/bugmind-ai-monorepo/releases)
+
 **Intelligent Bug Generator from Jira User Stories**
 
 BugMind AI is a production-grade SaaS system that analyzes Jira User Stories and Acceptance Criteria to automatically generate high-quality QA bug reports using AI (OpenRouter/GPT-4o).
 
+---
+
 ## 📁 System Architecture
+
 - **Backend**: FastAPI, PostgreSQL, SQLAlchemy, Redis.
 - **Extension**: React, TypeScript, TailwindCSS, Vite (Manifest V3).
 - **AI**: OpenRouter integration with structured JSON output.
@@ -35,15 +44,23 @@ The API will be available at `http://localhost:8000`.
    - Go to `chrome://extensions/`
    - Enable "Developer mode"
    - Click "Load unpacked"
-   - Select the `extension/dist` folder (after build) or `extension` folder if using a dev server.
+   - Select the `extension/dist` folder (after build).
 
 ## 🧠 Features
+
 - **Auto-Detection**: Scrapes Jira Cloud & Server issues automatically.
 - **Direct Submission**: Create bug tickets in Jira with one click.
 - **Self-Healing**: AI output validation and API retry logic.
 - **Usage Tracking**: SaaS-ready with subscription enforcement hooks.
 
 ## ⚙️ Development
-- **Backend API**: `http://localhost:8000/docs` (Swagger UI)
-- **Database**: PostgreSQL on port 5432.
-- **Cache**: Redis on port 6379.
+
+- **Release Management**: This project uses [standard-version](https://github.com/conventional-changelog/standard-version) for automated versioning.
+  - Patch: `npm run release`
+  - Minor: `npm run release:minor`
+  - Major: `npm run release:major`
+- **CI/CD**: GitHub Actions validate every PR and automate releases on tag pushes.
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
