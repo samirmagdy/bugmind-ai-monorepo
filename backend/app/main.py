@@ -6,24 +6,26 @@ from .db.session import engine, Base
 from .services.jira import JiraConnectionError
 from .services.ai_engine import AIConnectionError
 from .core.limiter import limiter
+from .core.config import settings
 from slowapi.errors import RateLimitExceeded
 from slowapi import _rate_limit_exceeded_handler
 import os
 import time
 import logging
 from starlette.middleware.base import BaseHTTPMiddleware
+from sqlalchemy import text
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("bugmind")
 
-# Create DB tables (In production use Alembic)
-Base.metadata.create_all(bind=engine)
+# Create DB tables (In production, use Alembic - removal of auto-creation here)
+# Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
-    title="BugMind AI API",
+    title=settings.PROJECT_NAME,
     description="Intelligent Bug Generator from Jira User Stories",
-    version="1.0.0"
+    version=settings.VERSION
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
@@ -63,11 +65,9 @@ async def ai_connection_exception_handler(request: Request, exc: AIConnectionErr
     )
 
 # CORS configuration
-# Restricted to the specific extension ID from ENV or a whitelist
-ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "").split(",")
-if not any(ALLOWED_ORIGINS):
-    # Fallback to a warning-level permissive state for local dev ONLY
-    if os.getenv("ENV") == "production":
+ALLOWED_ORIGINS = settings.ALLOWED_ORIGINS
+if not ALLOWED_ORIGINS or ALLOWED_ORIGINS == ["*"]:
+    if settings.ENV == "production":
         logger.error("DANGER: No ALLOWED_ORIGINS set in production!")
     ALLOWED_ORIGINS = ["*"]
 
@@ -100,7 +100,23 @@ app.include_router(settings.router)
 
 @app.get("/")
 def read_root():
-    return {"message": "Welcome to BugMind AI API", "status": "running"}
+    return {"message": f"Welcome to {settings.PROJECT_NAME} API", "status": "running"}
+
+@app.get("/health")
+async def health_check():
+    health_status = {"status": "ok", "timestamp": time.time(), "services": {}}
+    
+    # Check Database
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+        health_status["services"]["database"] = "ok"
+    except Exception as e:
+        logger.error(f"Health Check - DB Failure: {str(e)}")
+        health_status["services"]["database"] = "error"
+        health_status["status"] = "degraded"
+
+    return health_status
 
 # Register logger as the outermost middleware (last added)
 app.add_middleware(InteractionLogger)

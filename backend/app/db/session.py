@@ -1,18 +1,8 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
-import os
-from dotenv import load_dotenv
+from ..core.config import settings
 
-load_dotenv()
-
-# Auto-detect Docker environment
-db_host = os.getenv("POSTGRES_HOST", "localhost")
-if os.path.exists("/.dockerenv"):
-    db_host = "postgres"
-
-DATABASE_URL = os.getenv("DATABASE_URL", f"postgresql://postgres:postgres@{db_host}:5432/bugmind")
-
-engine = create_engine(DATABASE_URL)
+engine = create_engine(settings.sqlalchemy_database_url)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
