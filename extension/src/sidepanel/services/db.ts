@@ -1,0 +1,74 @@
+import { BugReport } from '../types';
+
+const DB_NAME = 'BugMindDB';
+const STORE_NAME = 'tab_bugs';
+const DB_VERSION = 1;
+
+export class BugMindDB {
+  private db: IDBDatabase | null = null;
+
+  async init(): Promise<void> {
+    if (this.db) return;
+
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+      request.onupgradeneeded = (event: any) => {
+        const db = event.target.result;
+        if (!db.objectStoreNames.contains(STORE_NAME)) {
+          db.createObjectStore(STORE_NAME); // Key will be tabId (number)
+        }
+      };
+
+      request.onsuccess = (event: any) => {
+        this.db = event.target.result;
+        resolve();
+      };
+
+      request.onerror = (event: any) => {
+        reject('IndexedDB error: ' + event.target.error);
+      };
+    });
+  }
+
+  async saveBugs(tabId: number, bugs: BugReport[]): Promise<void> {
+    await this.init();
+    return new Promise((resolve, reject) => {
+      if (!this.db) return reject('DB not initialized');
+      const transaction = this.db.transaction([STORE_NAME], 'readwrite');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.put(bugs, tabId);
+
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async getBugs(tabId: number): Promise<BugReport[]> {
+    await this.init();
+    return new Promise((resolve, reject) => {
+      if (!this.db) return reject('DB not initialized');
+      const transaction = this.db.transaction([STORE_NAME], 'readonly');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.get(tabId);
+
+      request.onsuccess = () => resolve(request.result || []);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async clearBugs(tabId: number): Promise<void> {
+    await this.init();
+    return new Promise((resolve, reject) => {
+      if (!this.db) return reject('DB not initialized');
+      const transaction = this.db.transaction([STORE_NAME], 'readwrite');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.delete(tabId);
+
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+}
+
+export const dbService = new BugMindDB();

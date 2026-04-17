@@ -1,0 +1,11 @@
+{
+  "name": "bugmind-ai-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "npm run build --prefix extension",
+    "install:extension": "npm install --prefix extension",
+    "dev:extension": "npm run dev --prefix extension",
+    "docker:up": "docker-compose up --build"
+  }
+}
