@@ -13,6 +13,23 @@ export interface ExtractedIssue {
   theme: 'light' | 'dark';
 }
 
+declare global {
+  interface Window {
+    __BugMindInjected?: string | null;
+    __BugMindCleanup?: () => void;
+  }
+}
+
+type BugMindMessage = 
+  | { type: "PING" }
+  | { type: "GET_ISSUE_DATA" }
+  | { type: "THEME_CHANGED"; theme: 'light' | 'dark' };
+
+type BugMindResponse = 
+  | { type: "PONG"; version: string }
+  | { type: 'ISSUE_DATA_SUCCESS'; data: ExtractedIssue | null }
+  | { type: 'ISSUE_DATA_ERROR'; error: string };
+
 export function detectTheme(): 'light' | 'dark' {
   const mode = document.documentElement.getAttribute('data-color-mode');
   if (mode === 'dark') return 'dark';
@@ -93,7 +110,11 @@ export function extractJiraData(): ExtractedIssue | null {
 }
 
 // Message Handlers
-const messageListener = (request: any, _sender: any, sendResponse: (response?: any) => void) => {
+const messageListener = (
+  request: BugMindMessage, 
+  _sender: chrome.runtime.MessageSender, 
+  sendResponse: (response: BugMindResponse) => void
+) => {
   // Versioned PING for health checks
   if (request.type === "PING") {
     sendResponse({ type: "PONG", version: "1.2.0" });
@@ -115,19 +136,19 @@ const messageListener = (request: any, _sender: any, sendResponse: (response?: a
 // Injection Guard & Initialization
 function initialize() {
   // 1. Duplicate Guard: Stop if this version is already active
-  if ((window as any).__BugMindInjected === "1.2.0") {
+  if (window.__BugMindInjected === "1.2.0") {
     console.log("[BugMind] This script version is already active.");
     return;
   }
 
   // 2. Orphan detection: Cleanup if we are re-injecting over a different version
-  if ((window as any).__BugMindCleanup) {
-    (window as any).__BugMindCleanup();
+  if (window.__BugMindCleanup) {
+    window.__BugMindCleanup();
   }
 
   // 3. Mark as injected
-  (window as any).__BugMindInjected = "1.2.0";
-  chrome.runtime.onMessage.addListener(messageListener);
+  window.__BugMindInjected = "1.2.0";
+  chrome.runtime.onMessage.addListener(messageListener as any); // Type cast needed for third-party event listener sign
 
   // 4. Watch for theme changes
   const themeObserver = new MutationObserver(() => {
@@ -147,10 +168,10 @@ function initialize() {
   });
 
   // 5. Cleanup handle for safe handover
-  (window as any).__BugMindCleanup = () => {
-    chrome.runtime.onMessage.removeListener(messageListener);
+  window.__BugMindCleanup = () => {
+    chrome.runtime.onMessage.removeListener(messageListener as any);
     themeObserver.disconnect();
-    (window as any).__BugMindInjected = null;
+    window.__BugMindInjected = null;
   };
 
   console.log("[BugMind] AI Content Engine Ready.");
