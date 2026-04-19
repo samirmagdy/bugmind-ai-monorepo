@@ -189,7 +189,8 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
     }
   }, [
     auth.authToken, auth.globalView, 
-    bootstrapCurrentContext, currentTabId, jira, logDebug, session.error, session.instanceUrl,
+    bootstrapCurrentContext, currentTabId, jira, logDebug, 
+    session, session.error, session.instanceUrl,
     session.issueData, session.jiraConnectionId,
     session.loading, sessionHydrated
   ]);
