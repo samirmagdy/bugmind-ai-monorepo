@@ -3,12 +3,15 @@ from jose import jwt
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.api import deps
-from app.schemas.token import Token, RefreshTokenRequest
+from app.schemas.token import Token, RefreshTokenRequest, AuthBootstrapRequest, AuthBootstrapResponse
 from app.schemas.user import UserCreate, UserResponse
 from app.models.user import User
+from app.models.jira import JiraConnection
 from app.models.subscription import Subscription
 from app.core import security
 from app.core.config import settings
+from app.api.v1.jira import resolve_jira_bootstrap_context
+from app.schemas.jira import JiraBootstrapContextRequest
 
 router = APIRouter()
 
@@ -77,3 +80,39 @@ def get_me(current_user: User = Depends(deps.get_current_user)):
     Validation heartbeat to verify the current session token is still valid.
     """
     return current_user
+
+
+@router.post("/bootstrap", response_model=AuthBootstrapResponse)
+def bootstrap_authenticated_session(
+    request: AuthBootstrapRequest,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    has_connections = db.query(JiraConnection).filter(
+        JiraConnection.user_id == current_user.id
+    ).count() > 0
+
+    if not has_connections:
+        return AuthBootstrapResponse(view="setup", has_connections=False, bootstrap_context=None)
+
+    bootstrap_context = None
+    if request.instance_url:
+        try:
+            bootstrap_context = resolve_jira_bootstrap_context(
+                JiraBootstrapContextRequest(
+                    instance_url=request.instance_url,
+                    project_key=request.project_key,
+                    project_id=request.project_id,
+                    issue_type_id=request.issue_type_id,
+                ),
+                db,
+                current_user,
+            )
+        except HTTPException:
+            bootstrap_context = None
+
+    return AuthBootstrapResponse(
+        view="main",
+        has_connections=True,
+        bootstrap_context=bootstrap_context,
+    )

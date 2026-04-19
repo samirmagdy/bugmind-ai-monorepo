@@ -15,7 +15,7 @@ export interface AIContextType {
   generateTestCases: () => Promise<void>;
   handleManualGenerate: () => Promise<void>;
   submitBugs: (index?: number) => Promise<void>;
-  searchUsers: (query: string, baseUrl: string, projectId?: string, projectKey?: string, bugIndex?: number) => Promise<void>;
+  searchUsers: (query: string, bugIndex?: number) => Promise<void>;
   handleUpdateBug: (index: number, updates: Partial<BugReport>) => void;
   handleUpdateTestCase: (index: number, updates: Partial<TestCase>) => void;
   publishTestCasesToXray: () => Promise<void>;

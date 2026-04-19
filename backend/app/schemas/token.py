@@ -1,4 +1,7 @@
 from pydantic import BaseModel
+from typing import Optional, Literal
+
+from app.schemas.jira import JiraBootstrapContextResponse
 
 class Token(BaseModel):
     access_token: str
@@ -10,3 +13,16 @@ class RefreshTokenRequest(BaseModel):
 
 class TokenPayload(BaseModel):
     sub: str = None
+
+
+class AuthBootstrapRequest(BaseModel):
+    instance_url: Optional[str] = None
+    project_key: Optional[str] = None
+    project_id: Optional[str] = None
+    issue_type_id: Optional[str] = None
+
+
+class AuthBootstrapResponse(BaseModel):
+    view: Literal["main", "setup"]
+    has_connections: bool
+    bootstrap_context: Optional[JiraBootstrapContextResponse] = None

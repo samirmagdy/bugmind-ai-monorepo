@@ -176,6 +176,8 @@ class BugGenerator:
             if user_description:
                 user_prompt += f"\n\nUser's Bug Observation:\n{self._truncate_context(user_description, 2000)}"
             return await self._generate_and_parse_json(system_prompt, user_prompt, model=model)
+        except HTTPException:
+            raise
         except Exception as e:
             import traceback
             print(f"[BugMind-AI] Generation Error Traceback:")
@@ -218,6 +220,8 @@ class BugGenerator:
                     model=model,
                     expect_test_suite=True
                 )
+            except HTTPException:
+                raise
             except Exception:
                 retry_prompt = system_prompt + """
 
@@ -232,5 +236,7 @@ class BugGenerator:
                     model=model,
                     expect_test_suite=True
                 )
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"AI Test Suite Generation Failed: {str(e)}")

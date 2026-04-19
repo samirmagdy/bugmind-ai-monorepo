@@ -29,16 +29,9 @@ const MainView: React.FC = () => {
         // Only trigger search if query is 2+ chars, we're not already searching, and it's a NEW query
         if (q.length >= 2 && bug.activeUserSearchField && !bug.isSearchingUsers && q !== bug.lastSearchedQuery) {
           if (session.instanceUrl) {
-            const pKey = session.issueData?.key.split('-')[0];
             const logTag = `SEARCH-${idx}`;
             debug.log(logTag, `Debounce passed. Searching for "${q}"...`);
-            searchUsers(
-              q, 
-              session.instanceUrl, 
-              session.issueData?.projectId, 
-              pKey, 
-              idx
-            );
+            searchUsers(q, idx);
           }
         }
       });
@@ -51,22 +44,23 @@ const MainView: React.FC = () => {
     if (!session.testCases.length || !session.jiraConnectionId || session.xrayProjects.length > 0) return;
 
     let cancelled = false;
-    jira.fetchProjects(session.jiraConnectionId).then(projects => {
-      if (cancelled || projects.length === 0) return;
-      const storyProjectKey = session.issueData?.key.split('-')[0] || null;
-      const defaultProject = projects.find(project => project.key === storyProjectKey) || projects[0];
+    jira.fetchXrayDefaults(session.jiraConnectionId, session.issueData?.key || undefined).then(defaults => {
+      if (cancelled || !defaults) return;
       updateSession({
-        xrayProjects: projects,
-        xrayTargetProjectId: session.xrayTargetProjectId || defaultProject?.id || null,
-        xrayTargetProjectKey: session.xrayTargetProjectKey || defaultProject?.key || null,
-        xrayFolderPath: session.xrayFolderPath || session.issueData?.key || ''
+        xrayProjects: defaults.projects || [],
+        xrayTargetProjectId: session.xrayTargetProjectId || defaults.target_project_id || null,
+        xrayTargetProjectKey: session.xrayTargetProjectKey || defaults.target_project_key || null,
+        xrayFolderPath: session.xrayFolderPath || defaults.folder_path || session.issueData?.key || '',
+        xrayTestIssueTypeName: session.xrayTestIssueTypeName || defaults.test_issue_type_name || 'Test',
+        xrayLinkType: session.xrayLinkType || defaults.link_type || 'Tests',
+        xrayRepositoryPathFieldId: session.xrayRepositoryPathFieldId || defaults.repository_path_field_id || ''
       });
     });
 
     return () => {
       cancelled = true;
     };
-  }, [jira, session.issueData?.key, session.jiraConnectionId, session.testCases.length, session.xrayFolderPath, session.xrayProjects.length, session.xrayTargetProjectId, session.xrayTargetProjectKey, updateSession]);
+  }, [jira, session.issueData?.key, session.jiraConnectionId, session.testCases.length, session.xrayFolderPath, session.xrayLinkType, session.xrayProjects.length, session.xrayRepositoryPathFieldId, session.xrayTargetProjectId, session.xrayTargetProjectKey, session.xrayTestIssueTypeName, updateSession]);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">

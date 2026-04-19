@@ -1,5 +1,5 @@
 import { createContext } from 'react';
-import { JiraBootstrapContext, JiraProject } from '../types';
+import { JiraBootstrapContext, JiraProject, XrayDefaultsResponse } from '../types';
 
 export interface JiraConnectionConfig {
   base_url: string;
@@ -20,9 +20,18 @@ export interface JiraContextType {
   setActiveConnection: (id: number, hostUrl: string) => Promise<void>;
   updateConnection: (id: number, updates: Record<string, unknown>) => Promise<boolean>;
   fetchProjects: (id: number) => Promise<JiraProject[]>;
+  fetchXrayDefaults: (id: number, storyIssueKey?: string) => Promise<XrayDefaultsResponse | null>;
   fetchIssueTypes: (connectionId: number, projectKey: string, tabId?: number | null, projectId?: string, force?: boolean) => Promise<void>;
   fetchJiraMetadata: (connectionId: number, projectKey: string, issueTypeId: string, tabId?: number | null, projectId?: string, force?: boolean) => Promise<void>;
   fetchFieldSettings: (connectionId: number, projectKey: string, tabId?: number | null, issueTypeId?: string, projectId?: string, force?: boolean) => Promise<void>;
+  saveFieldSettings: (params: {
+    jiraConnectionId: number;
+    projectKey: string;
+    projectId?: string;
+    issueTypeId: string;
+    visibleFields?: string[];
+    aiMapping?: Record<string, string>;
+  }) => Promise<boolean>;
   bootstrapContext: (params: {
     instanceUrl: string;
     projectKey?: string;
@@ -32,6 +41,7 @@ export interface JiraContextType {
     force?: boolean;
     tokenOverride?: string;
   }) => Promise<JiraBootstrapContext | null>;
+  applyBootstrapContext: (data: JiraBootstrapContext, tabId?: number | null, hasProjectContext?: boolean) => void;
   checkJiraStatus: (isInit?: boolean, signal?: AbortSignal, tokenOverride?: string, urlOverride?: string, tabId?: number | null) => Promise<boolean>;
   isInitializing: boolean;
   cloudUrl: string;

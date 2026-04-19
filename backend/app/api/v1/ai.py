@@ -22,13 +22,38 @@ from app.services.ai.bug_generator import BugGenerator
 from app.services.subscription.limit_checker import LimitChecker
 from app.services.jira.metadata_engine import JiraMetadataEngine
 from app.services.jira.field_resolver import JiraFieldResolver
-from app.api.v1.jira import get_adapter
+from app.api.v1.jira import get_adapter, _normalize_instance_url
 from app.core.security import decrypt_credential
 import re
 
 router = APIRouter()
 
 STANDARD_ISSUE_FIELDS = {"summary", "description", "issuetype", "project"}
+
+
+def _compose_story_context(selected_text: Optional[str], issue_context) -> str:
+    if issue_context:
+        sections = []
+
+        summary = (issue_context.summary or "").strip()
+        if summary:
+            sections.append(f"Summary:\n{summary}")
+
+        description = (issue_context.description or "").strip()
+        if description:
+            sections.append(f"Description:\n{description}")
+
+        acceptance_criteria = (issue_context.acceptance_criteria or "").strip()
+        if acceptance_criteria:
+            sections.append(f"Acceptance Criteria:\n{acceptance_criteria}")
+
+        if sections:
+            return "\n\n".join(sections)
+
+    if selected_text and selected_text.strip():
+        return selected_text.strip()
+
+    raise HTTPException(status_code=400, detail="Issue context is required for AI generation")
 
 
 def _get_owned_connection(db: Session, user_id: int, connection_id: int) -> JiraConnection:
@@ -41,18 +66,34 @@ def _get_owned_connection(db: Session, user_id: int, connection_id: int) -> Jira
     return conn
 
 
-def _build_issue_fields(bug: dict, issue_type_id: str) -> dict:
+def _assert_connection_matches_instance(connection: JiraConnection, instance_url: Optional[str]) -> None:
+    if not instance_url:
+        return
+
+    requested = _normalize_instance_url(instance_url)
+    connection_url = _normalize_instance_url(connection.host_url)
+    if requested and connection_url and requested != connection_url:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Active Jira connection does not match the current tab. Expected {requested} but selected connection points to {connection_url}."
+        )
+
+
+def _build_issue_fields(bug: dict, issue_type_id: str, project_key: str, project_id: Optional[str]) -> dict:
     extra_fields = {
         key: value
         for key, value in (bug.get("extra_fields") or {}).items()
         if key not in STANDARD_ISSUE_FIELDS
     }
+
+    project_value = {"id": project_id} if project_id else {"key": project_key}
     return {
         "summary": bug.get("summary"),
         "description": bug.get("description"),
         "steps_to_reproduce": bug.get("steps_to_reproduce", ""),
         "expected_result": bug.get("expected_result"),
         "actual_result": bug.get("actual_result"),
+        "project": project_value,
         "issuetype": {"id": issue_type_id},
         **extra_fields
     }
@@ -152,6 +193,7 @@ async def generate_bug_report(
     ).first()
     if not conn:
         raise HTTPException(status_code=404, detail="Jira connection not found")
+    _assert_connection_matches_instance(conn, req.instance_url)
         
     adapter = get_adapter(conn)
     engine = JiraMetadataEngine(adapter)
@@ -164,8 +206,9 @@ async def generate_bug_report(
         custom_api_key = decrypt_credential(current_user.encrypted_ai_api_key)
 
     generator = BugGenerator(api_key=custom_api_key)
+    story_context = _compose_story_context(req.selected_text, req.issue_context)
     ai_raw = await generator.generate_bug(
-        req.selected_text, 
+        story_context,
         schema, 
         model=req.model or current_user.custom_ai_model,
         user_description=req.user_description,
@@ -224,8 +267,9 @@ async def generate_test_suite(
         custom_api_key = decrypt_credential(current_user.encrypted_ai_api_key)
 
     generator = BugGenerator(api_key=custom_api_key)
+    story_context = _compose_story_context(req.selected_text, req.issue_context)
     suite = await generator.generate_test_cases(
-        req.selected_text,
+        story_context,
         model=req.model or current_user.custom_ai_model,
         custom_instructions=req.custom_instructions
     )
@@ -239,12 +283,13 @@ async def prepare_bug_preview(
     current_user: User = Depends(deps.get_current_user)
 ):
     conn = _get_owned_connection(db, current_user.id, req.jira_connection_id)
+    _assert_connection_matches_instance(conn, req.instance_url)
     adapter = get_adapter(conn)
     engine = JiraMetadataEngine(adapter)
     schema_project_id = req.project_id or req.project_key
     schema = engine.get_field_schema(schema_project_id, req.issue_type_id)
 
-    payload_fields = _build_issue_fields(req.bug.model_dump(), req.issue_type_id)
+    payload_fields = _build_issue_fields(req.bug.model_dump(), req.issue_type_id, req.project_key, req.project_id)
     missing_fields = _validate_payload(schema, payload_fields)
     resolved_payload = _resolve_payload(
         db,
@@ -270,25 +315,41 @@ async def submit_bugs(
     current_user: User = Depends(deps.get_current_user)
 ):
     conn = _get_owned_connection(db, current_user.id, req.jira_connection_id)
+    _assert_connection_matches_instance(conn, req.instance_url)
     adapter = get_adapter(conn)
     schema_project_id = req.project_id or req.project_key
+    engine = JiraMetadataEngine(adapter)
+    schema = engine.get_field_schema(schema_project_id, req.issue_type_id)
     created_issues: List[XrayPublishedTest] = []
 
     for bug in req.bugs:
+        payload_fields = _build_issue_fields(
+            bug.model_dump(),
+            req.issue_type_id,
+            req.project_key,
+            req.project_id
+        )
+        missing_fields = _validate_payload(schema, payload_fields)
+        if missing_fields:
+            names = ", ".join(field["name"] for field in missing_fields)
+            raise HTTPException(status_code=400, detail=f"Cannot submit bug. Missing required Jira fields: {names}")
+
+        resolved_payload = _resolve_payload(
+            db,
+            current_user.id,
+            req.project_key,
+            req.project_id,
+            req.issue_type_id,
+            schema,
+            payload_fields
+        )
         issue_data = {
             "fields": {
-                "summary": bug.summary,
-                "description": bug.description,
+                **resolved_payload.get("fields", {}),
+                "project": {"id": req.project_id} if req.project_id else {"key": req.project_key},
                 "issuetype": {"id": req.issue_type_id},
-                **{
-                    key: value
-                    for key, value in (bug.extra_fields or {}).items()
-                    if key not in STANDARD_ISSUE_FIELDS
-                }
             }
         }
-        if "project" not in issue_data["fields"]:
-            issue_data["fields"]["project"] = {"key": schema_project_id}
 
         issue_key = adapter.create_issue(issue_data)
         created_issues.append(XrayPublishedTest(id=issue_key, key=issue_key, self=""))

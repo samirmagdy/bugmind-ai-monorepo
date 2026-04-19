@@ -1,5 +1,5 @@
 import React, { useState, useRef, useMemo, useCallback } from 'react';
-import { TabSession, BugReport, Usage, INITIAL_SESSION, TestCase, XrayPublishResult, MissingField, CreatedIssue, ResolvedPayload } from '../types';
+import { TabSession, BugReport, Usage, INITIAL_SESSION, TestCase, XrayPublishResult, MissingField, CreatedIssue, ResolvedPayload, IssueContextPayload } from '../types';
 import { apiRequest, readJsonResponse } from '../services/api';
 import { translateError } from '../utils/ErrorTranslator';
 import { AIContext } from './ai-context';
@@ -36,6 +36,13 @@ export const AIProvider: React.FC<{
     delete sanitized.project;
     return sanitized;
   }, []);
+
+  const buildIssueContext = useCallback((): IssueContextPayload => ({
+    issue_key: session.issueData?.key,
+    summary: session.issueData?.summary || '',
+    description: session.issueData?.description || '',
+    acceptance_criteria: session.issueData?.acceptanceCriteria || ''
+  }), [session.issueData]);
 
   const fetchUsage = useCallback(async () => {
     if (!authToken) return;
@@ -122,8 +129,9 @@ export const AIProvider: React.FC<{
         token: authToken,
         onUnauthorized: refreshAuthToken,
         body: JSON.stringify({
-          selected_text: `${session.issueData.summary}\n${session.issueData.description}\n${session.issueData.acceptanceCriteria}`,
+          issue_context: buildIssueContext(),
           jira_connection_id: session.jiraConnectionId,
+          instance_url: session.instanceUrl,
           project_key: session.issueData.key.split('-')[0],
           project_id: session.issueData.projectId,
           issue_type_id: session.selectedIssueType.id
@@ -154,7 +162,7 @@ export const AIProvider: React.FC<{
     } finally {
       updateSession({ loading: false }, currentTabId);
     }
-  }, [apiBase, authToken, currentTabId, logDebug, refreshAuthToken, sanitizeExtraFields, session.issueData, session.jiraConnectionId, session.selectedIssueType, updateSession]);
+  }, [apiBase, authToken, buildIssueContext, currentTabId, logDebug, refreshAuthToken, sanitizeExtraFields, session.issueData, session.jiraConnectionId, session.selectedIssueType, updateSession]);
 
   const generateTestCases = useCallback(async () => {
     if (!currentTabId || !session.issueData || !session.jiraConnectionId) return;
@@ -169,8 +177,9 @@ export const AIProvider: React.FC<{
         token: authToken,
         onUnauthorized: refreshAuthToken,
         body: JSON.stringify({
-          selected_text: `${session.issueData.summary}\n${session.issueData.description}\n${session.issueData.acceptanceCriteria}`,
+          issue_context: buildIssueContext(),
           jira_connection_id: session.jiraConnectionId,
+          instance_url: session.instanceUrl,
           project_key: session.issueData.key.split('-')[0],
           project_id: session.issueData.projectId,
           issue_type_id: session.selectedIssueType.id
@@ -194,7 +203,7 @@ export const AIProvider: React.FC<{
     } finally {
       updateSession({ loading: false }, currentTabId);
     }
-  }, [apiBase, authToken, currentTabId, fetchUsage, refreshAuthToken, session.issueData, session.jiraConnectionId, session.selectedIssueType, updateSession]);
+  }, [apiBase, authToken, buildIssueContext, currentTabId, fetchUsage, refreshAuthToken, session.issueData, session.jiraConnectionId, session.selectedIssueType, updateSession]);
 
   const publishTestCasesToXray = useCallback(async () => {
     if (!currentTabId || !session.issueData || !session.jiraConnectionId || !session.testCases.length) return;
@@ -250,17 +259,15 @@ export const AIProvider: React.FC<{
     updateSession({ loading: true, error: null, testCases: [], coverageScore: null });
     logDebug('MANUAL-START', 'Structuring manual description...');
     try {
-      const selectedText = session.issueData
-        ? `${session.issueData.summary}\n${session.issueData.description}\n${session.issueData.acceptanceCriteria}`
-        : session.manualDesc;
-
       const res = await apiRequest(`${apiBase}/ai/generate`, {
         method: 'POST',
         token: authToken,
         onUnauthorized: refreshAuthToken,
         body: JSON.stringify({
-          selected_text: selectedText,
+          issue_context: session.issueData ? buildIssueContext() : undefined,
+          selected_text: session.issueData ? undefined : session.manualDesc,
           jira_connection_id: session.jiraConnectionId,
+          instance_url: session.instanceUrl,
           project_key: session.issueData?.key.split('-')[0] || 'MANUAL',
           project_id: session.issueData?.projectId,
           issue_type_id: session.selectedIssueType.id,
@@ -297,7 +304,7 @@ export const AIProvider: React.FC<{
     } finally {
       updateSession({ loading: false });
     }
-  }, [apiBase, authToken, fetchUsage, logDebug, refreshAuthToken, sanitizeExtraFields, session.bugs, session.issueData, session.jiraConnectionId, session.manualDesc, session.selectedIssueType?.id, updateSession]);
+  }, [apiBase, authToken, buildIssueContext, fetchUsage, logDebug, refreshAuthToken, sanitizeExtraFields, session.bugs, session.issueData, session.jiraConnectionId, session.manualDesc, session.selectedIssueType?.id, updateSession]);
 
   const validateBug = useCallback(async (index: number): Promise<boolean> => {
     const bug = session.bugs[index];
@@ -312,6 +319,7 @@ export const AIProvider: React.FC<{
         onUnauthorized: refreshAuthToken,
         body: JSON.stringify({
           jira_connection_id: session.jiraConnectionId,
+          instance_url: session.instanceUrl,
           project_key: projectKey,
           project_id: session.issueData.projectId,
           issue_type_id: session.selectedIssueType.id,
@@ -351,6 +359,7 @@ export const AIProvider: React.FC<{
         onUnauthorized: refreshAuthToken,
         body: JSON.stringify({
           jira_connection_id: session.jiraConnectionId,
+          instance_url: session.instanceUrl,
           project_key: projectKey,
           project_id: session.issueData.projectId,
           issue_type_id: session.selectedIssueType.id,
@@ -391,6 +400,7 @@ export const AIProvider: React.FC<{
         onUnauthorized: refreshAuthToken,
         body: JSON.stringify({
           jira_connection_id: session.jiraConnectionId,
+          instance_url: session.instanceUrl,
           project_key: projectKey,
           project_id: session.issueData.projectId,
           issue_type_id: session.selectedIssueType.id,
@@ -411,23 +421,32 @@ export const AIProvider: React.FC<{
     }
   }, [authToken, apiBase, refreshAuthToken, session.bugs, session.issueData, session.jiraConnectionId, session.selectedIssueType, updateSession]);
 
-  const searchUsers = useCallback(async (query: string, _baseUrl: string, _projectId?: string, _projectKey?: string, bugIndex?: number) => {
+  const searchUsers = useCallback(async (query: string, bugIndex?: number) => {
     if (query.length < 2 || !session.jiraConnectionId) return;
     if (bugIndex !== undefined) handleUpdateBug(bugIndex, { isSearchingUsers: true, lastSearchedQuery: query });
     if (searchControllerRef.current) searchControllerRef.current.abort();
     searchControllerRef.current = new AbortController();
 
     try {
-      const connId = session.jiraConnectionId;
-      const url = `${apiBase}/jira/connections/${connId}/users/search?query=${encodeURIComponent(query)}`;
-      const res = await apiRequest(url, { token: authToken, onUnauthorized: refreshAuthToken, signal: searchControllerRef.current.signal });
+      const res = await apiRequest(`${apiBase}/jira/users/search`, {
+        method: 'POST',
+        token: authToken,
+        onUnauthorized: refreshAuthToken,
+        signal: searchControllerRef.current.signal,
+        body: JSON.stringify({
+          jira_connection_id: session.jiraConnectionId,
+          query,
+          project_id: session.issueData?.projectId,
+          project_key: session.issueData?.key.split('-')[0]
+        })
+      });
       if (res.ok && bugIndex !== undefined) {
         handleUpdateBug(bugIndex, { userSearchResults: await res.json(), isSearchingUsers: false });
       }
     } catch (err) {
       if (bugIndex !== undefined) handleUpdateBug(bugIndex, { isSearchingUsers: false });
     }
-  }, [apiBase, authToken, refreshAuthToken, handleUpdateBug, session.jiraConnectionId]);
+  }, [apiBase, authToken, refreshAuthToken, handleUpdateBug, session.issueData?.key, session.issueData?.projectId, session.jiraConnectionId]);
 
   const value = useMemo(() => ({
     usage, fetchUsage,

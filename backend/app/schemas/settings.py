@@ -13,6 +13,6 @@ class JiraSettingsUpdate(BaseModel):
     jira_connection_id: int
     project_key: str
     project_id: Optional[str] = None
-    issue_type_id: Optional[str] = None
+    issue_type_id: str
     visible_fields: Optional[list] = None
     ai_mapping: Optional[dict] = None

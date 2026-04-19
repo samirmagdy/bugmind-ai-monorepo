@@ -80,3 +80,26 @@ class JiraBootstrapContextResponse(BaseModel):
     visible_fields: List[str] = []
     ai_mapping: Dict[str, Any] = {}
     jira_metadata: Optional[JiraMetadataResponse] = None
+
+
+class JiraUserSearchRequest(BaseModel):
+    jira_connection_id: int
+    query: str
+    project_key: Optional[str] = None
+    project_id: Optional[str] = None
+
+
+class JiraProjectResponse(BaseModel):
+    id: str
+    key: str
+    name: str
+
+
+class XrayDefaultsResponse(BaseModel):
+    projects: List[JiraProjectResponse] = []
+    target_project_id: Optional[str] = None
+    target_project_key: Optional[str] = None
+    test_issue_type_name: str = "Test"
+    repository_path_field_id: Optional[str] = None
+    folder_path: str = ""
+    link_type: str = "Tests"

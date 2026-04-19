@@ -1,6 +1,7 @@
 import httpx
 from typing import Dict, Any, Optional
 from app.core.config import settings
+from fastapi import HTTPException
 
 class OpenRouterClient:
     def __init__(self, api_key: Optional[str] = None):
@@ -34,12 +35,26 @@ class OpenRouterClient:
                 response.raise_for_status()
                 return response.json()
         except httpx.TimeoutException:
-            raise Exception("The AI Engine timed out. This often happens with very long stories. Try a faster model or a shorter description.")
+            raise HTTPException(
+                status_code=504,
+                detail="The AI Engine timed out. This often happens with very long stories. Try a faster model or a shorter description."
+            )
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 402:
-                raise Exception("AI Quota Exceeded: Your AI credit limit has been reached. Please check your OpenRouter settings.")
+                raise HTTPException(
+                    status_code=402,
+                    detail="AI Quota Exceeded: Your AI credit limit has been reached. Please check your OpenRouter settings."
+                )
             if e.response.status_code == 429:
-                raise Exception("AI Rate Limit: Too many requests at once. Please wait a moment and try again.")
-            raise Exception(f"AI Service Error: {e.response.status_code} - {e.response.text}")
+                raise HTTPException(
+                    status_code=429,
+                    detail="AI Rate Limit: Too many requests at once. Please wait a moment and try again."
+                )
+            raise HTTPException(
+                status_code=502,
+                detail=f"AI Service Error: {e.response.status_code} - {e.response.text}"
+            )
+        except HTTPException:
+            raise
         except Exception as e:
-            raise Exception(f"AI Connection Failed: {str(e)}")
+            raise HTTPException(status_code=502, detail=f"AI Connection Failed: {str(e)}")

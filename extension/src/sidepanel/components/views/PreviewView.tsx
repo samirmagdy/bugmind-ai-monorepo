@@ -33,6 +33,18 @@ function formatResolvedFieldValue(value: ResolvedFieldValue): string {
   return String(value);
 }
 
+function formatStepsForPreview(stepsText: string | undefined): string {
+  if (!stepsText) return '';
+
+  const steps = stepsText
+    .split('\n')
+    .map(step => step.trim())
+    .filter(Boolean)
+    .map(step => step.replace(/^\d+\.\s*/, '').trim());
+
+  return steps.map(step => `# ${step}`).join('\n');
+}
+
 const PreviewView: React.FC = () => {
   const { session, updateSession, ai: { submitBugs } } = useBugMind();
   
@@ -41,6 +53,7 @@ const PreviewView: React.FC = () => {
   const resolved = session.resolvedPayload?.fields;
   const resolvedSummary = hasResolvedField(resolved, 'summary') ? formatResolvedFieldValue(resolved.summary) : bug?.summary ?? '';
   const previewDescription = bug?.description ?? '';
+  const previewSteps = formatStepsForPreview(bug?.steps_to_reproduce);
   
   if (!bug) {
     return (
@@ -139,7 +152,7 @@ const PreviewView: React.FC = () => {
           <div className="space-y-2">
             <span className="text-[9px] font-black uppercase tracking-[0.2em] text-[var(--status-success)]/80">Steps to Reproduce</span>
             <div className="bg-[var(--bg-app)]/40 rounded-2xl p-4 border border-[var(--border-main)]/50">
-              <JiraMarkdown content={bug.steps_to_reproduce} />
+              <JiraMarkdown content={previewSteps} />
             </div>
           </div>
           

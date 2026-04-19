@@ -32,6 +32,13 @@ export interface XrayPublishResult {
   warnings: string[];
 }
 
+export interface IssueContextPayload {
+  issue_key?: string;
+  summary: string;
+  description: string;
+  acceptance_criteria: string;
+}
+
 export interface JiraProject {
   id: string;
   key: string;
@@ -154,6 +161,22 @@ export interface JiraBootstrapContext {
   visible_fields: string[];
   ai_mapping: Record<string, string>;
   jira_metadata: JiraMetadata | null;
+}
+
+export interface AuthBootstrapResponse {
+  view: 'main' | 'setup';
+  has_connections: boolean;
+  bootstrap_context: JiraBootstrapContext | null;
+}
+
+export interface XrayDefaultsResponse {
+  projects: JiraProject[];
+  target_project_id: string | null;
+  target_project_key: string | null;
+  test_issue_type_name: string;
+  repository_path_field_id?: string | null;
+  folder_path: string;
+  link_type: string;
 }
 
 export interface IssueType {

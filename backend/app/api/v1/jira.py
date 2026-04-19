@@ -14,6 +14,9 @@ from app.schemas.jira import (
     JiraFieldResponse,
     JiraIssueTypeResponse,
     JiraMetadataResponse,
+    JiraProjectResponse,
+    JiraUserSearchRequest,
+    XrayDefaultsResponse,
 )
 from app.schemas.bug import XrayTestSuitePublishRequest, XrayTestSuitePublishResponse, XrayPublishedTest
 from app.core import security
@@ -151,20 +154,12 @@ def _format_test_issue_description(story_issue_key: str, test_case: dict) -> str
     lines.extend(["", f"Priority: {str(test_case.get('priority', '')).strip()}"])
     return "\n".join(lines).strip()
 
-@router.get("/connections", response_model=list[JiraConnectionResponse])
-def list_connections(
-    db: Session = Depends(deps.get_db), 
-    current_user: User = Depends(deps.get_current_user)
-):
-    return db.query(JiraConnection).filter(JiraConnection.user_id == current_user.id).order_by(JiraConnection.is_active.desc(), JiraConnection.id.asc()).all()
 
-
-@router.post("/bootstrap-context", response_model=JiraBootstrapContextResponse)
-def bootstrap_jira_context(
+def resolve_jira_bootstrap_context(
     req: JiraBootstrapContextRequest,
-    db: Session = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user)
-):
+    db: Session,
+    current_user: User
+) -> JiraBootstrapContextResponse:
     connections = db.query(JiraConnection).filter(
         JiraConnection.user_id == current_user.id
     ).order_by(JiraConnection.is_active.desc(), JiraConnection.id.asc()).all()
@@ -234,6 +229,22 @@ def bootstrap_jira_context(
         ai_mapping=ai_mapping,
         jira_metadata=metadata_response
     )
+
+@router.get("/connections", response_model=list[JiraConnectionResponse])
+def list_connections(
+    db: Session = Depends(deps.get_db), 
+    current_user: User = Depends(deps.get_current_user)
+):
+    return db.query(JiraConnection).filter(JiraConnection.user_id == current_user.id).order_by(JiraConnection.is_active.desc(), JiraConnection.id.asc()).all()
+
+
+@router.post("/bootstrap-context", response_model=JiraBootstrapContextResponse)
+def bootstrap_jira_context(
+    req: JiraBootstrapContextRequest,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    return resolve_jira_bootstrap_context(req, db, current_user)
 
 @router.post("/connections", response_model=JiraConnectionResponse)
 def create_connection(
@@ -329,6 +340,47 @@ def get_projects(
     adapter = get_adapter(conn)
     return adapter.get_projects()
 
+
+@router.get("/connections/{conn_id}/xray/defaults", response_model=XrayDefaultsResponse)
+def get_xray_defaults(
+    conn_id: int,
+    story_issue_key: Optional[str] = None,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    conn = db.query(JiraConnection).filter(
+        JiraConnection.id == conn_id,
+        JiraConnection.user_id == current_user.id
+    ).first()
+    if not conn:
+        raise HTTPException(status_code=404, detail="Connection not found")
+
+    adapter = get_adapter(conn)
+    projects = adapter.get_projects()
+    story_project_key = (story_issue_key or "").split("-", 1)[0] if story_issue_key else None
+    default_project = next((project for project in projects if project.get("key") == story_project_key), None)
+    if not default_project and projects:
+        default_project = projects[0]
+
+    projects_response = [
+        JiraProjectResponse(
+            id=str(project.get("id", "")),
+            key=str(project.get("key", "")),
+            name=str(project.get("name", "")),
+        )
+        for project in projects
+    ]
+
+    return XrayDefaultsResponse(
+        projects=projects_response,
+        target_project_id=str(default_project.get("id")) if default_project else None,
+        target_project_key=str(default_project.get("key")) if default_project else None,
+        test_issue_type_name="Test",
+        repository_path_field_id=None,
+        folder_path=(story_issue_key or "").strip(),
+        link_type="Tests",
+    )
+
 @router.get("/connections/{conn_id}/projects/{project_id}/metadata")
 def get_metadata(
     conn_id: int, 
@@ -391,17 +443,23 @@ def get_field_settings(
         "ai_mapping": mapping.field_mappings if mapping else {}
     }
 
-@router.get("/connections/{conn_id}/users/search")
+@router.post("/users/search")
 def search_jira_users(
-    conn_id: int,
-    query: str,
+    request: JiraUserSearchRequest,
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
-    conn = db.query(JiraConnection).filter(JiraConnection.id == conn_id, JiraConnection.user_id == current_user.id).first()
+    query = request.query.strip()
+    if len(query) < 2:
+        return []
+
+    conn = db.query(JiraConnection).filter(
+        JiraConnection.id == request.jira_connection_id,
+        JiraConnection.user_id == current_user.id
+    ).first()
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
-        
+
     adapter = get_adapter(conn)
     return adapter.search_users(query)
 
@@ -522,7 +580,7 @@ def create_jira_issue(
     adapter = get_adapter(conn)
     # Ensure project and issuetype are in the payload if not already
     if "project" not in issue_data["fields"]:
-        issue_data["fields"]["project"] = {"key": project_id}
+        issue_data["fields"]["project"] = {"id": project_id} if str(project_id).isdigit() else {"key": project_id}
         
     issue_key = adapter.create_issue(issue_data)
     
@@ -578,7 +636,7 @@ def publish_xray_test_suite(
 
     for test_case in req.test_cases:
         fields = {
-            "project": {"key": req.xray_project_key or req.xray_project_id},
+            "project": {"key": req.xray_project_key} if req.xray_project_key else {"id": req.xray_project_id},
             "summary": test_case.title,
             "description": _format_test_issue_description(req.story_issue_key, test_case.model_dump()),
             "issuetype": {"id": test_issue_type_id},

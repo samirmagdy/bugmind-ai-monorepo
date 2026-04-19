@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { TabSession, JiraConnection, JiraProject, JiraBootstrapContext } from '../types';
-import { apiRequest } from '../services/api';
+import { TabSession, JiraConnection, JiraProject, JiraBootstrapContext, XrayDefaultsResponse } from '../types';
+import { apiRequest, readJsonResponse } from '../services/api';
 import { translateError } from '../utils/ErrorTranslator';
 import { dbService } from '../services/db';
 import { JiraConnectionConfig, JiraContext } from './jira-context';
@@ -345,17 +345,31 @@ export const JiraProvider: React.FC<{
       if (res.ok) {
         const connections = await res.json() as JiraConnection[];
         updateSession({ connections });
-        const active = connections.find(c => c.is_active) || connections[0];
-        if (active) {
-          setVerifySslState(active.verify_ssl ?? true);
-          updateSession({ jiraConnectionId: active.id, instanceUrl: active.host_url });
-          saveJiraConfig({ verifySsl: active.verify_ssl ?? true });
+        const resolved = resolveConnectionForUrl(connections, session.instanceUrl);
+        const fallback = connections.find(c => c.is_active) || connections[0];
+        const selected = resolved || fallback;
+
+        if (selected) {
+          setVerifySslState(selected.verify_ssl ?? true);
+
+          // Preserve the live tab context URL when we already know it; only
+          // fall back to the connection host when no tab-specific URL exists yet.
+          updateSession({
+            jiraConnectionId: selected.id,
+            instanceUrl: session.instanceUrl || selected.host_url
+          });
+
+          saveJiraConfig({
+            verifySsl: selected.verify_ssl ?? true,
+            platform: (selected.auth_type as 'cloud' | 'server') || inferPlatformFromUrl(selected.host_url),
+            [((selected.auth_type as 'cloud' | 'server') || inferPlatformFromUrl(selected.host_url)) === 'cloud' ? 'cloudUrl' : 'serverUrl']: normalizeJiraUrl(selected.host_url)
+          });
         }
       }
     } catch (err) {
       logDebug('CONN-FETCH-ERR', String(err));
     }
-  }, [apiBase, authToken, logDebug, refreshAuthToken, saveJiraConfig, updateSession]);
+  }, [apiBase, authToken, logDebug, refreshAuthToken, saveJiraConfig, session.instanceUrl, updateSession]);
 
   useEffect(() => {
     if (!authToken) return;
@@ -441,6 +455,69 @@ export const JiraProvider: React.FC<{
     }
   }, [apiBase, authToken, logDebug, refreshAuthToken]);
 
+  const fetchXrayDefaults = useCallback(async (id: number, storyIssueKey?: string): Promise<XrayDefaultsResponse | null> => {
+    if (!authToken) return null;
+    try {
+      const query = storyIssueKey ? `?story_issue_key=${encodeURIComponent(storyIssueKey)}` : '';
+      const res = await apiRequest(`${apiBase}/jira/connections/${id}/xray/defaults${query}`, {
+        token: authToken,
+        onUnauthorized: refreshAuthToken,
+        onDebug: logDebug
+      });
+      if (!res.ok) {
+        throw new Error(await res.text() || `Failed to fetch Xray defaults (${res.status})`);
+      }
+      return await readJsonResponse<XrayDefaultsResponse>(res);
+    } catch (err) {
+      logDebug('XRAY-DEFAULTS-ERR', String(err));
+      return null;
+    }
+  }, [apiBase, authToken, logDebug, refreshAuthToken]);
+
+  const saveFieldSettings = useCallback(async ({
+    jiraConnectionId,
+    projectKey,
+    projectId,
+    issueTypeId,
+    visibleFields,
+    aiMapping
+  }: {
+    jiraConnectionId: number;
+    projectKey: string;
+    projectId?: string;
+    issueTypeId: string;
+    visibleFields?: string[];
+    aiMapping?: Record<string, string>;
+  }) => {
+    if (!authToken) return false;
+    try {
+      const nextVisibleFields = visibleFields ?? session.visibleFields;
+      const nextAiMapping = aiMapping ?? session.aiMapping;
+      const res = await apiRequest(`${apiBase}/settings/jira`, {
+        method: 'POST',
+        token: authToken,
+        onUnauthorized: refreshAuthToken,
+        onDebug: logDebug,
+        body: JSON.stringify({
+          jira_connection_id: jiraConnectionId,
+          project_key: projectKey,
+          project_id: projectId,
+          issue_type_id: issueTypeId,
+          visible_fields: nextVisibleFields,
+          ai_mapping: nextAiMapping
+        })
+      });
+      if (!res.ok) {
+        throw new Error(await res.text() || `Failed to sync Jira field settings (${res.status})`);
+      }
+      updateSession({ visibleFields: nextVisibleFields, aiMapping: nextAiMapping });
+      return true;
+    } catch (err) {
+      logDebug('FIELD-SETTINGS-ERR', String(err));
+      return false;
+    }
+  }, [apiBase, authToken, logDebug, refreshAuthToken, session.aiMapping, session.visibleFields, updateSession]);
+
   const deleteConnection = useCallback(async (id: number) => {
     if (!authToken) return;
     try {
@@ -504,7 +581,9 @@ export const JiraProvider: React.FC<{
     fetchIssueTypes,
     fetchJiraMetadata,
     fetchFieldSettings,
+    saveFieldSettings,
     bootstrapContext,
+    applyBootstrapContext,
     checkJiraStatus,
     cloudUrl, setCloudUrl,
     serverUrl, setServerUrl,
@@ -516,10 +595,11 @@ export const JiraProvider: React.FC<{
     setActiveConnection,
     updateConnection,
     fetchProjects,
+    fetchXrayDefaults,
     isInitializing
   }), [
     jiraPlatform, jiraConnected, fetchIssueTypes, fetchJiraMetadata, fetchFieldSettings,
-    bootstrapContext, checkJiraStatus, cloudUrl, serverUrl, verifySsl, setVerifySsl, saveJiraConfig, createConnection, fetchConnections, deleteConnection, setActiveConnection, updateConnection, fetchProjects,
+    saveFieldSettings, bootstrapContext, applyBootstrapContext, checkJiraStatus, cloudUrl, serverUrl, verifySsl, setVerifySsl, saveJiraConfig, createConnection, fetchConnections, deleteConnection, setActiveConnection, updateConnection, fetchProjects, fetchXrayDefaults,
     isInitializing
   ]);
 

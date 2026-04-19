@@ -6,7 +6,7 @@ import { translateError } from '../utils/ErrorTranslator';
 import { apiRequest, readJsonResponse } from '../services/api';
 import { BugMindContext, BugMindContextType } from '../hooks/useBugMind';
 import { obfuscate } from '../utils/StorageObfuscator';
-import { DebugLog } from '../types';
+import { AuthBootstrapResponse, DebugLog } from '../types';
 
 // New Specialized Providers
 import { AuthProvider } from './AuthProvider';
@@ -42,6 +42,14 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
   const ai = useAIContext();
   const { currentTabId, session, sessionHydrated, updateSession, setTabSessions } = sessionData;
   const authCheckInFlight = useRef<Promise<void> | null>(null);
+  const selectedIssueTypeIdRef = useRef<string | undefined>(undefined);
+  const hydratedTabRef = useRef<number | null>(null);
+  const lastBootstrapSignatureRef = useRef<string>('');
+  const lastContextMessageSignatureRef = useRef<string>('');
+
+  useEffect(() => {
+    selectedIssueTypeIdRef.current = session.selectedIssueType?.id || undefined;
+  }, [session.selectedIssueType?.id]);
 
   const withTimeout = useCallback(async <T,>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> => {
     return await Promise.race([
@@ -61,16 +69,29 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
     if (!context?.instanceUrl) return null;
 
     const projectKey = context.issueData?.key?.split('-')[0];
+    const signature = JSON.stringify({
+      tabId: tabId || currentTabId || null,
+      instanceUrl: context.instanceUrl,
+      projectKey: projectKey || null,
+      projectId: context.issueData?.projectId || null,
+      issueTypeId: selectedIssueTypeIdRef.current || null
+    });
+
+    if (lastBootstrapSignatureRef.current === signature) {
+      return null;
+    }
+    lastBootstrapSignatureRef.current = signature;
+
     logDebug('SYNC-CONN-CONTEXT', `Bootstrapping Jira context for ${context.instanceUrl}`);
     return jira.bootstrapContext({
       instanceUrl: context.instanceUrl,
       projectKey,
       projectId: context.issueData?.projectId,
-      issueTypeId: session.selectedIssueType?.id || undefined,
+      issueTypeId: selectedIssueTypeIdRef.current,
       tabId: tabId || currentTabId || undefined,
       tokenOverride
     });
-  }, [auth.authToken, currentTabId, jira, logDebug, session.selectedIssueType?.id]);
+  }, [auth.authToken, currentTabId, jira, logDebug]);
 
   const fetchCurrentContext = useCallback(async (force: boolean = false) => {
     if (!currentTabId) return null;
@@ -83,54 +104,84 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
     });
   }, [currentTabId]);
 
-  const resolveConnectionAfterAuth = useCallback(async (tokenOverride: string, source: 'login' | 'bootstrap'): Promise<boolean> => {
+  const runAuthBootstrap = useCallback(async (tokenOverride: string): Promise<'main' | 'setup'> => {
     const currentContext = await fetchCurrentContext(true);
+    const response = await withTimeout(
+      apiRequest(`${auth.apiBase}/auth/bootstrap`, {
+        method: 'POST',
+        token: tokenOverride,
+        onDebug: logDebug,
+        body: JSON.stringify({
+          instance_url: currentContext?.instanceUrl || undefined,
+          project_key: currentContext?.issueData?.key?.split('-')[0],
+          project_id: currentContext?.issueData?.projectId,
+          issue_type_id: session.selectedIssueType?.id || undefined
+        })
+      }),
+      8000,
+      'Auth bootstrap'
+    );
 
-    if (currentContext?.instanceUrl) {
-      try {
-        const bootstrapped = await withTimeout(
-          bootstrapCurrentContext(currentContext, currentTabId || undefined, tokenOverride),
-          8000,
-          'Jira bootstrap'
-        );
-        if (bootstrapped) {
-          return true;
-        }
-        logDebug('AUTH-CONN-FALLBACK', `Bootstrap returned no match during ${source}. Falling back to global connection check.`);
-      } catch (err) {
-        logDebug('AUTH-CONN-FALLBACK', `Bootstrap failed during ${source}: ${String(err)}. Falling back to global connection check.`);
-      }
+    if (!response.ok) {
+      throw new Error(await response.text() || `Auth bootstrap failed (${response.status})`);
     }
 
-    return await withTimeout(
-      jira.checkJiraStatus(true, undefined, tokenOverride, undefined, currentTabId || undefined),
-      8000,
-      'Global Jira status check'
-    );
-  }, [bootstrapCurrentContext, currentTabId, fetchCurrentContext, jira, logDebug, withTimeout]);
+    const data = await readJsonResponse<AuthBootstrapResponse>(response);
+    if (data.bootstrap_context) {
+      jira.applyBootstrapContext(
+        data.bootstrap_context,
+        currentTabId || undefined,
+        Boolean(currentContext?.issueData?.key || currentContext?.issueData?.projectId)
+      );
+      logDebug('AUTH-BOOT-OK', `Resolved landing view ${data.view.toUpperCase()} with Jira bootstrap.`);
+    } else {
+      logDebug('AUTH-BOOT-OK', `Resolved landing view ${data.view.toUpperCase()} without Jira bootstrap payload.`);
+    }
+
+    return data.view;
+  }, [auth.apiBase, currentTabId, fetchCurrentContext, jira, logDebug, session.selectedIssueType?.id, withTimeout]);
 
   // 1. Initial Context Hydration (Phase 1)
   useEffect(() => {
-    if (currentTabId && sessionHydrated) {
-      logDebug('SYS-INIT', `Hydrating context for tab ${currentTabId}...`);
-      chrome.runtime.sendMessage({ 
-        type: 'GET_CURRENT_CONTEXT', 
-        tabId: currentTabId,
-        force: true
-      }, (response) => {
-        if (response && !response.error) {
-          logDebug('SYS-INIT-OK', 'Received initial context from background');
-          updateSession(response);
-          bootstrapCurrentContext(response, currentTabId);
-        }
-      });
-    }
+    if (!currentTabId || !sessionHydrated) return;
+    if (hydratedTabRef.current === currentTabId) return;
+
+    hydratedTabRef.current = currentTabId;
+    logDebug('SYS-INIT', `Hydrating context for tab ${currentTabId}...`);
+    chrome.runtime.sendMessage({
+      type: 'GET_CURRENT_CONTEXT',
+      tabId: currentTabId,
+      force: true
+    }, (response) => {
+      if (response && !response.error) {
+        logDebug('SYS-INIT-OK', 'Received initial context from background');
+        updateSession(response);
+        bootstrapCurrentContext(response, currentTabId);
+      }
+    });
   }, [bootstrapCurrentContext, currentTabId, logDebug, sessionHydrated, updateSession]);
+
+  useEffect(() => {
+    hydratedTabRef.current = null;
+    lastBootstrapSignatureRef.current = '';
+    lastContextMessageSignatureRef.current = '';
+  }, [currentTabId]);
 
   // 2. Listen for Background Events (Phase 1)
   useEffect(() => {
     const handleMessage = (message: BackgroundMessage) => {
       if (message.type === 'CONTEXT_UPDATED' && message.tabId === currentTabId) {
+        const signature = JSON.stringify({
+          tabId: message.tabId,
+          instanceUrl: message.context?.instanceUrl || null,
+          issueKey: message.context?.issueData?.key || null,
+          projectId: message.context?.issueData?.projectId || null,
+          error: message.context?.error || null
+        });
+        if (lastContextMessageSignatureRef.current === signature) {
+          return;
+        }
+        lastContextMessageSignatureRef.current = signature;
         logDebug('SYS-SYNC', 'Received context update from background');
         updateSession(message.context);
         bootstrapCurrentContext(message.context, message.tabId);
@@ -215,20 +266,9 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
       const res = await withTimeout(verifyPromise, 8000, 'Authentication bootstrap');
       if (res.ok) {
         logDebug('AUTH-OK', 'Token valid. Checking Jira connection...');
-        const connected = await resolveConnectionAfterAuth(activeToken, 'bootstrap');
-        
-        if (connected) {
-          // Only auto-redirect if we are explicitly sitting on the Auth screen
-          if (auth.globalView === 'auth') {
-            logDebug('AUTH-REDIRECT', 'Connected. Moving to MAIN.');
-            auth.setGlobalView('main');
-          }
-        } else {
-          logDebug('AUTH-SETUP', 'No Jira connection found.');
-          // Only auto-redirect if we are explicitly sitting on the Auth screen
-          if (auth.globalView === 'auth') {
-            auth.setGlobalView('setup');
-          }
+        const nextView = await runAuthBootstrap(activeToken);
+        if (auth.globalView === 'auth' || auth.globalView === 'setup') {
+          auth.setGlobalView(nextView);
         }
       } else {
         logDebug('AUTH-FAIL', 'Session invalid. Redirecting to login.');
@@ -247,7 +287,7 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
 
     authCheckInFlight.current = run;
     return run;
-  }, [auth, logDebug, resolveConnectionAfterAuth, updateSession, withTimeout]);
+  }, [auth, logDebug, runAuthBootstrap, updateSession, withTimeout]);
 
   const handleLogin = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
@@ -279,9 +319,9 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
         chrome.storage.session.set({ bugmind_token: secureToken, bugmind_refresh_token: secureRefreshToken });
         
         logDebug('LOGIN-OK', 'Login successful. Verifying Jira status...');
-        const connected = await resolveConnectionAfterAuth(data.access_token, 'login');
-        
-        if (connected) {
+        const nextView = await runAuthBootstrap(data.access_token);
+
+        if (nextView === 'main') {
           auth.setGlobalView('main');
           updateSession({ success: `Welcome back, ${auth.email}!` });
         } else {
@@ -300,7 +340,7 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
     } finally {
       updateSession({ loading: false });
     }
-  }, [ai, auth, logDebug, resolveConnectionAfterAuth, updateSession]);
+  }, [ai, auth, logDebug, runAuthBootstrap, updateSession]);
 
 
   const value: BugMindContextType = {
@@ -357,18 +397,21 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
     saveFieldSettings: async (nf, nm) => {
       try {
         const pKey = sessionData.session.issueData?.key.split('-')[0];
-        await apiRequest(`${auth.apiBase}/settings/jira`, {
-          method: 'POST', token: auth.authToken, onUnauthorized: auth.refreshSession,
-          body: JSON.stringify({
-            jira_connection_id: sessionData.session.jiraConnectionId,
-            project_key: pKey,
-            project_id: sessionData.session.issueData?.projectId,
-            issue_type_id: sessionData.session.selectedIssueType?.id,
-            visible_fields: nf || sessionData.session.visibleFields,
-            ai_mapping: nm || sessionData.session.aiMapping
-          })
+        if (!sessionData.session.jiraConnectionId || !pKey || !sessionData.session.selectedIssueType?.id) {
+          throw new Error('Missing Jira context for field settings sync');
+        }
+        const synced = await jira.saveFieldSettings({
+          jiraConnectionId: sessionData.session.jiraConnectionId,
+          projectKey: pKey,
+          projectId: sessionData.session.issueData?.projectId,
+          issueTypeId: sessionData.session.selectedIssueType.id,
+          visibleFields: nf || sessionData.session.visibleFields,
+          aiMapping: nm || sessionData.session.aiMapping
         });
-        sessionData.updateSession({ visibleFields: nf || sessionData.session.visibleFields, aiMapping: nm || sessionData.session.aiMapping, success: 'Synced' });
+        if (!synced) {
+          throw new Error('Sync failed');
+        }
+        sessionData.updateSession({ success: 'Synced' });
       } catch (err) { sessionData.updateSession({ error: 'Sync failed' }); }
     },
     handleLogout: () => auth.handleLogout(() => setTabSessions({})),

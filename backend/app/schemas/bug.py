@@ -1,9 +1,18 @@
 from pydantic import BaseModel
 from typing import Dict, Any, List, Optional
 
+
+class IssueContext(BaseModel):
+    issue_key: Optional[str] = None
+    summary: str = ""
+    description: str = ""
+    acceptance_criteria: str = ""
+
 class BugGenerationRequest(BaseModel):
-    selected_text: str
+    selected_text: Optional[str] = None
+    issue_context: Optional[IssueContext] = None
     jira_connection_id: int
+    instance_url: Optional[str] = None
     project_key: str
     project_id: Optional[str] = None
     issue_type_id: str
@@ -42,6 +51,7 @@ class MissingField(BaseModel):
 
 class PreviewPreparationRequest(BaseModel):
     jira_connection_id: int
+    instance_url: Optional[str] = None
     project_key: str
     project_id: Optional[str] = None
     issue_type_id: str
@@ -56,6 +66,7 @@ class PreviewPreparationResponse(BaseModel):
 
 class SubmitBugsRequest(BaseModel):
     jira_connection_id: int
+    instance_url: Optional[str] = None
     project_key: str
     project_id: Optional[str] = None
     issue_type_id: str
