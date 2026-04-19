@@ -12,8 +12,6 @@ export interface JiraConnectionConfig {
 export interface JiraContextType {
   jiraPlatform: 'cloud' | 'server';
   setJiraPlatform: (p: 'cloud' | 'server') => void;
-  jiraConnected: boolean;
-  setJiraConnected: (val: boolean) => void;
   createConnection: (config: JiraConnectionConfig) => Promise<boolean>;
   fetchConnections: () => Promise<void>;
   deleteConnection: (id: number, tabId?: number | null) => Promise<void>;
@@ -39,13 +37,8 @@ export interface JiraContextType {
     tokenOverride?: string;
   }) => Promise<JiraBootstrapContext | null>;
   applyBootstrapContext: (data: JiraBootstrapContext, tabId?: number | null, hasProjectContext?: boolean) => void;
-  cloudUrl: string;
-  setCloudUrl: (v: string) => void;
-  serverUrl: string;
-  setServerUrl: (v: string) => void;
   verifySsl: boolean;
   setVerifySsl: (v: boolean) => Promise<void>;
-  saveJiraConfig: (updates: Record<string, string | boolean | undefined>) => void;
 }
 
 export const JiraContext = createContext<JiraContextType | undefined>(undefined);

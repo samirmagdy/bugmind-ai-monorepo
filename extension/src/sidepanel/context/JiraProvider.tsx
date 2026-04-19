@@ -58,9 +58,6 @@ export const JiraProvider: React.FC<{
   updateSession: (updates: Partial<TabSession>, tabId?: number | null) => void
 }> = ({ children, logDebug, apiBase, authToken, refreshAuthToken, session, updateSession }) => {
   const [jiraPlatform, setJiraPlatform] = useState<'cloud' | 'server'>('cloud');
-  const [jiraConnected, setJiraConnected] = useState(false);
-  const [cloudUrl, setCloudUrl] = useState('');
-  const [serverUrl, setServerUrl] = useState('');
   const [verifySsl, setVerifySslState] = useState(true);
   const activeFetches = useRef<Set<string>>(new Set());
   const bootstrapPromiseRef = useRef<Map<string, Promise<JiraBootstrapContext | null>>>(new Map());
@@ -78,12 +75,8 @@ export const JiraProvider: React.FC<{
     const normalizedBase = normalizeJiraUrl(data.instance_url);
     const platform = data.platform || inferPlatformFromUrl(normalizedBase);
 
-    setJiraConnected(true);
     setJiraPlatform(platform);
     setVerifySslState(data.verify_ssl ?? true);
-
-    if (platform === 'cloud') setCloudUrl(normalizedBase);
-    if (platform === 'server') setServerUrl(normalizedBase);
 
     saveJiraConfig({
       platform,
@@ -196,8 +189,6 @@ export const JiraProvider: React.FC<{
       if (res.bugmind_jira_config) {
         const c = res.bugmind_jira_config as Record<string, string | boolean | undefined>;
         if (c.platform === 'cloud' || c.platform === 'server') setJiraPlatform(c.platform);
-        if (typeof c.cloudUrl === 'string') setCloudUrl(c.cloudUrl);
-        if (typeof c.serverUrl === 'string') setServerUrl(c.serverUrl);
         if (typeof c.verifySsl === 'boolean') setVerifySslState(c.verifySsl);
 
         const {
@@ -438,7 +429,6 @@ export const JiraProvider: React.FC<{
       if (res.ok) {
         const conn = await res.json();
         logDebug('JIRA-OK', `Connection created with ID: ${conn.id}`);
-        setJiraConnected(true);
         setVerifySslState(config.verify_ssl);
         saveJiraConfig({ verifySsl: config.verify_ssl });
         updateSession({ jiraConnectionId: conn.id, instanceUrl: config.base_url.replace(/\/$/, '') });
@@ -458,15 +448,10 @@ export const JiraProvider: React.FC<{
   const value = useMemo(() => ({
     jiraPlatform,
     setJiraPlatform,
-    jiraConnected,
-    setJiraConnected,
     saveFieldSettings,
     bootstrapContext,
     applyBootstrapContext,
-    cloudUrl, setCloudUrl,
-    serverUrl, setServerUrl,
     verifySsl, setVerifySsl,
-    saveJiraConfig,
     createConnection,
     fetchConnections,
     deleteConnection,
@@ -475,7 +460,7 @@ export const JiraProvider: React.FC<{
     fetchProjects,
     fetchXrayDefaults
   }), [
-    jiraPlatform, jiraConnected, saveFieldSettings, bootstrapContext, applyBootstrapContext, cloudUrl, serverUrl, verifySsl, setVerifySsl, saveJiraConfig, createConnection, fetchConnections, deleteConnection, setActiveConnection, updateConnection, fetchProjects, fetchXrayDefaults
+    jiraPlatform, saveFieldSettings, bootstrapContext, applyBootstrapContext, verifySsl, setVerifySsl, createConnection, fetchConnections, deleteConnection, setActiveConnection, updateConnection, fetchProjects, fetchXrayDefaults
   ]);
 
   return <JiraContext.Provider value={value}>{children}</JiraContext.Provider>;
