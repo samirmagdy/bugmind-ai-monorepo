@@ -23,6 +23,42 @@ const SettingsView: React.FC = () => {
     }
   }, [session.settingsTab, session.issueTypes.length, session.issueTypesFetched, session.error, session.instanceUrl, session.loading, refreshIssue, log]);
 
+  const bootstrapJiraConfig = async (issueTypeId?: string, options?: { force?: boolean; loading?: boolean; logTag?: string; errorMessage?: string }) => {
+    const projectKey = session.issueData?.key.split('-')[0];
+    if (!projectKey || !session.instanceUrl || !session.issueData) return null;
+
+    const force = options?.force ?? true;
+    const showLoading = options?.loading ?? false;
+
+    if (showLoading) {
+      updateSession({ loading: true }, currentTabId);
+    }
+
+    if (options?.logTag) {
+      log(options.logTag, `Bootstrapping Jira config for ${projectKey}${issueTypeId ? ` (${issueTypeId})` : ''}`);
+    }
+
+    try {
+      return await jira.bootstrapContext({
+        instanceUrl: session.instanceUrl,
+        projectKey,
+        projectId: session.issueData.projectId,
+        issueTypeId,
+        tabId: currentTabId,
+        force
+      });
+    } catch {
+      if (options?.errorMessage) {
+        updateSession({ error: options.errorMessage }, currentTabId);
+      }
+      return null;
+    } finally {
+      if (showLoading) {
+        updateSession({ loading: false }, currentTabId);
+      }
+    }
+  };
+
   return (
     <div className="space-y-6 pt-4 animate-in slide-in-from-right-4 duration-300">
       <div className="flex items-center gap-3 mb-2">
@@ -319,9 +355,7 @@ const SettingsView: React.FC = () => {
                       const type = session.issueTypes.find((t: IssueType) => t.id === e.target.value);
                       if (type && session.jiraConnectionId && session.issueData) {
                         updateSession({ selectedIssueType: type, jiraMetadata: null });
-                        const pKey = session.issueData.key.split('-')[0];
-                        jira.fetchJiraMetadata(session.jiraConnectionId, pKey, type.id, currentTabId, session.issueData.projectId, true);
-                        jira.fetchFieldSettings(session.jiraConnectionId, pKey, currentTabId, type.id, session.issueData.projectId, true);
+                        void bootstrapJiraConfig(type.id, { force: true, loading: true, logTag: 'SETTINGS-TYPE' });
                       }
                     }}
                     className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-4 py-3 outline-none focus:border-[var(--status-info)]/50 transition-all text-sm appearance-none cursor-pointer pr-10 text-[var(--text-main)] shadow-[var(--shadow-sm)]"
@@ -346,9 +380,9 @@ const SettingsView: React.FC = () => {
                       if (pKey && session.instanceUrl && session.issueData) {
                         updateSession({ error: null });
                         if (session.issueTypes.length === 0) {
-                          jira.fetchIssueTypes(session.jiraConnectionId!, pKey, currentTabId, session.issueData.projectId, true);
+                          void bootstrapJiraConfig(undefined, { force: true, loading: true, logTag: 'SETTINGS-RETRY', errorMessage: 'Failed to refresh issue types.' });
                         } else if (session.selectedIssueType) {
-                          jira.fetchJiraMetadata(session.jiraConnectionId!, pKey, session.selectedIssueType.id, currentTabId, session.issueData.projectId, true);
+                          void bootstrapJiraConfig(session.selectedIssueType.id, { force: true, loading: true, logTag: 'SETTINGS-RETRY', errorMessage: 'Failed to refresh Jira fields.' });
                         }
                       }
                     }}
@@ -373,7 +407,7 @@ const SettingsView: React.FC = () => {
                       const pKey = session.issueData?.key.split('-')[0];
                       if (pKey && session.instanceUrl && session.issueData) {
                         updateSession({ error: null, issueTypesFetched: false });
-                        jira.fetchIssueTypes(session.jiraConnectionId!, pKey, currentTabId, session.issueData.projectId, true);
+                        void bootstrapJiraConfig(undefined, { force: true, loading: true, logTag: 'SETTINGS-REFRESH', errorMessage: 'Failed to refresh issue types.' });
                       }
                     }}
                     className="w-full bg-[var(--status-info)]/10 hover:bg-[var(--status-info)]/20 border border-[var(--status-info)]/30 text-[var(--status-info)] text-[10px] font-black py-3 rounded-xl transition-all uppercase tracking-widest"
@@ -403,8 +437,7 @@ const SettingsView: React.FC = () => {
                     onClick={() => {
                       const pKey = session.issueData?.key.split('-')[0];
                       if (pKey && session.issueData && session.selectedIssueType) {
-                        jira.fetchJiraMetadata(session.jiraConnectionId!, pKey, session.selectedIssueType.id, currentTabId, session.issueData.projectId, true);
-                        jira.fetchFieldSettings(session.jiraConnectionId!, pKey, currentTabId, session.selectedIssueType.id, session.issueData.projectId, true);
+                        void bootstrapJiraConfig(session.selectedIssueType.id, { force: true, loading: true, logTag: 'SETTINGS-FORCE', errorMessage: 'Failed to refresh Jira fields.' });
                       }
                     }}
                     className="text-[10px] font-bold text-blue-500 hover:underline flex items-center gap-1"
@@ -457,9 +490,8 @@ const SettingsView: React.FC = () => {
                       <label className="text-[11px] font-bold uppercase tracking-widest text-[var(--text-muted)] ml-1">Available Fields</label>
                       <button 
                         onClick={() => {
-                          const pKey = session.issueData?.key.split('-')[0];
-                          if (pKey && session.issueData && session.selectedIssueType) {
-                            jira.fetchJiraMetadata(session.jiraConnectionId!, pKey, session.selectedIssueType.id, currentTabId, session.issueData.projectId, true);
+                          if (session.issueData && session.selectedIssueType) {
+                            void bootstrapJiraConfig(session.selectedIssueType.id, { force: true, loading: true, logTag: 'SETTINGS-FIELDS', errorMessage: 'Failed to refresh Jira fields.' });
                           }
                         }}
                         disabled={session.loading}
