@@ -3,6 +3,28 @@ import { TabSession, INITIAL_SESSION } from '../types';
 import { dbService } from '../services/db';
 import { TIMEOUTS } from '../constants';
 
+function stripEphemeralJiraState(session: Partial<TabSession>): Partial<TabSession> {
+  const sanitized = { ...session };
+
+  delete sanitized.loading;
+  delete sanitized.error;
+  delete sanitized.success;
+  delete sanitized.issueData;
+  delete sanitized.instanceUrl;
+  delete sanitized.jiraConnectionId;
+  delete sanitized.issueTypesFetched;
+  delete sanitized.issueTypes;
+  delete sanitized.selectedIssueType;
+  delete sanitized.jiraMetadata;
+  delete sanitized.visibleFields;
+  delete sanitized.aiMapping;
+  delete sanitized.previewBugIndex;
+  delete sanitized.validationErrors;
+  delete sanitized.resolvedPayload;
+
+  return sanitized;
+}
+
 export function useSession(log?: (tag: string, msg: string) => void) {
   const [tabSessions, setTabSessions] = useState<Record<number, TabSession>>({});
   const [currentTabId, setCurrentTabId] = useState<number | null>(null);
@@ -72,7 +94,7 @@ export function useSession(log?: (tag: string, msg: string) => void) {
     // 1. Load metadata from chrome storage (include global onboarding flag)
     chrome.storage.local.get([key, 'bugmind_onboarding_completed'], async (result) => {
       const globalOnboardingDone = !!result['bugmind_onboarding_completed'];
-      const rawSession = (result[key] || {}) as Partial<TabSession>;
+      const rawSession = stripEphemeralJiraState((result[key] || {}) as Partial<TabSession>);
       
       let sessionData: TabSession = { 
         ...INITIAL_SESSION, 
@@ -106,12 +128,8 @@ export function useSession(log?: (tag: string, msg: string) => void) {
     const bugsToSave = sessionToSave.bugs;
     
     // Do NOT store bugs or transient UI messages in chrome.storage.local
-    const strippedSession: Partial<TabSession> = { ...sessionToSave };
+    const strippedSession: Partial<TabSession> = stripEphemeralJiraState({ ...sessionToSave });
     delete strippedSession.bugs;
-    delete strippedSession.error;
-    delete strippedSession.success;
-    delete strippedSession.issueTypesFetched; // Force fresh scan on reload
-    delete strippedSession.jiraMetadata;     // Force fresh schema fetch
     
     return { key: `bugmind_tab_${currentTabId}`, tabId: currentTabId, session: strippedSession, bugs: bugsToSave };
   }, [currentTabId, tabSessions]);

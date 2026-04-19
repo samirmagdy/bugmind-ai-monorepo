@@ -113,8 +113,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode, logDebug: (tag:
   const refreshSession = useCallback(async (): Promise<string | null> => {
     if (!refreshToken) return null;
     try {
-      const res = await apiRequest(`${apiBase}/auth/refresh?refresh_token=${encodeURIComponent(refreshToken)}`, {
-        method: 'POST'
+      const res = await apiRequest(`${apiBase}/auth/refresh`, {
+        method: 'POST',
+        body: JSON.stringify({ refresh_token: refreshToken }),
+        timeoutMs: 10000,
+        onDebug: logDebug
       });
       if (!res.ok) {
         throw new Error(await res.text() || `Refresh failed (${res.status})`);

@@ -24,6 +24,43 @@ class BugGenerationResponse(BaseModel):
     fields: Dict[str, Any]
     ac_coverage: float
 
+
+class BugDraft(BaseModel):
+    summary: str
+    description: str
+    steps_to_reproduce: str
+    expected_result: str
+    actual_result: str
+    severity: Optional[str] = None
+    extra_fields: Optional[Dict[str, Any]] = None
+
+
+class MissingField(BaseModel):
+    key: str
+    name: str
+
+
+class PreviewPreparationRequest(BaseModel):
+    jira_connection_id: int
+    project_key: str
+    project_id: Optional[str] = None
+    issue_type_id: str
+    bug: BugDraft
+
+
+class PreviewPreparationResponse(BaseModel):
+    valid: bool
+    missing_fields: List[MissingField]
+    resolved_payload: Dict[str, Any]
+
+
+class SubmitBugsRequest(BaseModel):
+    jira_connection_id: int
+    project_key: str
+    project_id: Optional[str] = None
+    issue_type_id: str
+    bugs: List[BugDraft]
+
 class TestCase(BaseModel):
     title: str
     steps: List[str]
@@ -52,6 +89,10 @@ class XrayPublishedTest(BaseModel):
     id: str
     key: str
     self: str = ""
+
+
+class SubmitBugsResponse(BaseModel):
+    created_issues: List[XrayPublishedTest]
 
 
 class XrayTestSuitePublishResponse(BaseModel):

@@ -22,6 +22,13 @@ export function translateError(error: unknown, context?: string): TranslatedErro
     };
   }
 
+  if (message.includes('Request timed out after')) {
+    return {
+      title: 'BugMind API Unreachable',
+      description: 'The configured BugMind API endpoint did not respond in time. Make sure the backend server is running and the API URL in Setup is correct.'
+    };
+  }
+
   if (message.includes('Timeout') || message.includes('Aborted') || message.includes('The user aborted a request')) {
     return {
       title: 'Request Timed Out',

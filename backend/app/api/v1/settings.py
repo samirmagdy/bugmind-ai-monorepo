@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 from app.api import deps
 from app.models.user import User
 from app.models.jira import JiraFieldMapping
@@ -40,7 +41,10 @@ def update_jira_settings(
 ):
     mapping = db.query(JiraFieldMapping).filter(
         JiraFieldMapping.user_id == current_user.id,
-        JiraFieldMapping.project_key == settings.project_key,
+        or_(
+            JiraFieldMapping.project_key == settings.project_key,
+            JiraFieldMapping.project_id == settings.project_id
+        ),
         JiraFieldMapping.issue_type_id == settings.issue_type_id
     ).first()
 

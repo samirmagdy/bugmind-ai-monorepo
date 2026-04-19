@@ -1,5 +1,5 @@
 import React, { useState, useRef, useMemo, useCallback } from 'react';
-import { TabSession, BugReport, Usage, INITIAL_SESSION, TestCase, XrayPublishResult } from '../types';
+import { TabSession, BugReport, Usage, INITIAL_SESSION, TestCase, XrayPublishResult, MissingField, CreatedIssue, ResolvedPayload } from '../types';
 import { apiRequest, readJsonResponse } from '../services/api';
 import { translateError } from '../utils/ErrorTranslator';
 import { AIContext } from './ai-context';
@@ -26,6 +26,17 @@ export const AIProvider: React.FC<{
   const startFetch = (key: string) => activeFetches.current.add(key);
   const clearFetch = (key: string) => activeFetches.current.delete(key);
 
+  const sanitizeExtraFields = useCallback((fields: BugReport['extra_fields']) => {
+    if (!fields) return {};
+
+    const sanitized = { ...fields } as NonNullable<BugReport['extra_fields']>;
+    delete sanitized.summary;
+    delete sanitized.description;
+    delete sanitized.issuetype;
+    delete sanitized.project;
+    return sanitized;
+  }, []);
+
   const fetchUsage = useCallback(async () => {
     if (!authToken) return;
     const fetchKey = 'usage-fetch';
@@ -50,7 +61,6 @@ export const AIProvider: React.FC<{
     const fetchKey = 'ai-settings-fetch';
     if (isFetching(fetchKey)) return;
     startFetch(fetchKey);
-    updateSession({ loading: true });
     try {
       const res = await apiRequest(`${apiBase}/settings/ai`, { token: authToken, onUnauthorized: refreshAuthToken });
       if (!res.ok) {
@@ -64,7 +74,6 @@ export const AIProvider: React.FC<{
       logDebug('AI-SETTINGS-ERR', String(err));
       updateSession({ error: translateError(err, 'settings').description });
     } finally {
-      updateSession({ loading: false });
       clearFetch(fetchKey);
     }
   }, [apiBase, authToken, logDebug, refreshAuthToken, updateSession]);
@@ -133,7 +142,7 @@ export const AIProvider: React.FC<{
         expected_result: data.expected_result || "",
         actual_result: data.actual_result || "",
         severity: "Medium",
-        extra_fields: data.fields || {}
+        extra_fields: sanitizeExtraFields((data.fields || {}) as BugReport['extra_fields'])
       };
 
       updateSession({ bugs: [bug], testCases: [], coverageScore: null }, currentTabId);
@@ -145,7 +154,7 @@ export const AIProvider: React.FC<{
     } finally {
       updateSession({ loading: false }, currentTabId);
     }
-  }, [apiBase, authToken, currentTabId, logDebug, refreshAuthToken, session.issueData, session.jiraConnectionId, session.selectedIssueType, updateSession]);
+  }, [apiBase, authToken, currentTabId, logDebug, refreshAuthToken, sanitizeExtraFields, session.issueData, session.jiraConnectionId, session.selectedIssueType, updateSession]);
 
   const generateTestCases = useCallback(async () => {
     if (!currentTabId || !session.issueData || !session.jiraConnectionId) return;
@@ -197,27 +206,6 @@ export const AIProvider: React.FC<{
     updateSession({ loading: true, error: null, success: null }, currentTabId);
 
     try {
-      const metadataRes = await apiRequest(
-        `${apiBase}/jira/connections/${session.jiraConnectionId}/projects/${session.xrayTargetProjectId}/metadata`,
-        {
-          token: authToken,
-          onUnauthorized: refreshAuthToken
-        }
-      );
-      if (!metadataRes.ok) {
-        throw new Error(await metadataRes.text() || `Failed to inspect Xray project issue types (${metadataRes.status})`);
-      }
-
-      const projectIssueTypes = await readJsonResponse<Array<{ id: string; name: string }>>(metadataRes);
-      const desiredIssueType = (session.xrayTestIssueTypeName || 'Test').trim().toLowerCase();
-      const hasTestIssueType = projectIssueTypes.some(issueType => {
-        const name = String(issueType.name || '').trim().toLowerCase();
-        return name === desiredIssueType || name.includes(desiredIssueType) || name.includes('test');
-      });
-      if (!hasTestIssueType) {
-        throw new Error(`XRAY_TEST_ISSUE_TYPE_MISSING:${session.xrayTargetProjectKey || session.xrayTargetProjectId}`);
-      }
-
       const res = await apiRequest(`${apiBase}/jira/connections/${session.jiraConnectionId}/xray/test-suite`, {
         method: 'POST',
         token: authToken,
@@ -299,7 +287,7 @@ export const AIProvider: React.FC<{
         expected_result: data.expected_result || '',
         actual_result: data.actual_result || '',
         severity: 'Medium',
-        extra_fields: (data.fields || {}) as BugReport['extra_fields']
+        extra_fields: sanitizeExtraFields((data.fields || {}) as BugReport['extra_fields'])
       };
       const existing = session.bugs || [];
       updateSession({ bugs: [...existing, newBug], testCases: [], coverageScore: null, manualDesc: '', showManualInput: false, expandedBug: existing.length });
@@ -309,36 +297,32 @@ export const AIProvider: React.FC<{
     } finally {
       updateSession({ loading: false });
     }
-  }, [apiBase, authToken, fetchUsage, logDebug, refreshAuthToken, session.bugs, session.issueData, session.jiraConnectionId, session.manualDesc, session.selectedIssueType?.id, updateSession]);
+  }, [apiBase, authToken, fetchUsage, logDebug, refreshAuthToken, sanitizeExtraFields, session.bugs, session.issueData, session.jiraConnectionId, session.manualDesc, session.selectedIssueType?.id, updateSession]);
 
   const validateBug = useCallback(async (index: number): Promise<boolean> => {
     const bug = session.bugs[index];
-    if (!bug || !session.jiraConnectionId || !session.issueData) return false;
+    if (!bug || !session.jiraConnectionId || !session.issueData || !session.selectedIssueType?.id) return false;
 
     updateSession({ loading: true, error: null, validationErrors: [] });
     try {
       const projectKey = session.issueData.key.split('-')[0];
-      const projId = session.issueData.projectId || projectKey;
-      
-      const payload = {
-        fields: {
-          summary: bug.summary,
-          description: bug.description,
-          issuetype: { id: session.selectedIssueType?.id },
-          ...bug.extra_fields
-        }
-      };
-
-      const res = await apiRequest(`${apiBase}/jira/connections/${session.jiraConnectionId}/projects/${projId}/validate-issue`, {
+      const res = await apiRequest(`${apiBase}/ai/preview`, {
         method: 'POST',
         token: authToken,
         onUnauthorized: refreshAuthToken,
-        body: JSON.stringify(payload)
+        body: JSON.stringify({
+          jira_connection_id: session.jiraConnectionId,
+          project_key: projectKey,
+          project_id: session.issueData.projectId,
+          issue_type_id: session.selectedIssueType.id,
+          bug
+        })
       });
 
-      if (!res.ok) throw new Error("Validation failed");
+      if (!res.ok) throw new Error(await res.text() || "Validation failed");
       
-      const data = await res.json() as { valid: boolean; missing_fields: { key: string; name: string }[] };
+      const data = await readJsonResponse<{ valid: boolean; missing_fields: MissingField[]; resolved_payload: ResolvedPayload }>(res);
+      updateSession({ resolvedPayload: data.resolved_payload ?? null });
       if (!data.valid) {
         updateSession({ 
           validationErrors: data.missing_fields.map(f => `Field "${f.name}" is required.`) 
@@ -357,32 +341,26 @@ export const AIProvider: React.FC<{
 
   const fetchResolvedPayload = useCallback(async (index: number) => {
     const bug = session.bugs[index];
-    if (!bug || !session.jiraConnectionId || !session.issueData) return;
+    if (!bug || !session.jiraConnectionId || !session.issueData || !session.selectedIssueType?.id) return;
 
     try {
       const projectKey = session.issueData.key.split('-')[0];
-      const projId = session.issueData.projectId || projectKey;
-
-      const res = await apiRequest(`${apiBase}/jira/connections/${session.jiraConnectionId}/projects/${projId}/resolve-issue`, {
+      const res = await apiRequest(`${apiBase}/ai/preview`, {
         method: 'POST',
         token: authToken,
         onUnauthorized: refreshAuthToken,
         body: JSON.stringify({
-          fields: {
-            summary: bug.summary,
-            description: bug.description,
-            steps_to_reproduce: bug.steps_to_reproduce,
-            expected_result: bug.expected_result,
-            actual_result: bug.actual_result,
-            issuetype: { id: session.selectedIssueType?.id },
-            ...bug.extra_fields
-          }
+          jira_connection_id: session.jiraConnectionId,
+          project_key: projectKey,
+          project_id: session.issueData.projectId,
+          issue_type_id: session.selectedIssueType.id,
+          bug
         })
       });
 
       if (res.ok) {
-        const data = await res.json();
-        updateSession({ resolvedPayload: data });
+        const data = await readJsonResponse<{ resolved_payload: ResolvedPayload }>(res);
+        updateSession({ resolvedPayload: data.resolved_payload ?? null });
       }
     } catch (err) {
       console.error('Failed to resolve bug payload', err);
@@ -402,38 +380,30 @@ export const AIProvider: React.FC<{
       bugs = [bugs[index]];
     }
     
-    if (!session.issueData || !bugs.length || !session.jiraConnectionId) return;
+    if (!session.issueData || !bugs.length || !session.jiraConnectionId || !session.selectedIssueType?.id) return;
     updateSession({ loading: true, error: null });
     
     try {
-      const connId = session.jiraConnectionId;
       const projectKey = session.issueData.key.split('-')[0];
-      const projId = session.issueData.projectId || projectKey;
-      
-      const results = [];
-      for (const bug of bugs) {
-        const payload = {
-          fields: {
-            summary: bug.summary,
-            description: bug.description,
-            issuetype: { id: session.selectedIssueType?.id },
-            ...bug.extra_fields
-          }
-        };
-        
-        const res = await apiRequest(`${apiBase}/jira/connections/${connId}/projects/${projId}/issues`, {
-          method: 'POST',
-          token: authToken,
-          onUnauthorized: refreshAuthToken,
-          body: JSON.stringify(payload)
-        });
-        
-        if (res.ok) {
-          results.push(await res.json());
-        }
+      const res = await apiRequest(`${apiBase}/ai/submit`, {
+        method: 'POST',
+        token: authToken,
+        onUnauthorized: refreshAuthToken,
+        body: JSON.stringify({
+          jira_connection_id: session.jiraConnectionId,
+          project_key: projectKey,
+          project_id: session.issueData.projectId,
+          issue_type_id: session.selectedIssueType.id,
+          bugs
+        })
+      });
+
+      if (!res.ok) {
+        throw new Error(await res.text() || 'Failed to submit bugs');
       }
-      
-      updateSession({ view: 'success', createdIssues: results.map(r => ({ id: r.issue_key, key: r.issue_key, self: "" })) });
+
+      const data = await readJsonResponse<{ created_issues: CreatedIssue[] }>(res);
+      updateSession({ view: 'success', createdIssues: data.created_issues || [] });
     } catch (err: unknown) {
       updateSession({ error: translateError(err, 'jira-submit').description });
     } finally {

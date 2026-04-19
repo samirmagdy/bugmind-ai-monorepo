@@ -28,6 +28,21 @@ interface TabContext {
   error: string | null;
 }
 
+interface GetCurrentContextMessage {
+  type: 'GET_CURRENT_CONTEXT';
+  tabId: number;
+  force?: boolean;
+}
+
+interface ThemeChangedMessage {
+  type: 'THEME_CHANGED';
+  theme: 'light' | 'dark';
+}
+
+function isInjectableUrl(url: string): boolean {
+  return /^https?:\/\//i.test(url);
+}
+
 // In-memory cache for active tab context
 const tabContextCache: Record<number, TabContext> = {};
 
@@ -38,6 +53,19 @@ chrome.runtime.onInstalled.addListener(() => {
 // Sidebar setup (MV3)
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })
   .catch((error) => console.error(error));
+
+async function refreshExistingTabs() {
+  try {
+    const tabs = await chrome.tabs.query({});
+    await Promise.all(
+      tabs
+        .filter((tab): tab is chrome.tabs.Tab & { id: number; url: string } => typeof tab.id === 'number' && typeof tab.url === 'string')
+        .map((tab) => refreshTabContext(tab.id, tab.url))
+    );
+  } catch (error) {
+    console.error('[BugMind-BG] Failed to prime existing tabs:', error);
+  }
+}
 
 /**
  * Ensures the content script is active and version-matched.
@@ -79,6 +107,7 @@ async function refreshTabContext(tabId: number, url?: string) {
   }
 
   if (!url) return;
+  if (!isInjectableUrl(url)) return;
 
   // Domain Filter
   const isJira = url.includes(DOMAINS.JIRA_CLOUD) || url.includes(DOMAINS.BROWSE_PATH) || url.includes(DOMAINS.ISSUES_PATH);
@@ -117,6 +146,8 @@ async function refreshTabContext(tabId: number, url?: string) {
   }
 }
 
+refreshExistingTabs();
+
 // 1. Listen for Tab Updates (Navigation)
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status === 'complete' && tab.url) {
@@ -134,8 +165,8 @@ chrome.tabs.onActivated.addListener((activeInfo) => {
 // 3. Listen for Sidepanel Requests (Initial Hydration)
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'GET_CURRENT_CONTEXT') {
-    const tabId = message.tabId;
-    if (tabContextCache[tabId]) {
+    const { tabId, force } = message as GetCurrentContextMessage;
+    if (tabContextCache[tabId] && !force) {
       sendResponse(tabContextCache[tabId]);
     } else {
       refreshTabContext(tabId).then(() => {
@@ -147,7 +178,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   
   if (message.type === 'THEME_CHANGED') {
     // Forward theme changes to sidepanel
-    chrome.runtime.sendMessage(message).catch(() => {});
+    chrome.runtime.sendMessage(message as ThemeChangedMessage).catch(() => {});
   }
 });
 

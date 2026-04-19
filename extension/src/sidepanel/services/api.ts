@@ -3,6 +3,7 @@ export interface ApiRequestOptions extends RequestInit {
   onUnauthorized?: () => void | string | null | Promise<void | string | null>;
   onDebug?: (tag: string, msg: string) => void;
   token?: string | null;
+  timeoutMs?: number;
 }
 
 export const readJsonResponse = async <T>(res: Response): Promise<T> => {
@@ -23,7 +24,7 @@ export const apiRequest = async (
   url: string, 
   options: ApiRequestOptions = {}
 ): Promise<Response> => {
-  const { onUnauthorized, onDebug, token, ...fetchOptions } = options;
+  const { onUnauthorized, onDebug, token, timeoutMs, ...fetchOptions } = options;
   
   const headers: Record<string, string> = {};
   
@@ -46,7 +47,41 @@ export const apiRequest = async (
   }
   
   const execute = async (requestHeaders: Record<string, string>) => {
-    return fetch(url, { ...fetchOptions, headers: requestHeaders });
+    const controller = new AbortController();
+    const upstreamSignal = fetchOptions.signal;
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    let didTimeout = false;
+    let abortListener: (() => void) | undefined;
+
+    if (upstreamSignal) {
+      if (upstreamSignal.aborted) {
+        controller.abort();
+      } else {
+        abortListener = () => controller.abort();
+        upstreamSignal.addEventListener('abort', abortListener, { once: true });
+      }
+    }
+
+    if (timeoutMs && timeoutMs > 0) {
+      timeoutHandle = setTimeout(() => {
+        didTimeout = true;
+        controller.abort();
+      }, timeoutMs);
+    }
+
+    try {
+      return await fetch(url, { ...fetchOptions, headers: requestHeaders, signal: controller.signal });
+    } catch (err: unknown) {
+      if (didTimeout) {
+        throw new Error(`Request timed out after ${timeoutMs}ms`);
+      }
+      throw err;
+    } finally {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      if (upstreamSignal && abortListener) {
+        upstreamSignal.removeEventListener('abort', abortListener);
+      }
+    }
   };
 
   try {

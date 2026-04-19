@@ -1,10 +1,52 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { TabSession, IssueType, JiraMetadata, JiraField, JiraConnection, JiraProject } from '../types';
+import { TabSession, JiraConnection, JiraProject, JiraBootstrapContext } from '../types';
 import { apiRequest } from '../services/api';
 import { translateError } from '../utils/ErrorTranslator';
-import { obfuscate, deobfuscate } from '../utils/StorageObfuscator';
 import { dbService } from '../services/db';
 import { JiraConnectionConfig, JiraContext } from './jira-context';
+
+function normalizeJiraUrl(url: string | null | undefined): string {
+  if (!url) return '';
+
+  const trimmed = url.trim().replace(/\/+$/, '');
+  if (!trimmed) return '';
+
+  try {
+    const parsed = new URL(trimmed);
+    const normalizedPath = parsed.pathname.replace(/\/+$/, '');
+    const issuePathMatch = normalizedPath.match(/^(.*?)(\/browse\/|\/issues\/|\/projects\/)/);
+    const basePath = issuePathMatch ? issuePathMatch[1] : normalizedPath;
+    return `${parsed.origin}${basePath}`.replace(/\/+$/, '');
+  } catch {
+    return trimmed;
+  }
+}
+
+function inferPlatformFromUrl(url: string): 'cloud' | 'server' {
+  return url.includes('.atlassian.net') ? 'cloud' : 'server';
+}
+
+function resolveConnectionForUrl(connections: JiraConnection[], targetUrl: string | null | undefined): JiraConnection | undefined {
+  const normalizedTarget = normalizeJiraUrl(targetUrl);
+  if (!normalizedTarget) return connections.find(c => c.is_active) || connections[0];
+
+  const rankedMatches = connections
+    .map((connection) => ({
+      connection,
+      normalizedBase: normalizeJiraUrl(connection.host_url)
+    }))
+    .filter(({ normalizedBase }) =>
+      normalizedBase &&
+      (normalizedTarget === normalizedBase || normalizedTarget.startsWith(`${normalizedBase}/`) || normalizedTarget.startsWith(normalizedBase))
+    )
+    .sort((a, b) => b.normalizedBase.length - a.normalizedBase.length);
+
+  return rankedMatches[0]?.connection || connections.find(c => c.is_active) || connections[0];
+}
+
+function buildProjectIdentity(projectKey: string, projectId?: string): string {
+  return projectId || projectKey;
+}
 
 export const JiraProvider: React.FC<{ 
   children: React.ReactNode, 
@@ -18,250 +60,282 @@ export const JiraProvider: React.FC<{
   const [jiraPlatform, setJiraPlatform] = useState<'cloud' | 'server'>('cloud');
   const [jiraConnected, setJiraConnected] = useState(false);
   const [cloudUrl, setCloudUrl] = useState('');
-  const [cloudUsername, setCloudUsername] = useState('');
-  const [cloudToken, setCloudToken] = useState('');
   const [serverUrl, setServerUrl] = useState('');
-  const [serverUsername, setServerUsername] = useState('');
-  const [serverToken, setServerToken] = useState('');
   const [verifySsl, setVerifySslState] = useState(true);
   const [isInitializing, setIsInitializing] = useState(true);
 
   const activeFetches = useRef<Set<string>>(new Set());
+  const statusCheckPromiseRef = useRef<Promise<boolean> | null>(null);
+  const bootstrapPromiseRef = useRef<Map<string, Promise<JiraBootstrapContext | null>>>(new Map());
   const isFetching = (key: string) => activeFetches.current.has(key);
   const startFetch = (key: string) => activeFetches.current.add(key);
   const clearFetch = (key: string) => activeFetches.current.delete(key);
 
-  useEffect(() => {
-    chrome.storage.local.get(['bugmind_jira_config'], (res) => {
-      if (res.bugmind_jira_config) {
-        const c = res.bugmind_jira_config;
-        if (c.platform) setJiraPlatform(c.platform);
-        if (c.cloudUrl) setCloudUrl(c.cloudUrl);
-        if (c.cloudUsername) setCloudUsername(deobfuscate(c.cloudUsername));
-        if (c.cloudToken) setCloudToken(deobfuscate(c.cloudToken));
-        if (c.serverUrl) setServerUrl(c.serverUrl);
-        if (c.serverUsername) setServerUsername(deobfuscate(c.serverUsername));
-        if (c.serverToken) setServerToken(deobfuscate(c.serverToken));
-        if (c.verifySsl !== undefined) setVerifySslState(c.verifySsl);
-      }
-    });
-  }, []);
-
   const saveJiraConfig = useCallback((updates: Record<string, string | boolean | undefined>) => {
     chrome.storage.local.get(['bugmind_jira_config'], (res) => {
       const current = (res.bugmind_jira_config as Record<string, string | boolean | undefined>) || {};
-      const secureUpdates = { ...updates };
-      if (typeof secureUpdates.cloudToken === 'string') secureUpdates.cloudToken = obfuscate(secureUpdates.cloudToken);
-      if (typeof secureUpdates.serverToken === 'string') secureUpdates.serverToken = obfuscate(secureUpdates.serverToken);
-      if (typeof secureUpdates.cloudUsername === 'string') secureUpdates.cloudUsername = obfuscate(secureUpdates.cloudUsername);
-      if (typeof secureUpdates.serverUsername === 'string') secureUpdates.serverUsername = obfuscate(secureUpdates.serverUsername);
-      
-      chrome.storage.local.set({ 'bugmind_jira_config': { ...current, ...secureUpdates } });
+      chrome.storage.local.set({ 'bugmind_jira_config': { ...current, ...updates } });
     });
   }, []);
 
-  const fetchIssueTypes = useCallback(async (connectionId: number, projectKey: string, tabId?: number | null, projectId?: string, force?: boolean) => {
-    if (!authToken) return;
-    const cacheKey = `issue-types-${connectionId}-${projectId || projectKey}`;
-    const fetchKey = `types-${projectKey}`;
-    
-    if (isFetching(fetchKey)) return;
-    
+  const applyBootstrapContext = useCallback((data: JiraBootstrapContext, tabId?: number | null, hasProjectContext: boolean = false) => {
+    const normalizedBase = normalizeJiraUrl(data.instance_url);
+    const platform = data.platform || inferPlatformFromUrl(normalizedBase);
+
+    setJiraConnected(true);
+    setJiraPlatform(platform);
+    setVerifySslState(data.verify_ssl ?? true);
+
+    if (platform === 'cloud') setCloudUrl(normalizedBase);
+    if (platform === 'server') setServerUrl(normalizedBase);
+
+    saveJiraConfig({
+      platform,
+      [platform === 'cloud' ? 'cloudUrl' : 'serverUrl']: normalizedBase,
+      verifySsl: data.verify_ssl ?? true
+    });
+
+    updateSession({
+      instanceUrl: normalizedBase,
+      jiraConnectionId: data.connection_id,
+      issueTypes: data.issue_types || [],
+      issueTypesFetched: hasProjectContext,
+      selectedIssueType: data.selected_issue_type || null,
+      visibleFields: data.visible_fields || [],
+      aiMapping: data.ai_mapping || {},
+      jiraMetadata: data.jira_metadata || null,
+      error: null
+    }, tabId);
+  }, [saveJiraConfig, updateSession]);
+
+  const bootstrapContext = useCallback(async ({
+    instanceUrl,
+    projectKey,
+    projectId,
+    issueTypeId,
+    tabId,
+    force,
+    tokenOverride
+  }: {
+    instanceUrl: string;
+    projectKey?: string;
+    projectId?: string;
+    issueTypeId?: string;
+    tabId?: number | null;
+    force?: boolean;
+    tokenOverride?: string;
+  }): Promise<JiraBootstrapContext | null> => {
+    const activeToken = tokenOverride || authToken;
+    const normalizedUrl = normalizeJiraUrl(instanceUrl);
+    if (!activeToken || !normalizedUrl) return null;
+
+    const projectIdentity = projectKey ? buildProjectIdentity(projectKey, projectId) : '';
+    const requestIssueTypeId = issueTypeId || undefined;
+    const cacheKey = `bootstrap-${normalizedUrl}-${projectIdentity}-${requestIssueTypeId || 'default'}`;
+    const fetchKey = `bootstrap-${normalizedUrl}-${projectIdentity}`;
+    const metadataCacheKey = projectKey ? `metadata-${projectIdentity}-${requestIssueTypeId || 'default'}` : '';
+
     if (!force) {
-      const cached = await dbService.getMetadata<IssueType[]>(cacheKey);
-      if (cached) {
-        updateSession({ issueTypes: cached, issueTypesFetched: true }, tabId);
-        return;
+      const inFlight = bootstrapPromiseRef.current.get(cacheKey);
+      if (inFlight) {
+        return inFlight;
+      }
+
+      if (projectKey && metadataCacheKey) {
+        const cached = await dbService.getMetadata<JiraBootstrapContext>(metadataCacheKey);
+        if (cached) {
+          applyBootstrapContext(cached, tabId, true);
+          return cached;
+        }
       }
     }
 
+    logDebug('JIRA-BOOT', `Bootstrapping Jira context for ${normalizedUrl}${projectIdentity ? ` (${projectIdentity})` : ''}`);
     startFetch(fetchKey);
-    updateSession({ loading: true }, tabId);
-    logDebug('TYPES-SCAN', `Triggering issue-type fetch for project: ${projectId || projectKey} (Conn: ${connectionId})`);
-    try {
-      const projId = projectId || projectKey;
-      const finalUrl = `${apiBase}/jira/connections/${connectionId}/projects/${projId}/metadata`;
-      const res = await apiRequest(finalUrl, { token: authToken, onUnauthorized: refreshAuthToken, onDebug: logDebug });
 
-      if (!res.ok) {
-        throw new Error(await res.text() || `Failed to fetch issue types (${res.status})`);
+    const promise = (async () => {
+      try {
+        const res = await apiRequest(`${apiBase}/jira/bootstrap-context`, {
+          method: 'POST',
+          token: activeToken,
+          onUnauthorized: tokenOverride ? undefined : refreshAuthToken,
+          onDebug: logDebug,
+          body: JSON.stringify({
+            instance_url: normalizedUrl,
+            project_key: projectKey,
+            project_id: projectId,
+            issue_type_id: requestIssueTypeId
+          })
+        });
+
+        if (!res.ok) {
+          throw new Error(await res.text() || `Failed to bootstrap Jira context (${res.status})`);
+        }
+
+        const data = await res.json() as JiraBootstrapContext;
+        applyBootstrapContext(data, tabId, !!projectKey || !!projectId);
+
+        if (projectKey && metadataCacheKey) {
+          await dbService.saveMetadata(metadataCacheKey, data);
+        }
+
+        logDebug('JIRA-BOOT-OK', `Resolved connection ${data.connection_id}`);
+        return data;
+      } catch (err: unknown) {
+        logDebug('JIRA-BOOT-ERR', String(err));
+        updateSession({ error: translateError(err, 'jira-status').description }, tabId);
+        return null;
+      } finally {
+        clearFetch(fetchKey);
+        bootstrapPromiseRef.current.delete(cacheKey);
       }
+    })();
 
-      const types = await res.json() as IssueType[];
-      logDebug('TYPES-OK', `Found ${types.length} issue types.`);
-      
-      await dbService.saveMetadata(cacheKey, types);
-      updateSession({ issueTypes: types, issueTypesFetched: true, error: null }, tabId);
-      
-      if (!session.selectedIssueType) {
-        const bugType = types.find((type) => type.name.toLowerCase().includes('bug'));
-        updateSession({ selectedIssueType: bugType || types[0] }, tabId);
+    bootstrapPromiseRef.current.set(cacheKey, promise);
+    return promise;
+  }, [apiBase, applyBootstrapContext, authToken, logDebug, refreshAuthToken, updateSession]);
+
+  useEffect(() => {
+    chrome.storage.local.get(['bugmind_jira_config'], (res) => {
+      if (res.bugmind_jira_config) {
+        const c = res.bugmind_jira_config as Record<string, string | boolean | undefined>;
+        if (c.platform === 'cloud' || c.platform === 'server') setJiraPlatform(c.platform);
+        if (typeof c.cloudUrl === 'string') setCloudUrl(c.cloudUrl);
+        if (typeof c.serverUrl === 'string') setServerUrl(c.serverUrl);
+        if (typeof c.verifySsl === 'boolean') setVerifySslState(c.verifySsl);
+
+        const {
+          cloudUsername: _cloudUsername,
+          cloudToken: _cloudToken,
+          serverUsername: _serverUsername,
+          serverToken: _serverToken,
+          ...sanitizedConfig
+        } = c;
+
+        if (
+          _cloudUsername !== undefined ||
+          _cloudToken !== undefined ||
+          _serverUsername !== undefined ||
+          _serverToken !== undefined
+        ) {
+          chrome.storage.local.set({ bugmind_jira_config: sanitizedConfig });
+        }
+      }
+    });
+  }, []);
+
+  const fetchIssueTypes = useCallback(async (_connectionId: number, projectKey: string, tabId?: number | null, projectId?: string, force?: boolean) => {
+    const instanceUrl = session.instanceUrl;
+    if (!instanceUrl) return;
+
+    updateSession({ loading: true }, tabId);
+    logDebug('TYPES-SCAN', `Triggering issue-type fetch for project: ${projectId || projectKey}`);
+    try {
+      const data = await bootstrapContext({ instanceUrl, projectKey, projectId, tabId, force });
+      if (data) {
+        logDebug('TYPES-OK', `Found ${data.issue_types.length} issue types.`);
       }
     } catch (err: unknown) {
       logDebug('TYPES-ERROR', String(err));
       updateSession({ error: translateError(err, 'jira-types').description, issueTypesFetched: true }, tabId);
     } finally {
       updateSession({ loading: false }, tabId);
-      clearFetch(fetchKey);
     }
-  }, [apiBase, authToken, logDebug, refreshAuthToken, session.selectedIssueType, updateSession]);
+  }, [bootstrapContext, logDebug, session.instanceUrl, updateSession]);
 
-  const fetchJiraMetadata = useCallback(async (connectionId: number, projectKey: string, issueTypeId: string, tabId?: number | null, projectId?: string, force?: boolean) => {
-    if (!authToken) return;
-    const cacheKey = `metadata-${connectionId}-${projectId || projectKey}-${issueTypeId}`;
-    const fetchKey = `meta-${projectKey}-${issueTypeId}`;
-    
-    if (isFetching(fetchKey)) return;
-    
-    if (!force) {
-      const cached = await dbService.getMetadata<JiraMetadata>(cacheKey);
-      if (cached?.fields?.length) {
-        updateSession({ jiraMetadata: cached }, tabId);
-        return;
-      }
-    }
+  const fetchJiraMetadata = useCallback(async (_connectionId: number, projectKey: string, issueTypeId: string, tabId?: number | null, projectId?: string, force?: boolean) => {
+    const instanceUrl = session.instanceUrl;
+    if (!instanceUrl) return;
 
-    startFetch(fetchKey);
     updateSession({ loading: true }, tabId);
-    const projId = projectId || projectKey;
-    const finalUrl = `${apiBase}/jira/connections/${connectionId}/projects/${projId}/issue-types/${issueTypeId}/fields`;
-    
     try {
-      const res = await apiRequest(finalUrl, { token: authToken, onUnauthorized: refreshAuthToken, onDebug: logDebug });
-
-      if (!res.ok) {
-        throw new Error(await res.text() || `Failed to fetch field metadata (${res.status})`);
+      const data = await bootstrapContext({ instanceUrl, projectKey, projectId, issueTypeId, tabId, force });
+      if (data?.jira_metadata) {
+        logDebug('META-OK', `Received ${data.jira_metadata.fields.length || 0} fields`);
       }
-
-      const fields = await res.json() as JiraField[];
-      logDebug('META-OK', `Received ${fields.length || 0} fields`);
-      logDebug('META-RAW', JSON.stringify(fields));
-      
-      const metadata: JiraMetadata = {
-        project_key: projectKey,
-        project_id: projId,
-        issue_type_id: issueTypeId,
-        fields: fields
-      };
-
-      if (fields.length > 0) {
-        await dbService.saveMetadata(cacheKey, metadata);
-      }
-      const updates: Partial<TabSession> = { jiraMetadata: metadata };
-      
-      if (!session.visibleFields || session.visibleFields.length === 0) {
-        const requiredFields = fields.filter((f: JiraField) => f.required).map((f: JiraField) => f.key);
-        if (requiredFields.length > 0) updates.visibleFields = requiredFields;
-      }
-      updateSession(updates, tabId);
     } catch (err: unknown) {
       logDebug('META-ERROR', String(err));
       updateSession({ error: translateError(err, 'jira-metadata').description }, tabId);
     } finally {
       updateSession({ loading: false }, tabId);
-      clearFetch(fetchKey);
     }
-  }, [apiBase, authToken, logDebug, refreshAuthToken, session.visibleFields, updateSession]);
+  }, [bootstrapContext, logDebug, session.instanceUrl, updateSession]);
 
-  const fetchFieldSettings = useCallback(async (connectionId: number, projectKey: string, tabId?: number | null, issueTypeId?: string, projectId?: string, force?: boolean) => {
-    if (!authToken) return;
-    const cacheKey = `settings-${connectionId}-${projectId || projectKey}-${issueTypeId || 'none'}`;
-    const fetchKey = `settings-${projectKey}-${issueTypeId || 'none'}`;
-    
-    if (isFetching(fetchKey)) return;
+  const fetchFieldSettings = useCallback(async (_connectionId: number, projectKey: string, tabId?: number | null, issueTypeId?: string, projectId?: string, force?: boolean) => {
+    const instanceUrl = session.instanceUrl;
+    if (!instanceUrl) return;
 
-    if (!force) {
-      const cached = await dbService.getMetadata<{ visible_fields?: string[]; ai_mapping?: Record<string, string> }>(cacheKey);
-      if (cached) {
-        updateSession({ 
-          visibleFields: cached.visible_fields || [],
-          aiMapping: cached.ai_mapping || {}
-        }, tabId);
-        return;
-      }
-    }
-
-    startFetch(fetchKey);
-    const projId = projectId || projectKey;
-    const finalUrl = `${apiBase}/jira/connections/${connectionId}/projects/${projId}/field-settings${issueTypeId ? `?issue_type_id=${issueTypeId}` : ''}`;
-    
     try {
-      const res = await apiRequest(finalUrl, { token: authToken, onUnauthorized: refreshAuthToken });
-      if (res.ok) {
-        const data = await res.json() as { visible_fields?: string[]; ai_mapping?: Record<string, string> };
-        await dbService.saveMetadata(cacheKey, data);
-        updateSession({ 
-          visibleFields: data.visible_fields || [],
-          aiMapping: data.ai_mapping || {}
-        }, tabId);
-      }
-    } catch (err: unknown) {
+      await bootstrapContext({ instanceUrl, projectKey, projectId, issueTypeId, tabId, force });
+    } catch {
       // Background fetch, ignore errors
-    } finally {
-      clearFetch(fetchKey);
     }
-  }, [apiBase, authToken, refreshAuthToken, updateSession]);
+  }, [bootstrapContext, session.instanceUrl]);
 
   const checkJiraStatus = useCallback(async (isInit: boolean = false, signal?: AbortSignal, tokenOverride?: string, urlOverride?: string, tabId?: number | null): Promise<boolean> => {
     const fetchKey = 'status-check';
-    if (isFetching(fetchKey)) return false;
+    if (isFetching(fetchKey)) {
+      return statusCheckPromiseRef.current ?? false;
+    }
 
     startFetch(fetchKey);
     if (!isInit) updateSession({ loading: true }, tabId);
-    let targetUrl = urlOverride || session.instanceUrl;
-    
-    if (targetUrl) targetUrl = targetUrl.replace(/\/$/, '');
-    
+    const targetUrl = normalizeJiraUrl(urlOverride || session.instanceUrl);
+
     logDebug('JIRA-STATUS', `Verifying connection... ${targetUrl || '(global)'}`);
-    
-    try {
-      const res = await apiRequest(`${apiBase}/jira/connections`, { signal, token: tokenOverride || authToken, onUnauthorized: tokenOverride ? undefined : refreshAuthToken, onDebug: logDebug });
-      if (res.ok) {
-        const connections = await res.json() as JiraConnection[];
-        updateSession({ connections });
-        
-        if (connections && connections.length > 0) {
-          setJiraConnected(true);
-          
-          const activeConn = connections.find(c => c.is_active);
-          const conn = targetUrl 
-            ? (connections.find(c => c.host_url?.replace(/\/$/, '') === targetUrl) || activeConn || connections[0])
-            : (activeConn || connections[0]);
-            
-          const platform = (conn.auth_type as 'cloud' | 'server') || 'cloud';
-          const normalizedBase = conn.host_url?.replace(/\/$/, '');
-          
-          if (normalizedBase) {
-            setJiraPlatform(platform);
-            setVerifySslState(conn.verify_ssl ?? true);
-            if (platform === 'cloud') setCloudUrl(normalizedBase);
-            if (platform === 'server') setServerUrl(normalizedBase);
-            
-            saveJiraConfig({ 
-              platform, 
-              [platform === 'cloud' ? 'cloudUrl' : 'serverUrl']: normalizedBase,
-              verifySsl: conn.verify_ssl ?? true
-            });
-            
-            updateSession({ 
-              instanceUrl: normalizedBase,
-              jiraConnectionId: conn.id 
-            }, tabId);
-            
-            logDebug('JIRA-OK', `Connected via connection ID: ${conn.id}`);
-            return true;
+
+    const statusPromise = (async () => {
+      try {
+        const res = await apiRequest(`${apiBase}/jira/connections`, { signal, token: tokenOverride || authToken, onUnauthorized: tokenOverride ? undefined : refreshAuthToken, onDebug: logDebug });
+        if (res.ok) {
+          const connections = await res.json() as JiraConnection[];
+          updateSession({ connections });
+
+          if (connections && connections.length > 0) {
+            setJiraConnected(true);
+
+            const conn = resolveConnectionForUrl(connections, targetUrl);
+            const platform = conn ? ((conn.auth_type as 'cloud' | 'server') || inferPlatformFromUrl(targetUrl || conn.host_url)) : inferPlatformFromUrl(targetUrl);
+            const normalizedBase = normalizeJiraUrl(conn?.host_url || targetUrl);
+
+            if (normalizedBase) {
+              setJiraPlatform(platform);
+              setVerifySslState(conn?.verify_ssl ?? true);
+              if (platform === 'cloud') setCloudUrl(normalizedBase);
+              if (platform === 'server') setServerUrl(normalizedBase);
+
+              saveJiraConfig({
+                platform,
+                [platform === 'cloud' ? 'cloudUrl' : 'serverUrl']: normalizedBase,
+                verifySsl: conn?.verify_ssl ?? true
+              });
+
+              updateSession({
+                instanceUrl: normalizedBase,
+                jiraConnectionId: conn?.id ?? null
+              }, tabId);
+
+              if (conn) {
+                logDebug('JIRA-OK', `Connected via connection ID: ${conn.id}`);
+                return true;
+              }
+            }
           }
         }
+        return false;
+      } catch (err: unknown) {
+        logDebug('JIRA-ERR', String(err));
+        return false;
+      } finally {
+        if (!isInit) updateSession({ loading: false }, tabId || undefined);
+        if (isInit) setIsInitializing(false);
+        clearFetch(fetchKey);
+        statusCheckPromiseRef.current = null;
       }
-      return false;
-    } catch (err: unknown) {
-      logDebug('JIRA-ERR', String(err));
-      return false;
-    } finally {
-      if (!isInit) updateSession({ loading: false }, tabId || undefined);
-      if (isInit) setIsInitializing(false);
-      clearFetch(fetchKey);
-    }
+    })();
+
+    statusCheckPromiseRef.current = statusPromise;
+    return await statusPromise;
   }, [apiBase, authToken, logDebug, refreshAuthToken, saveJiraConfig, session.instanceUrl, updateSession]);
 
   const fetchConnections = useCallback(async () => {
@@ -282,6 +356,11 @@ export const JiraProvider: React.FC<{
       logDebug('CONN-FETCH-ERR', String(err));
     }
   }, [apiBase, authToken, logDebug, refreshAuthToken, saveJiraConfig, updateSession]);
+
+  useEffect(() => {
+    if (!authToken) return;
+    fetchConnections();
+  }, [authToken, fetchConnections]);
 
   const setVerifySsl = useCallback(async (value: boolean) => {
     setVerifySslState(value);
@@ -425,13 +504,10 @@ export const JiraProvider: React.FC<{
     fetchIssueTypes,
     fetchJiraMetadata,
     fetchFieldSettings,
+    bootstrapContext,
     checkJiraStatus,
     cloudUrl, setCloudUrl,
-    cloudUsername, setCloudUsername,
-    cloudToken, setCloudToken,
     serverUrl, setServerUrl,
-    serverUsername, setServerUsername,
-    serverToken, setServerToken,
     verifySsl, setVerifySsl,
     saveJiraConfig,
     createConnection,
@@ -443,8 +519,7 @@ export const JiraProvider: React.FC<{
     isInitializing
   }), [
     jiraPlatform, jiraConnected, fetchIssueTypes, fetchJiraMetadata, fetchFieldSettings,
-    checkJiraStatus, cloudUrl, cloudUsername, cloudToken, serverUrl, serverUsername,
-    serverToken, verifySsl, setVerifySsl, saveJiraConfig, createConnection, fetchConnections, deleteConnection, setActiveConnection, updateConnection, fetchProjects,
+    bootstrapContext, checkJiraStatus, cloudUrl, serverUrl, verifySsl, setVerifySsl, saveJiraConfig, createConnection, fetchConnections, deleteConnection, setActiveConnection, updateConnection, fetchProjects,
     isInitializing
   ]);
 

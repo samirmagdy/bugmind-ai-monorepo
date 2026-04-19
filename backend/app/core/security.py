@@ -13,14 +13,18 @@ _placeholders = [
     "CHANGE_THIS_IN_PRODUCTION_MUST_BE_32_BYTES_!"
 ]
 if not settings.ENCRYPTION_KEY or settings.ENCRYPTION_KEY in _placeholders:
-    # Fails loudly to prevent using placeholder keys which lead to data loss
-    print(f"DEBUG: Current ENCRYPTION_KEY: '{settings.ENCRYPTION_KEY}'")
     raise ValueError("CRITICAL: ENCRYPTION_KEY is missing or using a placeholder value in .env. Please set a valid Fernet key.")
 
 try:
     cipher_suite = Fernet(settings.ENCRYPTION_KEY.encode())
 except Exception as e:
     raise ValueError(f"CRITICAL: Invalid ENCRYPTION_KEY format. Must be a valid Fernet key. Error: {str(e)}")
+
+_secret_placeholders = [
+    "CHANGE_THIS_IN_PRODUCTION_b8m9k2n3m4n5b6g7v8a9c0d1e2f3a4b"
+]
+if not settings.SECRET_KEY or settings.SECRET_KEY in _secret_placeholders:
+    raise ValueError("CRITICAL: SECRET_KEY is missing or using a placeholder value in .env. Please set a secure application secret.")
 
 ALGORITHM = "HS256"
 

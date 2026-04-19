@@ -25,12 +25,18 @@ export default function App() {
   const debugLog = debug.log;
   
   const lastEffectiveView = useRef<string | null>(null);
+  const lastAuthCheckKey = useRef<string | null>(null);
 
   useEffect(() => {
-    if (auth.storageLoaded) {
-      checkAuth();
-    }
-  }, [auth.storageLoaded, auth.authToken, checkAuth]);
+    if (!auth.storageLoaded) return;
+    if (auth.globalView !== 'auth') return;
+
+    const authCheckKey = `${auth.storageLoaded}:${auth.authToken ? 'token' : 'guest'}:${auth.globalView}`;
+    if (lastAuthCheckKey.current === authCheckKey) return;
+
+    lastAuthCheckKey.current = authCheckKey;
+    checkAuth();
+  }, [auth.globalView, auth.storageLoaded, auth.authToken, checkAuth]);
 
   // Logic to determine which view to show
   const activeView = (auth.globalView === 'auth' || auth.globalView === 'setup') 
@@ -154,7 +160,7 @@ export default function App() {
 
       {debug.show && <DebugConsole />}
       {session.loading && <BlockingLoader />}
-      {sessionHydrated && !session.onboardingCompleted && <OnboardingTour />}
+      {auth.authToken && sessionHydrated && !session.onboardingCompleted && <OnboardingTour />}
     </div>
   );
 }

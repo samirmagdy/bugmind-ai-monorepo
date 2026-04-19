@@ -12,6 +12,10 @@
   ],
   "host_permissions": [
     "*://*.atlassian.net/*",
+    "*://*.atlassian.net/browse/*",
+    "*://*.atlassian.net/issues/*",
+    "*://*/browse/*",
+    "*://*/issues/*",
     "*://*/rest/api/*"
   ],
   "action": {

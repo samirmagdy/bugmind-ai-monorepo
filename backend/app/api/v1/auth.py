@@ -3,7 +3,7 @@ from jose import jwt
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.api import deps
-from app.schemas.token import Token
+from app.schemas.token import Token, RefreshTokenRequest
 from app.schemas.user import UserCreate, UserResponse
 from app.models.user import User
 from app.models.subscription import Subscription
@@ -50,9 +50,9 @@ def login_access_token(db: Session = Depends(deps.get_db), form_data: OAuth2Pass
     }
 
 @router.post("/refresh", response_model=Token)
-def refresh_token(refresh_token: str, db: Session = Depends(deps.get_db)):
+def refresh_token(request: RefreshTokenRequest, db: Session = Depends(deps.get_db)):
     try:
-        payload = jwt.decode(refresh_token, settings.SECRET_KEY, algorithms=[security.ALGORITHM])
+        payload = jwt.decode(request.refresh_token, settings.SECRET_KEY, algorithms=[security.ALGORITHM])
         if payload.get("type") != "refresh":
             raise HTTPException(status_code=400, detail="Invalid token type")
         user_id = payload.get("sub")

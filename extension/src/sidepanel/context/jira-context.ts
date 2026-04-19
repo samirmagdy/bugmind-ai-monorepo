@@ -1,5 +1,5 @@
 import { createContext } from 'react';
-import { JiraProject } from '../types';
+import { JiraBootstrapContext, JiraProject } from '../types';
 
 export interface JiraConnectionConfig {
   base_url: string;
@@ -23,20 +23,21 @@ export interface JiraContextType {
   fetchIssueTypes: (connectionId: number, projectKey: string, tabId?: number | null, projectId?: string, force?: boolean) => Promise<void>;
   fetchJiraMetadata: (connectionId: number, projectKey: string, issueTypeId: string, tabId?: number | null, projectId?: string, force?: boolean) => Promise<void>;
   fetchFieldSettings: (connectionId: number, projectKey: string, tabId?: number | null, issueTypeId?: string, projectId?: string, force?: boolean) => Promise<void>;
+  bootstrapContext: (params: {
+    instanceUrl: string;
+    projectKey?: string;
+    projectId?: string;
+    issueTypeId?: string;
+    tabId?: number | null;
+    force?: boolean;
+    tokenOverride?: string;
+  }) => Promise<JiraBootstrapContext | null>;
   checkJiraStatus: (isInit?: boolean, signal?: AbortSignal, tokenOverride?: string, urlOverride?: string, tabId?: number | null) => Promise<boolean>;
   isInitializing: boolean;
   cloudUrl: string;
   setCloudUrl: (v: string) => void;
-  cloudUsername: string;
-  setCloudUsername: (v: string) => void;
-  cloudToken: string;
-  setCloudToken: (v: string) => void;
   serverUrl: string;
   setServerUrl: (v: string) => void;
-  serverUsername: string;
-  setServerUsername: (v: string) => void;
-  serverToken: string;
-  setServerToken: (v: string) => void;
   verifySsl: boolean;
   setVerifySsl: (v: boolean) => Promise<void>;
   saveJiraConfig: (updates: Record<string, string | boolean | undefined>) => void;

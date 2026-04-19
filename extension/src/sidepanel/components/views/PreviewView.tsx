@@ -7,9 +7,20 @@ import {
 import JiraMarkdown from '../common/JiraMarkdown';
 import { ResolvedFieldValue } from '../../types';
 
+function hasResolvedField(
+  fields: Record<string, ResolvedFieldValue> | undefined,
+  key: string
+): fields is Record<string, ResolvedFieldValue> {
+  return Boolean(fields) && Object.prototype.hasOwnProperty.call(fields, key);
+}
+
 function formatResolvedFieldValue(value: ResolvedFieldValue): string {
   if (Array.isArray(value)) {
     return `${value.length} items selected`;
+  }
+
+  if (value === '') {
+    return '(empty)';
   }
 
   if (value && typeof value === 'object') {
@@ -28,8 +39,8 @@ const PreviewView: React.FC = () => {
   const bugIndex = session.previewBugIndex;
   const bug = bugIndex !== null ? session.bugs[bugIndex] : null;
   const resolved = session.resolvedPayload?.fields;
-  const resolvedSummary = resolved?.summary ? formatResolvedFieldValue(resolved.summary) : bug?.summary ?? '';
-  const resolvedDescription = resolved?.description ? formatResolvedFieldValue(resolved.description) : bug?.description ?? '';
+  const resolvedSummary = hasResolvedField(resolved, 'summary') ? formatResolvedFieldValue(resolved.summary) : bug?.summary ?? '';
+  const previewDescription = bug?.description ?? '';
   
   if (!bug) {
     return (
@@ -110,14 +121,14 @@ const PreviewView: React.FC = () => {
 
         <div className="h-px bg-[var(--border-main)]/50 mr-[-2rem] ml-[-2rem]"></div>
 
-        {/* Formatted Description (The Full Jira Output) */}
+        {/* Core description only. Steps/expected/actual are previewed separately below. */}
         <div className="space-y-3">
           <div className="flex items-center gap-2 text-[var(--text-muted)]">
             <AlignLeft size={12} />
-            <span className="text-[9px] font-black uppercase tracking-[0.2em]">Final Assembled Jira Description</span>
+            <span className="text-[9px] font-black uppercase tracking-[0.2em]">Core Description</span>
           </div>
           <div className="prose prose-invert max-w-none bg-[var(--bg-app)]/20 rounded-2xl p-4 border border-dashed border-[var(--border-main)]/50">
-            <JiraMarkdown content={resolvedDescription} />
+            <JiraMarkdown content={previewDescription} />
           </div>
         </div>
 
@@ -158,7 +169,7 @@ const PreviewView: React.FC = () => {
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {Object.entries(resolved).map(([key, val]) => {
-                if (key === 'summary' || key === 'description' || key === 'issuetype' || !val) return null;
+                if (key === 'summary' || key === 'description' || key === 'issuetype' || val === null || val === undefined) return null;
                 const field = session.jiraMetadata?.fields.find(f => f.key === key);
                 const displayVal = formatResolvedFieldValue(val);
 

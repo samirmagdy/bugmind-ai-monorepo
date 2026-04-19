@@ -74,6 +74,11 @@ export interface ResolvedPayload {
   [key: string]: unknown;
 }
 
+export interface MissingField {
+  key: string;
+  name: string;
+}
+
 export interface TabSession {
   view: View;
   loading: boolean;
@@ -137,6 +142,18 @@ export interface JiraMetadata {
   project_key: string;
   issue_type_id?: string;
   fields: JiraField[];
+}
+
+export interface JiraBootstrapContext {
+  connection_id: number;
+  instance_url: string;
+  platform: 'cloud' | 'server';
+  verify_ssl: boolean;
+  issue_types: IssueType[];
+  selected_issue_type: IssueType | null;
+  visible_fields: string[];
+  ai_mapping: Record<string, string>;
+  jira_metadata: JiraMetadata | null;
 }
 
 export interface IssueType {

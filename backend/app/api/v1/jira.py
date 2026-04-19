@@ -5,12 +5,22 @@ from typing import Optional
 from app.api import deps
 from app.models.user import User
 from app.models.jira import JiraConnection, JiraAuthType, JiraFieldMapping
-from app.schemas.jira import JiraConnectionCreate, JiraConnectionResponse, JiraConnectionUpdate
+from app.schemas.jira import (
+    JiraBootstrapContextRequest,
+    JiraBootstrapContextResponse,
+    JiraConnectionCreate,
+    JiraConnectionResponse,
+    JiraConnectionUpdate,
+    JiraFieldResponse,
+    JiraIssueTypeResponse,
+    JiraMetadataResponse,
+)
 from app.schemas.bug import XrayTestSuitePublishRequest, XrayTestSuitePublishResponse, XrayPublishedTest
 from app.core import security
 from app.services.jira.adapters.cloud import JiraCloudAdapter
 from app.services.jira.adapters.server import JiraServerAdapter
 from app.services.jira.metadata_engine import JiraMetadataEngine
+from urllib.parse import urlparse
 
 router = APIRouter()
 
@@ -27,6 +37,45 @@ def get_adapter(connection: JiraConnection):
     if connection.auth_type == JiraAuthType.CLOUD:
         return JiraCloudAdapter(connection.host_url, connection.username, token, verify_ssl=connection.verify_ssl)
     return JiraServerAdapter(connection.host_url, connection.username, token, verify_ssl=connection.verify_ssl)
+
+
+def _normalize_instance_url(url: Optional[str]) -> str:
+    trimmed = (url or "").strip().rstrip("/")
+    if not trimmed:
+        return ""
+
+    try:
+        parsed = urlparse(trimmed)
+        path = parsed.path.rstrip("/")
+        for marker in ("/browse/", "/issues/", "/projects/"):
+            if marker in path:
+                path = path.split(marker, 1)[0]
+                break
+        normalized = f"{parsed.scheme}://{parsed.netloc}{path}"
+        return normalized.rstrip("/")
+    except Exception:
+        return trimmed
+
+
+def _serialize_issue_type(issue_type: dict) -> JiraIssueTypeResponse:
+    return JiraIssueTypeResponse(
+        id=str(issue_type.get("id", "")),
+        name=str(issue_type.get("name", "")),
+        icon_url=issue_type.get("iconUrl") or issue_type.get("icon_url"),
+        subtask=bool(issue_type.get("subtask", False)),
+    )
+
+
+def _select_issue_type(issue_types: list[dict], issue_type_id: Optional[str]) -> Optional[dict]:
+    if issue_type_id:
+        exact = next((item for item in issue_types if str(item.get("id")) == str(issue_type_id)), None)
+        if exact:
+            return exact
+
+    bug_type = next((item for item in issue_types if "bug" in str(item.get("name", "")).strip().lower()), None)
+    if bug_type:
+        return bug_type
+    return issue_types[0] if issue_types else None
 
 
 def _normalize_folder_path(folder_path: Optional[str], story_issue_key: str) -> str:
@@ -109,6 +158,83 @@ def list_connections(
 ):
     return db.query(JiraConnection).filter(JiraConnection.user_id == current_user.id).order_by(JiraConnection.is_active.desc(), JiraConnection.id.asc()).all()
 
+
+@router.post("/bootstrap-context", response_model=JiraBootstrapContextResponse)
+def bootstrap_jira_context(
+    req: JiraBootstrapContextRequest,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    connections = db.query(JiraConnection).filter(
+        JiraConnection.user_id == current_user.id
+    ).order_by(JiraConnection.is_active.desc(), JiraConnection.id.asc()).all()
+    if not connections:
+        raise HTTPException(status_code=404, detail="No Jira connections found")
+
+    target_url = _normalize_instance_url(req.instance_url)
+    if not target_url:
+        raise HTTPException(status_code=400, detail="A valid Jira instance URL is required")
+
+    ranked_matches = []
+    for connection in connections:
+        normalized_host = _normalize_instance_url(connection.host_url)
+        if normalized_host and (
+            target_url == normalized_host or
+            target_url.startswith(f"{normalized_host}/") or
+            target_url.startswith(normalized_host)
+        ):
+            ranked_matches.append((len(normalized_host), connection))
+
+    ranked_matches.sort(key=lambda item: item[0], reverse=True)
+    conn = ranked_matches[0][1] if ranked_matches else (next((item for item in connections if item.is_active), None) or connections[0])
+
+    adapter = get_adapter(conn)
+    engine = JiraMetadataEngine(adapter)
+
+    resolved_project_id = req.project_id or req.project_key
+    issue_types_raw: list[dict] = []
+    selected_issue_type_raw: Optional[dict] = None
+    visible_fields: list[str] = []
+    ai_mapping: dict = {}
+    metadata_response: Optional[JiraMetadataResponse] = None
+
+    if resolved_project_id:
+        issue_types_raw = engine.get_project_metadata(resolved_project_id)
+        selected_issue_type_raw = _select_issue_type(issue_types_raw, req.issue_type_id)
+
+        if selected_issue_type_raw:
+            selected_issue_type_id = str(selected_issue_type_raw.get("id", ""))
+            mapping = db.query(JiraFieldMapping).filter(
+                JiraFieldMapping.user_id == current_user.id,
+                or_(
+                    JiraFieldMapping.project_key == (req.project_key or resolved_project_id),
+                    JiraFieldMapping.project_id == req.project_id
+                ),
+                JiraFieldMapping.issue_type_id == selected_issue_type_id
+            ).first()
+            visible_fields = mapping.visible_fields if mapping else []
+            ai_mapping = mapping.field_mappings if mapping else {}
+
+            metadata_fields = engine.get_field_schema(resolved_project_id, selected_issue_type_id)
+            metadata_response = JiraMetadataResponse(
+                project_key=req.project_key or str(resolved_project_id),
+                project_id=req.project_id or str(resolved_project_id),
+                issue_type_id=selected_issue_type_id,
+                fields=[JiraFieldResponse(**field) for field in metadata_fields]
+            )
+
+    return JiraBootstrapContextResponse(
+        connection_id=conn.id,
+        instance_url=_normalize_instance_url(conn.host_url),
+        platform=conn.auth_type,
+        verify_ssl=conn.verify_ssl,
+        issue_types=[_serialize_issue_type(issue_type) for issue_type in issue_types_raw],
+        selected_issue_type=_serialize_issue_type(selected_issue_type_raw) if selected_issue_type_raw else None,
+        visible_fields=visible_fields,
+        ai_mapping=ai_mapping,
+        jira_metadata=metadata_response
+    )
+
 @router.post("/connections", response_model=JiraConnectionResponse)
 def create_connection(
     conn_in: JiraConnectionCreate, 
@@ -117,8 +243,7 @@ def create_connection(
 ):
     if not conn_in.token or not conn_in.token.strip():
         raise HTTPException(status_code=400, detail="API Token cannot be empty")
-        
-    print(f"[BugMind] Saving NEW connection. Token length: {len(conn_in.token)}, Prefix: {conn_in.token[:4]}...")
+
     encrypted = security.encrypt_credential(conn_in.token)
     db.query(JiraConnection).filter(JiraConnection.user_id == current_user.id).update(
         {JiraConnection.is_active: False},
@@ -154,10 +279,7 @@ def update_connection(
     if "token" in update_data:
         token_val = update_data.pop("token")
         if token_val and token_val.strip():
-            print(f"[BugMind] Updating token. New length: {len(token_val)}, Prefix: {token_val[:4]}...")
             update_data["encrypted_token"] = security.encrypt_credential(token_val)
-        else:
-            print("[BugMind] Token update skipped (empty or whitespace string provided)")
     
     if update_data.get("is_active") is True:
         db.query(JiraConnection).filter(

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useBugMind } from '../../hooks/useBugMind';
 import { ExternalLink, ArrowLeft } from 'lucide-react';
 
@@ -16,6 +16,20 @@ const SetupView: React.FC = () => {
   const [username, setUsername] = useState('');
   const [token, setToken] = useState('');
   const [verifySsl, setVerifySsl] = useState(true);
+
+  useEffect(() => {
+    if (session.instanceUrl) {
+      setUrl(prev => prev || session.instanceUrl || '');
+    }
+  }, [session.instanceUrl]);
+
+  useEffect(() => {
+    setPlatform(jira.jiraPlatform);
+  }, [jira.jiraPlatform]);
+
+  useEffect(() => {
+    setVerifySsl(jira.verifySsl);
+  }, [jira.verifySsl]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
