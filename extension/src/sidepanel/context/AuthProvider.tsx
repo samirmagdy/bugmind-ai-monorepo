@@ -1,35 +1,8 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
-import { View } from '../types';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { deobfuscate, obfuscate } from '../utils/StorageObfuscator';
 import { apiRequest, readJsonResponse } from '../services/api';
-
-interface AuthContextType {
-  globalView: View;
-  setGlobalView: (view: View) => void;
-  initializing: boolean;
-  setInitializing: (val: boolean) => void;
-  authToken: string | null;
-  setAuthToken: (token: string | null) => void;
-  refreshToken: string | null;
-  setRefreshToken: (token: string | null) => void;
-  refreshSession: () => Promise<string | null>;
-  storageLoaded: boolean;
-  apiBase: string;
-  setApiBase: (url: string) => void;
-  email: string;
-  setEmail: (email: string) => void;
-  password: string;
-  setPassword: (pw: string) => void;
-  confirmPassword: string;
-  setConfirmPassword: (pw: string) => void;
-  authMode: 'login' | 'register';
-  setAuthMode: (mode: 'login' | 'register') => void;
-  rememberMe: boolean;
-  setRememberMe: (val: boolean) => void;
-  handleLogout: (clearSessions: () => void) => void;
-}
-
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+import { View } from '../types';
+import { AuthContext } from './auth-context';
 
 const DEFAULT_API_BASE = 'http://localhost:8000/api/v1';
 
@@ -48,13 +21,13 @@ function decodeStoredToken(encoded: string | undefined): string {
   if (!encoded) return '';
 
   const decoded = deobfuscate(encoded);
-  if (decoded && decoded.split('.').length === 3 && !/[\u0000-\u001f]/.test(decoded)) {
+  if (decoded && decoded.split('.').length === 3 && !containsControlCharacters(decoded)) {
     return decoded;
   }
 
   try {
     const legacy = atob(encoded);
-    if (legacy && legacy.split('.').length === 3 && !/[\u0000-\u001f]/.test(legacy)) {
+    if (legacy && legacy.split('.').length === 3 && !containsControlCharacters(legacy)) {
       return legacy;
     }
   } catch {
@@ -62,6 +35,13 @@ function decodeStoredToken(encoded: string | undefined): string {
   }
 
   return decoded;
+}
+
+function containsControlCharacters(value: string): boolean {
+  return Array.from(value).some((char) => {
+    const code = char.charCodeAt(0);
+    return code <= 31;
+  });
 }
 
 export const AuthProvider: React.FC<{ children: React.ReactNode, logDebug: (tag: string, msg: string) => void }> = ({ children, logDebug }) => {
@@ -185,10 +165,4 @@ export const AuthProvider: React.FC<{ children: React.ReactNode, logDebug: (tag:
   ]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
-};
-
-export const useAuthContext = () => {
-  const context = useContext(AuthContext);
-  if (!context) throw new Error('useAuthContext must be used within AuthProvider');
-  return context;
 };

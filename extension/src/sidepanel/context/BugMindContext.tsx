@@ -6,75 +6,87 @@ import { translateError } from '../utils/ErrorTranslator';
 import { apiRequest, readJsonResponse } from '../services/api';
 import { BugMindContext, BugMindContextType } from '../hooks/useBugMind';
 import { obfuscate } from '../utils/StorageObfuscator';
+import { DebugLog, IssueType } from '../types';
 
 // New Specialized Providers
-import { AuthProvider, useAuthContext } from './AuthProvider';
-import { JiraProvider, useJiraContext } from './JiraProvider';
-import { AIProvider, useAIContext } from './AIProvider';
+import { AuthProvider } from './AuthProvider';
+import { JiraProvider } from './JiraProvider';
+import { AIProvider } from './AIProvider';
+import { useAuthContext } from '../hooks/useAuthContext';
+import { useAIContext } from '../hooks/useAIContext';
+import { useJiraContext } from '../hooks/useJiraContext';
+
+type BackgroundMessage =
+  | { type: 'CONTEXT_UPDATED'; tabId: number; context: ReturnType<typeof useSession>['session'] }
+  | { type: 'THEME_CHANGED'; theme: 'light' | 'dark' };
+
+interface WrapperProps {
+  children: ReactNode;
+  logDebug: (tag: string, msg: string) => void;
+  internalLogs: DebugLog[];
+  showDebug: boolean;
+  setShowDebug: (v: boolean) => void;
+  clearLogs: () => void;
+}
 
 /**
  * Inner Provider that orchestrates sub-providers and handles global messaging.
  */
-const BugMindOrchestrator: React.FC<{ 
-  children: ReactNode, 
-  logDebug: (tag: string, msg: string) => void, 
-  internalLogs: any[], 
-  showDebug: boolean, 
-  setShowDebug: (v: boolean) => void, 
-  clearLogs: () => void,
-  sessionData: ReturnType<typeof useSession> 
-}> = ({ 
+const BugMindOrchestrator: React.FC<WrapperProps & {
+  sessionData: ReturnType<typeof useSession>
+}> = ({
   children, logDebug, internalLogs, showDebug, setShowDebug, clearLogs, sessionData 
 }) => {
   const auth = useAuthContext();
   const jira = useJiraContext();
   const ai = useAIContext();
+  const { currentTabId, session, sessionHydrated, updateSession, setTabSessions } = sessionData;
 
   // 1. Initial Context Hydration (Phase 1)
   useEffect(() => {
-    if (sessionData.currentTabId && sessionData.sessionHydrated) {
-      logDebug('SYS-INIT', `Hydrating context for tab ${sessionData.currentTabId}...`);
+    if (currentTabId && sessionHydrated) {
+      logDebug('SYS-INIT', `Hydrating context for tab ${currentTabId}...`);
       chrome.runtime.sendMessage({ 
         type: 'GET_CURRENT_CONTEXT', 
-        tabId: sessionData.currentTabId 
+        tabId: currentTabId 
       }, (response) => {
         if (response && !response.error) {
           logDebug('SYS-INIT-OK', 'Received initial context from background');
-          sessionData.updateSession(response);
+          updateSession(response);
         }
       });
     }
-  }, [sessionData.currentTabId, sessionData.sessionHydrated]);
+  }, [currentTabId, logDebug, sessionHydrated, updateSession]);
 
   // 2. Listen for Background Events (Phase 1)
   useEffect(() => {
-    const handleMessage = (message: any) => {
-      if (message.type === 'CONTEXT_UPDATED' && message.tabId === sessionData.currentTabId) {
+    const handleMessage = (message: BackgroundMessage) => {
+      if (message.type === 'CONTEXT_UPDATED' && message.tabId === currentTabId) {
         logDebug('SYS-SYNC', 'Received context update from background');
-        sessionData.updateSession(message.context);
+        updateSession(message.context);
       }
-      if (message.type === 'THEME_CHANGED' && sessionData.session.themeSource === 'auto') {
+      if (message.type === 'THEME_CHANGED' && session.themeSource === 'auto') {
         logDebug('SYS-THEME', `Theme update: ${message.theme}`);
-        sessionData.updateSession({ theme: message.theme });
+        updateSession({ theme: message.theme });
       }
     };
     chrome.runtime.onMessage.addListener(handleMessage);
     return () => chrome.runtime.onMessage.removeListener(handleMessage);
-  }, [sessionData.currentTabId, sessionData.session.themeSource, sessionData.updateSession, logDebug]);
+  }, [currentTabId, logDebug, session.themeSource, updateSession]);
 
   const lastStaleCheck = useRef<number | null>(null);
 
   // 3. Orchestration Logic (Sync dependencies)
   useEffect(() => {
     // CIRCUIT BREAKER: Stop all automated sync attempts if we have an error or are already loading
-    if (sessionData.session.error || sessionData.session.loading || !sessionData.sessionHydrated) return;
+    if (session.error || session.loading || !sessionHydrated) return;
 
     // 1. Logic to define defaults
     const isMain = auth.authToken && auth.globalView === 'main';
-    const hasContext = sessionData.session.issueData?.key && sessionData.session.instanceUrl;
+    const hasContext = session.issueData?.key && session.instanceUrl;
     
     // Auto-recovery if stuck without context
-    if (isMain && !hasContext && sessionData.sessionHydrated) {
+    if (isMain && !hasContext && sessionHydrated) {
       if (!lastStaleCheck.current) { lastStaleCheck.current = Date.now(); }
       const staleTime = Date.now() - lastStaleCheck.current;
       
@@ -82,7 +94,7 @@ const BugMindOrchestrator: React.FC<{
         logDebug('SYNC-STALE', 'Still no context after 2s. Re-requesting background scan...');
         chrome.runtime.sendMessage({ 
           type: 'GET_CURRENT_CONTEXT', 
-          tabId: sessionData.currentTabId,
+          tabId: currentTabId,
           force: true 
         });
         lastStaleCheck.current = Date.now();
@@ -92,55 +104,51 @@ const BugMindOrchestrator: React.FC<{
     }
 
     if (isMain && hasContext) {
-      if (!sessionData.session.jiraConnectionId) {
+      if (!session.jiraConnectionId) {
         logDebug('SYNC-CONN', 'Connection ID missing. Discovering connection...');
-        jira.checkJiraStatus(true, undefined, undefined, sessionData.session.instanceUrl || undefined, sessionData.currentTabId || undefined);
+        jira.checkJiraStatus(true, undefined, undefined, session.instanceUrl || undefined, currentTabId || undefined);
         return;
       }
 
-      const pKey = sessionData.session.issueData!.key.split('-')[0];
-      const pId = sessionData.session.issueData!.projectId;
+      const pKey = session.issueData!.key.split('-')[0];
+      const pId = session.issueData!.projectId;
 
       // Sync Issue Types
-      const hasTypes = sessionData.session.issueTypes.length > 0;
-      if (!sessionData.session.issueTypesFetched || !hasTypes) {
+      const hasTypes = session.issueTypes.length > 0;
+      if (!session.issueTypesFetched || !hasTypes) {
         logDebug('SYNC-INIT', `Refreshing issue types for ${pKey}...`);
-        jira.fetchIssueTypes(sessionData.session.jiraConnectionId, pKey, sessionData.currentTabId!, pId);
-      } else if (!sessionData.session.selectedIssueType) {
+        jira.fetchIssueTypes(session.jiraConnectionId, pKey, currentTabId!, pId);
+      } else if (!session.selectedIssueType) {
         // FAIL-SAFE: Selection missing
-        const bugType = sessionData.session.issueTypes.find((t: any) => t.name.toLowerCase().includes('bug')) || sessionData.session.issueTypes[0];
+        const bugType = session.issueTypes.find((type: IssueType) => type.name.toLowerCase().includes('bug')) || session.issueTypes[0];
         logDebug('SYNC-HEAL', `Auto-selected issue type: ${bugType.name}`);
-        sessionData.updateSession({ selectedIssueType: bugType });
+        updateSession({ selectedIssueType: bugType });
       }
 
       // Sync Metadata when issue type is selected
-      if (sessionData.session.selectedIssueType) {
-        const itId = sessionData.session.selectedIssueType.id;
-        const hasMeta = sessionData.session.jiraMetadata?.project_key === pKey && sessionData.session.jiraMetadata?.issue_type_id === itId;
+      if (session.selectedIssueType) {
+        const itId = session.selectedIssueType.id;
+        const hasMeta = session.jiraMetadata?.project_key === pKey && session.jiraMetadata?.issue_type_id === itId;
         if (!hasMeta) {
-          logDebug('SYNC-META', `Syncing schema for ${pKey}:${sessionData.session.selectedIssueType.name}`);
-          jira.fetchJiraMetadata(sessionData.session.jiraConnectionId, pKey, itId, sessionData.currentTabId!, pId);
-          jira.fetchFieldSettings(sessionData.session.jiraConnectionId, pKey, sessionData.currentTabId!, itId, pId);
+          logDebug('SYNC-META', `Syncing schema for ${pKey}:${session.selectedIssueType.name}`);
+          jira.fetchJiraMetadata(session.jiraConnectionId, pKey, itId, currentTabId!, pId);
+          jira.fetchFieldSettings(session.jiraConnectionId, pKey, currentTabId!, itId, pId);
         }
       }
     } else if (isMain) {
       const missing = [];
-      if (!sessionData.session.issueData?.key) missing.push('Issue Key (Context)');
-      if (!sessionData.session.instanceUrl) missing.push('Jira Hub URL');
+      if (!session.issueData?.key) missing.push('Issue Key (Context)');
+      if (!session.instanceUrl) missing.push('Jira Hub URL');
       if (missing.length > 0) {
         logDebug('SYNC-WAIT', `Waiting for: ${missing.join(', ')}`);
       }
     }
   }, [
     auth.authToken, auth.globalView, 
-    sessionData.session.issueData?.key, 
-    sessionData.session.jiraConnectionId,
-    sessionData.session.selectedIssueType?.id,
-    sessionData.session.issueTypesFetched,
-    sessionData.session.issueTypes.length,
-    sessionData.session.jiraMetadata?.issue_type_id,
-    sessionData.currentTabId, sessionData.sessionHydrated,
-    jira, sessionData.updateSession, logDebug
+    currentTabId, jira, logDebug, session.error, session.instanceUrl,
+    session.issueData, session.issueTypes, session.issueTypesFetched,
+    session.jiraConnectionId, session.jiraMetadata?.issue_type_id, session.jiraMetadata?.project_key,
+    session.loading, session.selectedIssueType, sessionHydrated, updateSession
   ]);
 
 
@@ -157,7 +165,7 @@ const BugMindOrchestrator: React.FC<{
       const res = await apiRequest(`${auth.apiBase}/auth/me`, { token: activeToken, onUnauthorized: auth.refreshSession });
       if (res.ok) {
         logDebug('AUTH-OK', 'Token valid. Checking Jira connection...');
-        const connected = await jira.checkJiraStatus(true, undefined, activeToken, undefined, sessionData.currentTabId || undefined);
+        const connected = await jira.checkJiraStatus(true, undefined, activeToken, undefined, currentTabId || undefined);
         
         if (connected) {
           // Only auto-redirect if we are explicitly sitting on the Auth screen
@@ -180,16 +188,16 @@ const BugMindOrchestrator: React.FC<{
     } catch (err) {
       logDebug('AUTH-ERR', `Background verification failed: ${err}`);
       // Don't force redirect on network errors, just show the error
-      sessionData.updateSession({ error: translateError(err, 'auth').description });
+      updateSession({ error: translateError(err, 'auth').description });
     } finally {
       auth.setInitializing(false);
     }
-  }, [auth.authToken, auth.globalView, auth.setGlobalView, auth.setAuthToken, auth.setInitializing, auth.apiBase, jira, sessionData.currentTabId, sessionData.updateSession, logDebug]);
+  }, [auth, currentTabId, jira, logDebug, updateSession]);
 
   const handleLogin = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
     logDebug('LOGIN-START', `Attempting login for ${auth.email}`);
-    sessionData.updateSession({ error: null, loading: true });
+    updateSession({ error: null, loading: true });
     try {
       const formData = new URLSearchParams();
       formData.append('username', auth.email);
@@ -214,28 +222,28 @@ const BugMindOrchestrator: React.FC<{
         chrome.storage.session.set({ bugmind_token: secureToken, bugmind_refresh_token: secureRefreshToken });
         
         logDebug('LOGIN-OK', 'Login successful. Verifying Jira status...');
-        const connected = await jira.checkJiraStatus(true, undefined, data.access_token, undefined, sessionData.currentTabId || undefined);
+        const connected = await jira.checkJiraStatus(true, undefined, data.access_token, undefined, currentTabId || undefined);
         
         if (connected) {
           auth.setGlobalView('main');
-          sessionData.updateSession({ success: `Welcome back, ${auth.email}!` });
+          updateSession({ success: `Welcome back, ${auth.email}!` });
         } else {
           auth.setGlobalView('setup');
-          sessionData.updateSession({ success: 'Login successful! Please connect your Jira instance.' });
+          updateSession({ success: 'Login successful! Please connect your Jira instance.' });
         }
         
         ai.fetchUsage();
         ai.fetchAISettings();
-        setTimeout(() => sessionData.updateSession({ success: null }), TIMEOUTS.NOTIFICATION_AUTO_HIDE_LONG);
+        setTimeout(() => updateSession({ success: null }), TIMEOUTS.NOTIFICATION_AUTO_HIDE_LONG);
       } else {
         throw new Error(data.detail || 'Login failed');
       }
     } catch (err) {
-      sessionData.updateSession({ error: translateError(err, 'login').description });
+      updateSession({ error: translateError(err, 'login').description });
     } finally {
-      sessionData.updateSession({ loading: false });
+      updateSession({ loading: false });
     }
-  }, [auth, jira, ai, sessionData.currentTabId, sessionData.updateSession, logDebug]);
+  }, [ai, auth, currentTabId, jira, logDebug, updateSession]);
 
 
   const value: BugMindContextType = {
@@ -243,7 +251,7 @@ const BugMindOrchestrator: React.FC<{
     updateSession: sessionData.updateSession,
     currentTabId: sessionData.currentTabId,
     setTabSessions: sessionData.setTabSessions,
-    auth: auth as any,
+    auth,
     jira: jira,
     ai: ai,
     debug: useMemo(() => ({
@@ -255,7 +263,7 @@ const BugMindOrchestrator: React.FC<{
     }), [internalLogs, showDebug, setShowDebug, logDebug, clearLogs]),
     refreshIssue: (force) => {
       logDebug('MANUAL-SYNC', 'Triggering manual context refresh via worker...');
-      chrome.runtime.sendMessage({ type: 'GET_CURRENT_CONTEXT', tabId: sessionData.currentTabId, force });
+      chrome.runtime.sendMessage({ type: 'GET_CURRENT_CONTEXT', tabId: currentTabId, force });
     },
     checkAuth,
     handleLogin,
@@ -306,11 +314,11 @@ const BugMindOrchestrator: React.FC<{
         sessionData.updateSession({ visibleFields: nf || sessionData.session.visibleFields, aiMapping: nm || sessionData.session.aiMapping, success: 'Synced' });
       } catch (err) { sessionData.updateSession({ error: 'Sync failed' }); }
     },
-    handleLogout: () => auth.handleLogout(() => sessionData.setTabSessions({})),
-    handleTabReload: () => chrome.tabs.reload(sessionData.currentTabId!),
+    handleLogout: () => auth.handleLogout(() => setTabSessions({})),
+    handleTabReload: () => chrome.tabs.reload(currentTabId!),
     completeOnboarding: async () => {
       await chrome.storage.local.set({ bugmind_onboarding_completed: true });
-      sessionData.setTabSessions(prev => {
+      setTabSessions(prev => {
         const next = { ...prev };
         Object.keys(next).forEach(id => { next[Number(id)] = { ...next[Number(id)], onboardingCompleted: true }; });
         return next;
@@ -324,7 +332,7 @@ const BugMindOrchestrator: React.FC<{
 }
 
 export const BugMindProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [internalLogs, setInternalLogs] = React.useState<{timestamp: string, tag: string, msg: string}[]>([]);
+  const [internalLogs, setInternalLogs] = React.useState<DebugLog[]>([]);
   const [showDebug, setShowDebug] = React.useState(false);
   const lastLogRef = useRef<string>('');
   const lastLogTimeRef = useRef<number>(0);
@@ -350,7 +358,7 @@ export const BugMindProvider: React.FC<{ children: ReactNode }> = ({ children })
 };
 
 // Intermediate wrapper to access Auth context before Jira/AI providers
-const AuthContextValueWrapper: React.FC<any> = ({ children, logDebug, ...props }) => {
+const AuthContextValueWrapper: React.FC<WrapperProps> = ({ children, logDebug, ...props }) => {
   const auth = useAuthContext();
   const sessionData = useSession(logDebug); // We need session in Jira/AI too
 

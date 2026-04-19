@@ -5,6 +5,22 @@ import {
   Layout, AlignLeft, ShieldAlert
 } from 'lucide-react';
 import JiraMarkdown from '../common/JiraMarkdown';
+import { ResolvedFieldValue } from '../../types';
+
+function formatResolvedFieldValue(value: ResolvedFieldValue): string {
+  if (Array.isArray(value)) {
+    return `${value.length} items selected`;
+  }
+
+  if (value && typeof value === 'object') {
+    if ('name' in value && typeof value.name === 'string') return value.name;
+    if ('value' in value && typeof value.value === 'string') return value.value;
+    if ('id' in value && typeof value.id === 'string') return value.id;
+    return JSON.stringify(value);
+  }
+
+  return String(value);
+}
 
 const PreviewView: React.FC = () => {
   const { session, updateSession, ai: { submitBugs } } = useBugMind();
@@ -12,6 +28,8 @@ const PreviewView: React.FC = () => {
   const bugIndex = session.previewBugIndex;
   const bug = bugIndex !== null ? session.bugs[bugIndex] : null;
   const resolved = session.resolvedPayload?.fields;
+  const resolvedSummary = resolved?.summary ? formatResolvedFieldValue(resolved.summary) : bug?.summary ?? '';
+  const resolvedDescription = resolved?.description ? formatResolvedFieldValue(resolved.description) : bug?.description ?? '';
   
   if (!bug) {
     return (
@@ -87,7 +105,7 @@ const PreviewView: React.FC = () => {
 
         {/* Summary */}
         <h1 className="text-xl font-black text-[var(--text-main)] leading-tight tracking-tight">
-          {resolved?.summary || bug.summary}
+          {resolvedSummary}
         </h1>
 
         <div className="h-px bg-[var(--border-main)]/50 mr-[-2rem] ml-[-2rem]"></div>
@@ -99,7 +117,7 @@ const PreviewView: React.FC = () => {
             <span className="text-[9px] font-black uppercase tracking-[0.2em]">Final Assembled Jira Description</span>
           </div>
           <div className="prose prose-invert max-w-none bg-[var(--bg-app)]/20 rounded-2xl p-4 border border-dashed border-[var(--border-main)]/50">
-            <JiraMarkdown content={resolved?.description || bug.description} />
+            <JiraMarkdown content={resolvedDescription} />
           </div>
         </div>
 
@@ -142,12 +160,7 @@ const PreviewView: React.FC = () => {
               {Object.entries(resolved).map(([key, val]) => {
                 if (key === 'summary' || key === 'description' || key === 'issuetype' || !val) return null;
                 const field = session.jiraMetadata?.fields.find(f => f.key === key);
-                
-                let displayVal = String(val);
-                if (typeof val === 'object' && val !== null) {
-                   displayVal = (val as any).name || (val as any).value || (val as any).id || JSON.stringify(val);
-                   if (Array.isArray(val)) displayVal = `${val.length} items selected`;
-                }
+                const displayVal = formatResolvedFieldValue(val);
 
                 return (
                   <div key={key} className="flex flex-col gap-1 bg-[var(--bg-app)]/40 p-3 rounded-2xl border border-[var(--border-main)]/30">

@@ -12,8 +12,24 @@ const DOMAINS = {
   ISSUES_PATH: '/issues/',
 };
 
+interface ExtractedIssueData {
+  key: string;
+  projectId: string;
+  summary: string;
+  description: string;
+  acceptanceCriteria: string;
+  typeName: string;
+  theme: 'light' | 'dark';
+}
+
+interface TabContext {
+  issueData: ExtractedIssueData | null;
+  instanceUrl: string | null;
+  error: string | null;
+}
+
 // In-memory cache for active tab context
-const tabContextCache: Record<number, any> = {};
+const tabContextCache: Record<number, TabContext> = {};
 
 chrome.runtime.onInstalled.addListener(() => {
   console.log('[BugMind-BG] Extension installed. Ready for context discovery.');

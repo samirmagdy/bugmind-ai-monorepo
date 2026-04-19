@@ -2,9 +2,9 @@ import { createContext, useContext } from 'react';
 import { useSession } from './useSession';
 import { DebugLog } from '../types';
 
-import { useAuthContext } from '../context/AuthProvider';
-import { useJiraContext } from '../context/JiraProvider';
-import { useAIContext } from '../context/AIProvider';
+import { useAuthContext } from './useAuthContext';
+import { useJiraContext } from './useJiraContext';
+import { useAIContext } from './useAIContext';
 
 export interface BugMindContextType {
   // Session & Tab

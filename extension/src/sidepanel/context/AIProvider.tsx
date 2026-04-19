@@ -1,32 +1,8 @@
-import React, { createContext, useContext, useState, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useRef, useMemo, useCallback } from 'react';
 import { TabSession, BugReport, Usage, INITIAL_SESSION, TestCase, XrayPublishResult } from '../types';
 import { apiRequest, readJsonResponse } from '../services/api';
 import { translateError } from '../utils/ErrorTranslator';
-
-interface AIContextType {
-  usage: Usage | null;
-  fetchUsage: () => Promise<void>;
-  customModel: string;
-  setCustomModel: (m: string) => void;
-  customKey: string;
-  setCustomKey: (k: string) => void;
-  hasCustomKeySaved: boolean;
-  setHasCustomKeySaved: (v: boolean) => void;
-  fetchAISettings: () => Promise<void>;
-  generateBugs: () => Promise<void>;
-  generateTestCases: () => Promise<void>;
-  handleManualGenerate: () => Promise<void>;
-  submitBugs: (index?: number) => Promise<void>;
-  searchUsers: (query: string, baseUrl: string, projectId?: string, projectKey?: string, bugIndex?: number) => Promise<void>;
-  handleUpdateBug: (index: number, updates: Partial<BugReport>) => void;
-  handleUpdateTestCase: (index: number, updates: Partial<TestCase>) => void;
-  publishTestCasesToXray: () => Promise<void>;
-  validateBug: (index: number) => Promise<boolean>;
-  preparePreviewBug: (index: number) => void;
-  fetchResolvedPayload: (index: number) => Promise<void>;
-}
-
-const AIContext = createContext<AIContextType | undefined>(undefined);
+import { AIContext } from './ai-context';
 
 export const AIProvider: React.FC<{
   children: React.ReactNode,
@@ -67,7 +43,7 @@ export const AIProvider: React.FC<{
     } finally {
       clearFetch(fetchKey);
     }
-  }, [apiBase, authToken, logDebug]);
+  }, [apiBase, authToken, logDebug, refreshAuthToken]);
 
   const fetchAISettings = useCallback(async () => {
     if (!authToken) return;
@@ -91,7 +67,7 @@ export const AIProvider: React.FC<{
       updateSession({ loading: false });
       clearFetch(fetchKey);
     }
-  }, [apiBase, authToken, logDebug, updateSession]);
+  }, [apiBase, authToken, logDebug, refreshAuthToken, updateSession]);
 
   const handleUpdateBug = useCallback((index: number, updates: Partial<BugReport>) => {
     if (!currentTabId) return;
@@ -333,7 +309,7 @@ export const AIProvider: React.FC<{
     } finally {
       updateSession({ loading: false });
     }
-  }, [apiBase, authToken, fetchUsage, logDebug, refreshAuthToken, session.bugs, session.issueData, session.manualDesc, updateSession]);
+  }, [apiBase, authToken, fetchUsage, logDebug, refreshAuthToken, session.bugs, session.issueData, session.jiraConnectionId, session.manualDesc, session.selectedIssueType?.id, updateSession]);
 
   const validateBug = useCallback(async (index: number): Promise<boolean> => {
     const bug = session.bugs[index];
@@ -503,10 +479,4 @@ export const AIProvider: React.FC<{
   }), [usage, fetchUsage, customModel, customKey, hasCustomKeySaved, fetchAISettings, generateBugs, generateTestCases, handleManualGenerate, submitBugs, searchUsers, handleUpdateBug, handleUpdateTestCase, publishTestCasesToXray, validateBug, preparePreviewBug, fetchResolvedPayload]);
 
   return <AIContext.Provider value={value}>{children}</AIContext.Provider>;
-};
-
-export const useAIContext = () => {
-  const context = useContext(AIContext);
-  if (!context) throw new Error('useAIContext must be used within AIProvider');
-  return context;
 };

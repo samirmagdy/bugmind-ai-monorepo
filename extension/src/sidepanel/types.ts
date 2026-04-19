@@ -54,6 +54,26 @@ export interface BugReport {
   lastSearchedQuery?: string;
 }
 
+export type ResolvedFieldObject = {
+  id?: string;
+  name?: string;
+  value?: string;
+  [key: string]: unknown;
+};
+
+export type ResolvedFieldValue =
+  | string
+  | number
+  | boolean
+  | null
+  | ResolvedFieldObject
+  | ResolvedFieldObject[];
+
+export interface ResolvedPayload {
+  fields: Record<string, ResolvedFieldValue>;
+  [key: string]: unknown;
+}
+
 export interface TabSession {
   view: View;
   loading: boolean;
@@ -91,7 +111,7 @@ export interface TabSession {
   xrayWarnings: string[];
   previewBugIndex: number | null;
   validationErrors: string[];
-  resolvedPayload: Record<string, any> | null;
+  resolvedPayload: ResolvedPayload | null;
 }
 
 export interface JiraConnection {

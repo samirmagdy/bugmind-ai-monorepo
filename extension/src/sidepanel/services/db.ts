@@ -78,7 +78,7 @@ export class BugMindDB {
     });
   }
 
-  async saveMetadata(key: string, data: any): Promise<void> {
+  async saveMetadata<T>(key: string, data: T): Promise<void> {
     await this.init();
     return new Promise((resolve, reject) => {
       if (!this.db) return reject('DB not initialized');
@@ -91,7 +91,7 @@ export class BugMindDB {
     });
   }
 
-  async getMetadata(key: string): Promise<any | null> {
+  async getMetadata<T>(key: string): Promise<T | null> {
     await this.init();
     return new Promise((resolve, reject) => {
       if (!this.db) return reject('DB not initialized');
@@ -99,7 +99,7 @@ export class BugMindDB {
       const store = transaction.objectStore(META_STORE);
       const request = store.get(key);
 
-      request.onsuccess = () => resolve(request.result || null);
+      request.onsuccess = () => resolve((request.result as T | undefined) || null);
       request.onerror = () => reject(request.error);
     });
   }

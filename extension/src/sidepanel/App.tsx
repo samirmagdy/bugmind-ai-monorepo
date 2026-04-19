@@ -22,6 +22,7 @@ export default function App() {
   const { 
     session, updateSession, auth, initializing, checkAuth, refreshIssue, debug, handleLogout, sessionHydrated 
   } = useBugMind();
+  const debugLog = debug.log;
   
   const lastEffectiveView = useRef<string | null>(null);
 
@@ -41,13 +42,13 @@ export default function App() {
     const isMain = auth.authToken && session.view === 'main' && auth.globalView === 'main';
     
     if (isMain && lastEffectiveView.current !== activeView) {
-      debug.log('INIT-SYNC', 'App entering main view, triggering refresh...');
+      debugLog('INIT-SYNC', 'App entering main view, triggering refresh...');
       refreshIssue();
     }
     
     // Track current view for next transition
     lastEffectiveView.current = activeView;
-  }, [auth.authToken, session.view, auth.globalView, activeView, refreshIssue, debug.log]);
+  }, [activeView, auth.authToken, auth.globalView, debugLog, refreshIssue, session.view]);
 
 
 
