@@ -162,7 +162,7 @@ export const AIProvider: React.FC<{
     } finally {
       updateSession({ loading: false }, currentTabId);
     }
-  }, [apiBase, authToken, buildIssueContext, currentTabId, logDebug, refreshAuthToken, sanitizeExtraFields, session.issueData, session.jiraConnectionId, session.selectedIssueType, updateSession]);
+  }, [apiBase, authToken, buildIssueContext, currentTabId, logDebug, refreshAuthToken, sanitizeExtraFields, session.instanceUrl, session.issueData, session.jiraConnectionId, session.selectedIssueType, updateSession]);
 
   const generateTestCases = useCallback(async () => {
     if (!currentTabId || !session.issueData || !session.jiraConnectionId) return;
@@ -203,7 +203,7 @@ export const AIProvider: React.FC<{
     } finally {
       updateSession({ loading: false }, currentTabId);
     }
-  }, [apiBase, authToken, buildIssueContext, currentTabId, fetchUsage, refreshAuthToken, session.issueData, session.jiraConnectionId, session.selectedIssueType, updateSession]);
+  }, [apiBase, authToken, buildIssueContext, currentTabId, fetchUsage, refreshAuthToken, session.instanceUrl, session.issueData, session.jiraConnectionId, session.selectedIssueType, updateSession]);
 
   const publishTestCasesToXray = useCallback(async () => {
     if (!currentTabId || !session.issueData || !session.jiraConnectionId || !session.testCases.length) return;
@@ -304,7 +304,7 @@ export const AIProvider: React.FC<{
     } finally {
       updateSession({ loading: false });
     }
-  }, [apiBase, authToken, buildIssueContext, fetchUsage, logDebug, refreshAuthToken, sanitizeExtraFields, session.bugs, session.issueData, session.jiraConnectionId, session.manualDesc, session.selectedIssueType?.id, updateSession]);
+  }, [apiBase, authToken, buildIssueContext, fetchUsage, logDebug, refreshAuthToken, sanitizeExtraFields, session.bugs, session.instanceUrl, session.issueData, session.jiraConnectionId, session.manualDesc, session.selectedIssueType?.id, updateSession]);
 
   const validateBug = useCallback(async (index: number): Promise<boolean> => {
     const bug = session.bugs[index];
@@ -345,7 +345,7 @@ export const AIProvider: React.FC<{
     } finally {
       updateSession({ loading: false });
     }
-  }, [apiBase, authToken, refreshAuthToken, session.bugs, session.issueData, session.jiraConnectionId, session.selectedIssueType, updateSession]);
+  }, [apiBase, authToken, refreshAuthToken, session.bugs, session.instanceUrl, session.issueData, session.jiraConnectionId, session.selectedIssueType, updateSession]);
 
   const fetchResolvedPayload = useCallback(async (index: number) => {
     const bug = session.bugs[index];
@@ -374,7 +374,7 @@ export const AIProvider: React.FC<{
     } catch (err) {
       console.error('Failed to resolve bug payload', err);
     }
-  }, [apiBase, authToken, refreshAuthToken, session.bugs, session.issueData, session.jiraConnectionId, session.selectedIssueType, updateSession]);
+  }, [apiBase, authToken, refreshAuthToken, session.bugs, session.instanceUrl, session.issueData, session.jiraConnectionId, session.selectedIssueType, updateSession]);
 
   const preparePreviewBug = useCallback((index: number) => {
     updateSession({ view: 'preview', previewBugIndex: index, validationErrors: [], resolvedPayload: null });
@@ -419,7 +419,7 @@ export const AIProvider: React.FC<{
     } finally {
       updateSession({ loading: false });
     }
-  }, [authToken, apiBase, refreshAuthToken, session.bugs, session.issueData, session.jiraConnectionId, session.selectedIssueType, updateSession]);
+  }, [authToken, apiBase, refreshAuthToken, session.bugs, session.instanceUrl, session.issueData, session.jiraConnectionId, session.selectedIssueType, updateSession]);
 
   const searchUsers = useCallback(async (query: string, bugIndex?: number) => {
     if (query.length < 2 || !session.jiraConnectionId) return;
