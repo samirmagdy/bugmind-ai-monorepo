@@ -2,7 +2,8 @@ import { BugReport } from '../types';
 
 const DB_NAME = 'BugMindDB';
 const STORE_NAME = 'tab_bugs';
-const DB_VERSION = 1;
+const META_STORE = 'jira_metadata';
+const DB_VERSION = 2;
 
 export class BugMindDB {
   private db: IDBDatabase | null = null;
@@ -17,9 +18,13 @@ export class BugMindDB {
         const target = event.target as IDBOpenDBRequest;
         const db = target.result;
         if (!db.objectStoreNames.contains(STORE_NAME)) {
-          db.createObjectStore(STORE_NAME); // Key will be tabId (number)
+          db.createObjectStore(STORE_NAME);
+        }
+        if (!db.objectStoreNames.contains(META_STORE)) {
+          db.createObjectStore(META_STORE); // Key will be baseUrl + projectId + issueTypeId
         }
       };
+
 
       request.onsuccess = (event: Event) => {
         const target = event.target as IDBOpenDBRequest;
@@ -72,6 +77,33 @@ export class BugMindDB {
       request.onerror = () => reject(request.error);
     });
   }
+
+  async saveMetadata(key: string, data: any): Promise<void> {
+    await this.init();
+    return new Promise((resolve, reject) => {
+      if (!this.db) return reject('DB not initialized');
+      const transaction = this.db.transaction([META_STORE], 'readwrite');
+      const store = transaction.objectStore(META_STORE);
+      const request = store.put(data, key);
+
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async getMetadata(key: string): Promise<any | null> {
+    await this.init();
+    return new Promise((resolve, reject) => {
+      if (!this.db) return reject('DB not initialized');
+      const transaction = this.db.transaction([META_STORE], 'readonly');
+      const store = transaction.objectStore(META_STORE);
+      const request = store.get(key);
+
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => reject(request.error);
+    });
+  }
 }
+
 
 export const dbService = new BugMindDB();

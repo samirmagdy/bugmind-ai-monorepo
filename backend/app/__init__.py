@@ -1,0 +1,1 @@
+"""BugMind backend application package."""

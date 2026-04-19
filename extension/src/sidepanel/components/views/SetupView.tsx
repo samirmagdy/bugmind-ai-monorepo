@@ -1,30 +1,66 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useBugMind } from '../../hooks/useBugMind';
-import { ExternalLink } from 'lucide-react';
+import { ExternalLink, ArrowLeft } from 'lucide-react';
 
 const SetupView: React.FC = () => {
   const { 
-    jira: { 
-      jiraPlatform, setJiraPlatform, cloudUrl, setCloudUrl, serverUrl, setServerUrl,
-      cloudUsername, setCloudUsername, serverUsername, setServerUsername,
-      cloudToken, setCloudToken, serverToken, setServerToken, verifySsl, setVerifySsl,
-      saveJiraConfig
-    },
-    auth: { apiBase, setApiBase },
-    handleJiraConnect
+    auth: { apiBase, setApiBase, setGlobalView },
+    jira,
+    session,
+    updateSession
   } = useBugMind();
 
+  // Local form state
+  const [platform, setPlatform] = useState<'cloud' | 'server'>('cloud');
+  const [url, setUrl] = useState('');
+  const [username, setUsername] = useState('');
+  const [token, setToken] = useState('');
+  const [verifySsl, setVerifySsl] = useState(true);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const connected = await jira.createConnection({
+      auth_type: platform,
+      base_url: url,
+      username,
+      token,
+      verify_ssl: verifySsl
+    });
+
+    if (connected) {
+      updateSession({ success: 'Connection saved successfully.' });
+      setGlobalView('main');
+    } else {
+      updateSession({ error: 'Failed to save Jira connection.' });
+    }
+  };
+
+  const hasConnections = (session.connections?.length || 0) > 0;
+
   return (
-    <div className="space-y-6 pt-4">
-      <div className="space-y-2">
-        <h2 className="text-xl font-bold text-[var(--text-main)]">Project Setup</h2>
-        <p className="text-sm text-[var(--text-muted)] opacity-80">Configure your BugMind connection settings.</p>
+    <div className="space-y-6 pt-4 animate-in slide-in-from-right-4 duration-300">
+      <div className="flex items-center gap-3">
+        {hasConnections && (
+          <button 
+            onClick={() => setGlobalView('main')}
+            className="p-2 hover:bg-[var(--bg-input)] rounded-full transition-colors text-[var(--text-muted)] hover:text-[var(--text-main)]"
+            title="Back to Main"
+          >
+            <ArrowLeft size={18} />
+          </button>
+        )}
+        <div className="space-y-1">
+          <h2 className="text-xl font-bold text-[var(--text-main)]">Add Connection</h2>
+          <p className="text-sm text-[var(--text-muted)] opacity-80">Link a new Jira instance to BugMind.</p>
+        </div>
       </div>
-      <form onSubmit={handleJiraConnect} className="space-y-4">
+
+      <form onSubmit={handleSubmit} className="space-y-4">
+        {/* Backend Endpoint - Only show if not configured or in advanced mode? Actually SetupView is for first time too */}
         <div className="p-4 bg-[var(--bg-card)] rounded-2xl border border-[var(--border-main)] shadow-[var(--shadow-sm)] space-y-3">
           <div className="flex items-center gap-2 mb-1">
             <div className="h-1 w-1 bg-[var(--status-info)] rounded-full"></div>
-            <span className="text-[10px] font-black uppercase text-[var(--status-info)] tracking-widest">Backend Configuration</span>
+            <span className="text-[10px] font-black uppercase text-[var(--status-info)] tracking-widest">Global Settings</span>
           </div>
           <div className="space-y-1.5">
             <label className="text-[11px] font-bold uppercase tracking-widest text-[var(--text-muted)] ml-1">BugMind API Endpoint</label>
@@ -34,28 +70,27 @@ const SetupView: React.FC = () => {
               onChange={e => {
                 const val = e.target.value;
                 setApiBase(val);
-                chrome.storage.local.set({ 'bugmind_api_base': val });
+                chrome.storage.local.set({ 'bugmind_api_base': val.trim().replace(/\/+$/, '') });
               }}
-              className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-4 py-3 outline-none focus:border-[var(--status-info)]/50 transition-all text-sm text-[var(--text-main)] placeholder:text-[var(--text-muted)] placeholder:opacity-50"
-              placeholder="https://api.bugmind.ai/api"
+              className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-4 py-3 outline-none focus:border-[var(--status-info)]/50 transition-all text-sm text-[var(--text-main)] placeholder:text-[var(--text-muted)]"
+              placeholder="https://api.bugmind.ai/api/v1"
               required
             />
-            <p className="text-[10px] text-[var(--text-muted)] ml-1 opacity-70">Must end with /api</p>
           </div>
         </div>
 
-        <div className="flex bg-[var(--bg-input)] p-1 rounded-xl border border-[var(--border-main)] mb-4 shadow-[var(--shadow-sm)]">
+        <div className="flex bg-[var(--bg-input)] p-1 rounded-xl border border-[var(--border-main)] shadow-[var(--shadow-sm)]">
           <button 
             type="button" 
-            onClick={() => { setJiraPlatform('cloud'); saveJiraConfig({ platform: 'cloud' }); }}
-            className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${jiraPlatform === 'cloud' ? 'bg-[var(--accent)] text-white shadow-lg' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}
+            onClick={() => setPlatform('cloud')}
+            className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${platform === 'cloud' ? 'bg-[var(--accent)] text-white shadow-lg' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}
           >
             Jira Cloud
           </button>
           <button 
             type="button" 
-            onClick={() => { setJiraPlatform('server'); saveJiraConfig({ platform: 'server' }); }}
-            className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${jiraPlatform === 'server' ? 'bg-[var(--accent)] text-white shadow-lg' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}
+            onClick={() => setPlatform('server')}
+            className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${platform === 'server' ? 'bg-[var(--accent)] text-white shadow-lg' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}
           >
             Server / DC
           </button>
@@ -65,77 +100,68 @@ const SetupView: React.FC = () => {
           <label className="text-[11px] font-bold uppercase tracking-widest text-[var(--text-muted)] ml-1">Jira Base URL</label>
           <input 
             type="url" 
-            value={jiraPlatform === 'cloud' ? cloudUrl : serverUrl} 
-            onChange={e => {
-              const val = e.target.value;
-              if (jiraPlatform === 'cloud') { setCloudUrl(val); saveJiraConfig({ cloudUrl: val }); }
-              else { setServerUrl(val); saveJiraConfig({ serverUrl: val }); }
-            }}
-            className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-4 py-3 outline-none focus:border-[var(--status-info)]/50 transition-all text-sm text-[var(--text-main)] placeholder:text-[var(--text-muted)] placeholder:opacity-50"
-            placeholder={jiraPlatform === 'cloud' ? "https://company.atlassian.net" : "http://jira.internal.com"}
+            value={url} 
+            onChange={e => setUrl(e.target.value)}
+            className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-4 py-3 outline-none focus:border-[var(--status-info)]/50 transition-all text-sm text-[var(--text-main)]"
+            placeholder={platform === 'cloud' ? "https://company.atlassian.net" : "http://jira.internal.com"}
             required
           />
         </div>
+
         <div className="space-y-1.5">
           <label className="text-[11px] font-bold uppercase tracking-widest text-[var(--text-muted)] ml-1">Jira Email / Username</label>
           <input 
             type="text" 
-            value={jiraPlatform === 'cloud' ? cloudUsername : serverUsername} 
-            onChange={e => {
-              const val = e.target.value;
-              if (jiraPlatform === 'cloud') { setCloudUsername(val); saveJiraConfig({ cloudUsername: val }); }
-              else { setServerUsername(val); saveJiraConfig({ serverUsername: val }); }
-            }}
-            className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-4 py-3 outline-none focus:border-[var(--status-info)]/50 transition-all text-sm text-[var(--text-main)] placeholder:text-[var(--text-muted)] placeholder:opacity-50 focus:scale-[1.01] focus:ring-1 focus:ring-[var(--status-info)]/10"
-            placeholder="QA Lead / email@company.com"
+            value={username} 
+            onChange={e => setUsername(e.target.value)}
+            className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-4 py-3 outline-none focus:border-[var(--status-info)]/50 transition-all text-sm text-[var(--text-main)]"
+            placeholder="email@company.com"
             required
           />
         </div>
+
         <div className="space-y-1.5">
           <div className="flex justify-between items-center px-1">
             <label className="text-[11px] font-bold uppercase tracking-widest text-[var(--text-muted)]">API Token / PAT</label>
             <a 
-              href={jiraPlatform === 'cloud' ? "https://id.atlassian.com/manage-profile/security/api-tokens" : "https://confluence.atlassian.com/x/8Y9XN"} 
+              href={platform === 'cloud' ? "https://id.atlassian.com/manage-profile/security/api-tokens" : "https://confluence.atlassian.com/x/8Y9XN"} 
               target="_blank" 
               rel="noopener noreferrer"
               className="text-[10px] text-[var(--status-info)] hover:underline flex items-center gap-1 font-bold"
             >
-              Get {jiraPlatform === 'cloud' ? 'Token' : 'PAT'}
+              Get {platform === 'cloud' ? 'Token' : 'PAT'}
               <ExternalLink size={10} />
             </a>
           </div>
           <input 
             type="password" 
-            value={jiraPlatform === 'cloud' ? cloudToken : serverToken} 
-            onChange={e => {
-              const val = e.target.value;
-              if (jiraPlatform === 'cloud') { setCloudToken(val); saveJiraConfig({ cloudToken: val }); }
-              else { setServerToken(val); saveJiraConfig({ serverToken: val }); }
-            }}
-            className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-4 py-3 outline-none focus:border-[var(--status-info)]/50 transition-all text-sm text-[var(--text-main)] placeholder:text-[var(--text-muted)] placeholder:opacity-50 focus:scale-[1.01] focus:ring-1 focus:ring-[var(--status-info)]/10"
-            placeholder="ATATT3xFfGF..."
+            value={token} 
+            onChange={e => setToken(e.target.value)}
+            className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-4 py-3 outline-none focus:border-[var(--status-info)]/50 transition-all text-sm text-[var(--text-main)]"
+            placeholder="••••••••••••••••"
             required
           />
         </div>
+
         <div className="flex items-center gap-3 px-1 py-1">
           <input 
             type="checkbox" 
             id="verify-ssl-setup"
             checked={verifySsl} 
-            onChange={e => {
-              const val = e.target.checked;
-              setVerifySsl(val);
-              saveJiraConfig({ verifySsl: val });
-            }}
-            className="w-4 h-4 rounded border-[var(--border-main)] bg-[var(--bg-input)] text-[var(--status-info)] focus:ring-[var(--status-info)]/50"
+            onChange={e => setVerifySsl(e.target.checked)}
+            className="w-4 h-4 rounded border-[var(--border-main)] bg-[var(--bg-input)] text-[var(--status-info)]"
           />
-          <label htmlFor="verify-ssl-setup" className="text-xs text-[var(--text-muted)] cursor-pointer flex items-center gap-1.5">
-            Enforce SSL Security 
-            <span className="text-[9px] opacity-60">(Recommended for Production)</span>
+          <label htmlFor="verify-ssl-setup" className="text-xs text-[var(--text-muted)] cursor-pointer">
+            Enforce SSL Security
           </label>
         </div>
-        <button type="submit" className="w-full bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-bold py-3.5 rounded-xl transition-all shadow-lg shadow-[var(--accent)]/20">
-          Save Connection
+
+        <button 
+          type="submit" 
+          disabled={jira.isInitializing}
+          className="w-full bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-bold py-3.5 rounded-xl transition-all shadow-lg"
+        >
+          {jira.isInitializing ? 'Connecting...' : 'Test & Save Connection'}
         </button>
       </form>
     </div>

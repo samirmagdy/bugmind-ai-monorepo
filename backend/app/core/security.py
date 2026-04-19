@@ -2,34 +2,53 @@ from datetime import datetime, timedelta
 from typing import Any, Union
 from jose import jwt
 from passlib.context import CryptContext
-import os
-from dotenv import load_dotenv
-
-load_dotenv()
+from cryptography.fernet import Fernet
+from app.core.config import settings
 
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
-SECRET_KEY = os.getenv("SECRET_KEY")
-if not SECRET_KEY:
-    # Allow local development without a formal secret, but warn heavily
-    if os.getenv("ENV") == "production":
-        raise RuntimeError("FATAL: SECRET_KEY not provided in production environment.")
-    SECRET_KEY = "insecure-local-dev-key"
+# Base64-encoded 32-byte key is needed for Fernet
+_placeholders = [
+    "32-byte-base64-encryption-key-for-jira-tokens",
+    "CHANGE_THIS_IN_PRODUCTION_MUST_BE_32_BYTES_!"
+]
+if not settings.ENCRYPTION_KEY or settings.ENCRYPTION_KEY in _placeholders:
+    # Fails loudly to prevent using placeholder keys which lead to data loss
+    print(f"DEBUG: Current ENCRYPTION_KEY: '{settings.ENCRYPTION_KEY}'")
+    raise ValueError("CRITICAL: ENCRYPTION_KEY is missing or using a placeholder value in .env. Please set a valid Fernet key.")
 
-ALGORITHM = os.getenv("ALGORITHM", "HS256")
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 1440)) # 24 Hours
+try:
+    cipher_suite = Fernet(settings.ENCRYPTION_KEY.encode())
+except Exception as e:
+    raise ValueError(f"CRITICAL: Invalid ENCRYPTION_KEY format. Must be a valid Fernet key. Error: {str(e)}")
+
+ALGORITHM = "HS256"
 
 def create_access_token(subject: Union[str, Any], expires_delta: timedelta = None) -> str:
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        expire = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode = {"exp": expire, "sub": str(subject)}
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
+
+def create_refresh_token(subject: Union[str, Any], expires_delta: timedelta = None) -> str:
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+    to_encode = {"exp": expire, "sub": str(subject), "type": "refresh"}
+    return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=ALGORITHM)
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
 def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
+
+def encrypt_credential(credential: str) -> str:
+    return cipher_suite.encrypt(credential.encode()).decode()
+
+def decrypt_credential(encrypted_credential: str) -> str:
+    return cipher_suite.decrypt(encrypted_credential.encode()).decode()

@@ -1,14 +1,27 @@
-import { X, ChevronDown, Loader2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { X, ChevronDown, Loader2, AlertCircle, RefreshCw, Pencil, FolderOpen, Save } from 'lucide-react';
 import { useBugMind } from '../../hooks/useBugMind';
-import { IssueType, JiraField } from '../../types';
+import { IssueType, JiraField, JiraProject } from '../../types';
 
 const SettingsView: React.FC = () => {
   const { 
     session, updateSession, handleSaveSettings, saveFieldSettings, auth: { setGlobalView },
     ai: { customKey, setCustomKey, hasCustomKeySaved, customModel, setCustomModel },
-    jira,
-    auth: { apiBase, setApiBase }
+    jira, refreshIssue, currentTabId,
+    auth: { apiBase, setApiBase },
+    debug: { log }
   } = useBugMind();
+  const [editingConnectionId, setEditingConnectionId] = useState<number | null>(null);
+  const [connectionDrafts, setConnectionDrafts] = useState<Record<number, { auth_type: string; host_url: string; username: string; token: string; verify_ssl: boolean }>>({});
+  const [projectsByConnection, setProjectsByConnection] = useState<Record<number, JiraProject[]>>({});
+
+  // Auto-refetch when entering Jira tab if empty
+  useEffect(() => {
+    if (session.settingsTab === 'jira' && session.issueTypes.length === 0 && !session.issueTypesFetched && !session.error && session.instanceUrl && !session.loading) {
+      log('SETTINGS-AUTO', 'Mapping tab empty, triggering background sync...');
+      refreshIssue(true);
+    }
+  }, [session.settingsTab, session.issueTypes.length, session.issueTypesFetched, session.error, session.instanceUrl, session.loading, refreshIssue, log]);
 
   return (
     <div className="space-y-6 pt-4 animate-in slide-in-from-right-4 duration-300">
@@ -22,15 +35,21 @@ const SettingsView: React.FC = () => {
       <div className="flex bg-[var(--bg-input)] p-1 rounded-xl border border-[var(--border-main)] mb-6 shadow-[var(--shadow-sm)]">
         <button 
           onClick={() => updateSession({ settingsTab: 'ai' })}
-          className={`flex-1 py-2 text-[11px] font-black uppercase tracking-widest rounded-lg transition-all ${session.settingsTab === 'ai' ? 'bg-[var(--accent)] text-white shadow-lg' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}
+          className={`flex-1 py-2 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${session.settingsTab === 'ai' ? 'bg-[var(--accent)] text-white shadow-lg' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}
         >
-          AI Configuration
+          AI
         </button>
         <button 
           onClick={() => updateSession({ settingsTab: 'jira' })}
-          className={`flex-1 py-2 text-[11px] font-black uppercase tracking-widest rounded-lg transition-all ${session.settingsTab === 'jira' ? 'bg-[var(--accent)] text-white shadow-lg' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}
+          className={`flex-1 py-2 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${session.settingsTab === 'jira' ? 'bg-[var(--accent)] text-white shadow-lg' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}
         >
-          Bug Field Mapping
+          Field Mapping
+        </button>
+        <button 
+          onClick={() => updateSession({ settingsTab: 'connections' })}
+          className={`flex-1 py-2 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${session.settingsTab === 'connections' ? 'bg-[var(--accent)] text-white shadow-lg' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}
+        >
+          Connections
         </button>
       </div>
 
@@ -49,10 +68,10 @@ const SettingsView: React.FC = () => {
                 onChange={e => {
                   const val = e.target.value;
                   setApiBase(val);
-                  chrome.storage.local.set({ 'bugmind_api_base': val });
+                  chrome.storage.local.set({ 'bugmind_api_base': val.trim().replace(/\/+$/, '') });
                 }}
                 className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-4 py-3 outline-none focus:border-[var(--status-info)]/50 transition-all text-sm text-[var(--text-main)] placeholder:text-[var(--text-muted)] placeholder:opacity-50"
-                placeholder="https://api.bugmind.ai/api"
+                placeholder="https://api.bugmind.ai/api/v1"
               />
             </div>
           </div>
@@ -95,6 +114,186 @@ const SettingsView: React.FC = () => {
             </div>
           </form>
         </>
+      ) : session.settingsTab === 'connections' ? (
+        <div className="space-y-4 animate-in fade-in duration-300">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-xs font-black uppercase text-[var(--text-muted)] tracking-widest">Active Connections</h3>
+            <button 
+              onClick={() => setGlobalView('setup')}
+              className="text-[10px] font-bold text-[var(--accent)] hover:underline"
+            >
+              + Add Connection
+            </button>
+          </div>
+
+          <div className="space-y-3">
+            {(!session.connections || session.connections.length === 0) ? (
+              <div className="py-8 text-center bg-[var(--bg-input)] rounded-2xl border border-dashed border-[var(--border-main)]">
+                <p className="text-xs text-[var(--text-muted)]">No connections found.</p>
+              </div>
+            ) : (
+              session.connections.map((conn) => (
+                <div 
+                  key={conn.id} 
+                  className={`p-4 rounded-2xl border transition-all ${
+                    session.jiraConnectionId === conn.id 
+                      ? 'bg-[var(--accent)]/5 border-[var(--accent)] shadow-md' 
+                      : 'bg-[var(--bg-card)] border-[var(--border-main)]'
+                  }`}
+                >
+                  <div className="flex justify-between items-start mb-2">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-[var(--bg-input)] flex items-center justify-center border border-[var(--border-main)]">
+                        {conn.icon_url ? (
+                          <img src={conn.icon_url} className="w-6 h-6 rounded-md" alt="" />
+                        ) : (
+                          <div className="w-2 h-2 rounded-full bg-[var(--accent)]" />
+                        )}
+                      </div>
+                      <div>
+                        <p className="text-sm font-bold text-[var(--text-main)] leading-tight">{conn.username}</p>
+                        <p className="text-[10px] text-[var(--text-muted)] truncate max-w-[150px]">{conn.host_url}</p>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button 
+                        onClick={() => {
+                          setEditingConnectionId(conn.id);
+                          setConnectionDrafts(prev => ({
+                            ...prev,
+                            [conn.id]: prev[conn.id] || {
+                              auth_type: conn.auth_type,
+                              host_url: conn.host_url,
+                              username: conn.username,
+                              token: '',
+                              verify_ssl: conn.verify_ssl ?? true
+                            }
+                          }));
+                        }}
+                        className="p-1.5 hover:bg-[var(--accent)]/10 text-[var(--accent)] rounded-lg transition-all"
+                        title="Edit connection"
+                      >
+                        <Pencil size={14} />
+                      </button>
+                      {session.jiraConnectionId !== conn.id && (
+                        <button 
+                          onClick={() => jira.setActiveConnection(conn.id, conn.host_url)}
+                          className="p-1.5 hover:bg-[var(--accent)]/10 text-[var(--accent)] rounded-lg transition-all"
+                          title="Set as Active"
+                        >
+                          <RefreshCw size={14} />
+                        </button>
+                      )}
+                      <button 
+                        onClick={async () => {
+                          const projects = await jira.fetchProjects(conn.id);
+                          setProjectsByConnection(prev => ({ ...prev, [conn.id]: projects }));
+                        }}
+                        className="p-1.5 hover:bg-[var(--accent)]/10 text-[var(--accent)] rounded-lg transition-all"
+                        title="Load projects"
+                      >
+                        <FolderOpen size={14} />
+                      </button>
+                      <button 
+                        onClick={() => jira.deleteConnection(conn.id)}
+                        className="p-1.5 hover:bg-red-500/10 text-red-500 rounded-lg transition-all"
+                        title="Delete connection"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  </div>
+                  {session.jiraConnectionId === conn.id && (
+                    <div className="mt-2 pt-2 border-t border-[var(--accent)]/10 flex items-center gap-1.5">
+                      <div className="w-1.5 h-1.5 rounded-full bg-[var(--status-success)]" />
+                      <span className="text-[10px] font-bold text-[var(--status-success)] uppercase tracking-widest">Active Connection</span>
+                    </div>
+                  )}
+                  {projectsByConnection[conn.id] && (
+                    <div className="mt-3 pt-3 border-t border-[var(--border-main)] space-y-2">
+                      <div className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Accessible Projects</div>
+                      <div className="space-y-1 max-h-[120px] overflow-y-auto custom-scrollbar">
+                        {projectsByConnection[conn.id].slice(0, 10).map(project => (
+                          <div key={`${conn.id}-${project.id}`} className="text-[11px] text-[var(--text-muted)]">
+                            <span className="font-bold text-[var(--text-main)]">{project.key}</span> {project.name}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {editingConnectionId === conn.id && connectionDrafts[conn.id] && (
+                    <form
+                      onSubmit={async (e) => {
+                        e.preventDefault();
+                        const draft = connectionDrafts[conn.id];
+                        const ok = await jira.updateConnection(conn.id, {
+                          auth_type: draft.auth_type,
+                          host_url: draft.host_url.trim(),
+                          username: draft.username.trim(),
+                          token: draft.token.trim() || undefined,
+                          verify_ssl: draft.verify_ssl
+                        });
+                        if (ok) {
+                          setEditingConnectionId(null);
+                          const projects = await jira.fetchProjects(conn.id);
+                          setProjectsByConnection(prev => ({ ...prev, [conn.id]: projects }));
+                        }
+                      }}
+                      className="mt-3 pt-3 border-t border-[var(--border-main)] space-y-3"
+                    >
+                      <select
+                        value={connectionDrafts[conn.id].auth_type}
+                        onChange={(e) => setConnectionDrafts(prev => ({ ...prev, [conn.id]: { ...prev[conn.id], auth_type: e.target.value } }))}
+                        className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-3 py-2 text-xs text-[var(--text-main)]"
+                      >
+                        <option value="cloud">Jira Cloud</option>
+                        <option value="server">Server / DC</option>
+                      </select>
+                      <input
+                        type="url"
+                        value={connectionDrafts[conn.id].host_url}
+                        onChange={(e) => setConnectionDrafts(prev => ({ ...prev, [conn.id]: { ...prev[conn.id], host_url: e.target.value } }))}
+                        className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-3 py-2 text-xs text-[var(--text-main)]"
+                        placeholder="https://company.atlassian.net"
+                      />
+                      <input
+                        type="text"
+                        value={connectionDrafts[conn.id].username}
+                        onChange={(e) => setConnectionDrafts(prev => ({ ...prev, [conn.id]: { ...prev[conn.id], username: e.target.value } }))}
+                        className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-3 py-2 text-xs text-[var(--text-main)]"
+                        placeholder="Email / username"
+                      />
+                      <input
+                        type="password"
+                        value={connectionDrafts[conn.id].token}
+                        onChange={(e) => setConnectionDrafts(prev => ({ ...prev, [conn.id]: { ...prev[conn.id], token: e.target.value } }))}
+                        className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-3 py-2 text-xs text-[var(--text-main)]"
+                        placeholder="Leave blank to keep current token"
+                      />
+                      <label className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
+                        <input
+                          type="checkbox"
+                          checked={connectionDrafts[conn.id].verify_ssl}
+                          onChange={(e) => setConnectionDrafts(prev => ({ ...prev, [conn.id]: { ...prev[conn.id], verify_ssl: e.target.checked } }))}
+                        />
+                        Verify SSL certificates
+                      </label>
+                      <div className="flex gap-2">
+                        <button type="submit" className="flex-1 bg-[var(--accent)] text-white font-bold py-2 rounded-xl text-xs flex items-center justify-center gap-2">
+                          <Save size={12} />
+                          Save Connection
+                        </button>
+                        <button type="button" onClick={() => setEditingConnectionId(null)} className="px-3 bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl text-xs">
+                          Cancel
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
       ) : (
         <div className="space-y-6 animate-in fade-in duration-300">
           <div className="bg-[var(--status-success)]/5 border border-[var(--status-success)]/10 p-4 rounded-xl space-y-2 mb-2 shadow-inner">
@@ -107,20 +306,32 @@ const SettingsView: React.FC = () => {
           <div className="space-y-4">
             <div className="space-y-2">
               <label className="text-[11px] font-bold uppercase tracking-widest text-[var(--text-muted)] ml-1">Select Issue Type</label>
-              <div className="relative">
-                <select 
-                  value={session.selectedIssueType?.id || ''}
-                  onChange={(e) => {
-                    const type = session.issueTypes.find((t: IssueType) => t.id === e.target.value);
-                    if (type) updateSession({ selectedIssueType: type });
-                  }}
-                  className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-4 py-3 outline-none focus:border-[var(--status-info)]/50 transition-all text-sm appearance-none cursor-pointer pr-10 text-[var(--text-main)] shadow-[var(--shadow-sm)]"
-                >
-                  {session.issueTypes.map((type: IssueType) => (
-                    <option key={type.id} value={type.id}>{type.name}</option>
-                  ))}
-                </select>
-                <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" size={16} />
+              <div className="relative flex items-center gap-3">
+                {session.selectedIssueType?.icon_url && (
+                  <div className="w-10 h-10 rounded-xl bg-[var(--bg-input)] flex items-center justify-center border border-[var(--border-main)] shrink-0">
+                    <img src={session.selectedIssueType.icon_url} className="w-6 h-6" alt="" />
+                  </div>
+                )}
+                <div className="relative flex-1">
+                  <select 
+                    value={session.selectedIssueType?.id || ''}
+                    onChange={(e) => {
+                      const type = session.issueTypes.find((t: IssueType) => t.id === e.target.value);
+                      if (type && session.jiraConnectionId && session.issueData) {
+                        updateSession({ selectedIssueType: type, jiraMetadata: null });
+                        const pKey = session.issueData.key.split('-')[0];
+                        jira.fetchJiraMetadata(session.jiraConnectionId, pKey, type.id, currentTabId, session.issueData.projectId, true);
+                        jira.fetchFieldSettings(session.jiraConnectionId, pKey, currentTabId, type.id, session.issueData.projectId, true);
+                      }
+                    }}
+                    className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-4 py-3 outline-none focus:border-[var(--status-info)]/50 transition-all text-sm appearance-none cursor-pointer pr-10 text-[var(--text-main)] shadow-[var(--shadow-sm)]"
+                  >
+                    {session.issueTypes.map((type: IssueType) => (
+                      <option key={type.id} value={type.id}>{type.name}</option>
+                    ))}
+                  </select>
+                  <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" size={16} />
+                </div>
               </div>
             </div>
 
@@ -135,15 +346,39 @@ const SettingsView: React.FC = () => {
                       if (pKey && session.instanceUrl && session.issueData) {
                         updateSession({ error: null });
                         if (session.issueTypes.length === 0) {
-                          jira.fetchIssueTypes(pKey, session.instanceUrl, undefined, session.issueData.projectId);
+                          jira.fetchIssueTypes(session.jiraConnectionId!, pKey, currentTabId, session.issueData.projectId, true);
                         } else if (session.selectedIssueType) {
-                          jira.fetchJiraMetadata(pKey, session.instanceUrl, session.selectedIssueType.id, undefined, session.issueData.projectId);
+                          jira.fetchJiraMetadata(session.jiraConnectionId!, pKey, session.selectedIssueType.id, currentTabId, session.issueData.projectId, true);
                         }
                       }
                     }}
                     className="w-full bg-[var(--status-danger)]/10 hover:bg-[var(--status-danger)]/20 border border-[var(--status-danger)]/30 text-[var(--status-danger)] text-[10px] font-black py-3 rounded-xl transition-all uppercase tracking-widest"
                   >
                     Retry Fetch
+                  </button>
+                </div>
+              ) : session.issueTypesFetched && session.issueTypes.length === 0 ? (
+                <div className="py-12 px-4 text-center bg-[var(--status-warning)]/5 border border-[var(--status-warning)]/20 rounded-2xl space-y-4 animate-in fade-in duration-300">
+                  <div className="w-12 h-12 bg-[var(--status-warning)]/10 rounded-2xl flex items-center justify-center text-[var(--status-warning)] mx-auto shadow-inner border border-[var(--status-warning)]/10">
+                    <AlertCircle size={24} />
+                  </div>
+                  <div className="space-y-1">
+                    <div className="text-[var(--text-main)] text-sm font-bold">No Issue Types Found</div>
+                    <p className="text-[11px] text-[var(--text-muted)] leading-tight px-4 italic">
+                      Verify your Jira account has "Browse Projects" permissions for project <strong>{session.issueData?.key.split('-')[0]}</strong>.
+                    </p>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      const pKey = session.issueData?.key.split('-')[0];
+                      if (pKey && session.instanceUrl && session.issueData) {
+                        updateSession({ error: null, issueTypesFetched: false });
+                        jira.fetchIssueTypes(session.jiraConnectionId!, pKey, currentTabId, session.issueData.projectId, true);
+                      }
+                    }}
+                    className="w-full bg-[var(--status-info)]/10 hover:bg-[var(--status-info)]/20 border border-[var(--status-info)]/30 text-[var(--status-info)] text-[10px] font-black py-3 rounded-xl transition-all uppercase tracking-widest"
+                  >
+                    Refresh Project Config
                   </button>
                 </div>
               ) : (
@@ -159,6 +394,25 @@ const SettingsView: React.FC = () => {
               )
             ) : (
               <div className="space-y-6">
+                <div className="flex justify-between items-center px-1">
+                  <div className="flex flex-col">
+                    <span className="text-[10px] font-black uppercase text-[var(--text-muted)] tracking-widest opacity-60">Schema Loaded</span>
+                    <span className="text-[9px] text-[var(--status-success)] font-bold">Synced with Jira</span>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      const pKey = session.issueData?.key.split('-')[0];
+                      if (pKey && session.issueData && session.selectedIssueType) {
+                        jira.fetchJiraMetadata(session.jiraConnectionId!, pKey, session.selectedIssueType.id, currentTabId, session.issueData.projectId, true);
+                        jira.fetchFieldSettings(session.jiraConnectionId!, pKey, currentTabId, session.selectedIssueType.id, session.issueData.projectId, true);
+                      }
+                    }}
+                    className="text-[10px] font-bold text-blue-500 hover:underline flex items-center gap-1"
+                  >
+                    <RefreshCw size={10} />
+                    Force Refresh
+                  </button>
+                </div>
                 {/* AI Property Mapping Section */}
                 <div className="bg-[var(--status-info)]/5 border border-[var(--status-info)]/10 p-4 rounded-xl space-y-4 shadow-inner">
                   <div className="flex items-center gap-2 mb-1">
@@ -199,7 +453,22 @@ const SettingsView: React.FC = () => {
                 {/* Visible Fields Section */}
                 <div className="space-y-4">
                   <div className="flex items-center justify-between mb-1">
-                    <label className="text-[11px] font-bold uppercase tracking-widest text-[var(--text-muted)] ml-1">Available Fields</label>
+                    <div className="flex items-center gap-2">
+                      <label className="text-[11px] font-bold uppercase tracking-widest text-[var(--text-muted)] ml-1">Available Fields</label>
+                      <button 
+                        onClick={() => {
+                          const pKey = session.issueData?.key.split('-')[0];
+                          if (pKey && session.issueData && session.selectedIssueType) {
+                            jira.fetchJiraMetadata(session.jiraConnectionId!, pKey, session.selectedIssueType.id, currentTabId, session.issueData.projectId, true);
+                          }
+                        }}
+                        disabled={session.loading}
+                        className={`p-1 rounded-md hover:bg-[var(--accent)]/10 text-[var(--accent)] transition-all ${session.loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        title="Force refresh available fields"
+                      >
+                        <RefreshCw size={12} className={session.loading ? 'animate-spin' : ''} />
+                      </button>
+                    </div>
                     <span className="text-[10px] text-[var(--status-info)] font-bold bg-[var(--status-info)]/10 px-2 py-0.5 rounded-full shadow-sm">{session.jiraMetadata.fields.length} Found</span>
                   </div>
                   <div className="max-h-[250px] overflow-y-auto pr-2 custom-scrollbar space-y-2">
@@ -212,25 +481,30 @@ const SettingsView: React.FC = () => {
                         <label 
                           key={field.key}
                           className={`flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer ${
-                            session.visibleFields.includes(field.key) 
+                            session.visibleFields.includes(field.key) || field.required
                               ? 'bg-[var(--status-info)]/10 border-[var(--status-info)]/30' 
                               : 'bg-[var(--bg-card)] border-[var(--border-main)] hover:border-[var(--status-info)]/30 shadow-[var(--shadow-sm)]'
-                          }`}
+                          } ${field.required ? 'opacity-80 cursor-not-allowed' : ''}`}
                         >
                           <div className="flex flex-col">
-                            <span className="text-xs font-bold text-[var(--text-main)]">{field.name}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-bold text-[var(--text-main)]">{field.name}</span>
+                              {field.required && <span className="text-[10px] font-black text-[var(--status-info)] bg-[var(--status-info)]/20 px-1.5 py-0.5 rounded uppercase tracking-tighter">Locked</span>}
+                            </div>
                             <span className="text-[9px] text-[var(--text-muted)] opacity-70 uppercase tracking-tighter">{field.type} {field.required && '• REQUIRED'}</span>
                           </div>
                           <input 
                             type="checkbox"
-                            checked={session.visibleFields.includes(field.key)}
+                            checked={session.visibleFields.includes(field.key) || field.required}
+                            disabled={field.required}
                             onChange={() => {
+                              if (field.required) return;
                               const next = session.visibleFields.includes(field.key)
                                 ? session.visibleFields.filter((f: string) => f !== field.key)
                                 : [...session.visibleFields, field.key];
                               saveFieldSettings(next);
                             }}
-                            className="w-4 h-4 rounded border-[var(--border-main)] bg-[var(--bg-input)] text-[var(--status-info)] focus:ring-[var(--status-info)]/50"
+                            className="w-4 h-4 rounded border-[var(--border-main)] bg-[var(--bg-input)] text-[var(--status-info)] focus:ring-[var(--status-info)]/50 disabled:opacity-50"
                           />
                         </label>
                       ))

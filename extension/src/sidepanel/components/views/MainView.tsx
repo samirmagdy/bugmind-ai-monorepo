@@ -3,16 +3,21 @@ import { useBugMind } from '../../hooks/useBugMind';
 import { 
   Plus, MessageSquare, ChevronDown, 
   Loader2, User, Search, X, Save, Send, AlertCircle, Zap, RefreshCw,
-  Compass, ArrowRight, Check
+  Compass, ArrowRight, Check, Layout
 } from 'lucide-react';
-import { BugReport, JiraField, JiraUser, JiraFieldOption } from '../../types';
+import { BugReport, JiraField, JiraUser, JiraFieldOption, TestCase } from '../../types';
 import AutoResizeTextarea from '../common/AutoResizeTextarea';
 import { TIMEOUTS } from '../../constants';
 
 const MainView: React.FC = () => {
   const { 
     session, updateSession, refreshIssue, debug, handleTabReload,
-    ai: { generateBugs, handleManualGenerate, handleUpdateBug, submitBugs, searchUsers } 
+    jira,
+    ai: { 
+      generateBugs, generateTestCases, handleManualGenerate, 
+      handleUpdateBug, handleUpdateTestCase, publishTestCasesToXray, 
+      searchUsers, preparePreviewBug 
+    } 
   } = useBugMind();
 
 
@@ -42,6 +47,27 @@ const MainView: React.FC = () => {
     return () => clearTimeout(timer);
   }, [session.bugs, session.instanceUrl, session.issueData, debug, searchUsers]);
 
+  useEffect(() => {
+    if (!session.testCases.length || !session.jiraConnectionId || session.xrayProjects.length > 0) return;
+
+    let cancelled = false;
+    jira.fetchProjects(session.jiraConnectionId).then(projects => {
+      if (cancelled || projects.length === 0) return;
+      const storyProjectKey = session.issueData?.key.split('-')[0] || null;
+      const defaultProject = projects.find(project => project.key === storyProjectKey) || projects[0];
+      updateSession({
+        xrayProjects: projects,
+        xrayTargetProjectId: session.xrayTargetProjectId || defaultProject?.id || null,
+        xrayTargetProjectKey: session.xrayTargetProjectKey || defaultProject?.key || null,
+        xrayFolderPath: session.xrayFolderPath || session.issueData?.key || ''
+      });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [jira, session.issueData?.key, session.jiraConnectionId, session.testCases.length, session.xrayFolderPath, session.xrayProjects.length, session.xrayTargetProjectId, session.xrayTargetProjectKey, updateSession]);
+
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       {/* Issue Context Card */}
@@ -66,7 +92,12 @@ const MainView: React.FC = () => {
         {session.issueData ? (
           <div className="space-y-2 animate-in slide-in-from-left-4 duration-500">
             <div className="flex items-center gap-2">
-              <span className="px-2 py-0.5 bg-blue-500/10 text-blue-400 text-[10px] font-bold rounded-md border border-blue-500/20">{session.issueData.key}</span>
+              {session.issueData.iconUrl ? (
+                <img src={session.issueData.iconUrl} className="w-4 h-4 rounded-sm" alt="" />
+              ) : (
+                <span className="px-2 py-0.5 bg-blue-500/10 text-blue-400 text-[10px] font-bold rounded-md border border-blue-500/20">{session.issueData.key}</span>
+              )}
+              {session.issueData.iconUrl && <span className="text-[10px] font-bold text-blue-400/80">{session.issueData.key}</span>}
               <div className="h-px flex-1 bg-[var(--border-main)]"></div>
             </div>
             <div className="text-base font-bold text-[var(--text-main)] leading-tight pr-8">{session.issueData.summary}</div>
@@ -168,8 +199,32 @@ const MainView: React.FC = () => {
             </div>
           )}
 
-          <div className={`transition-all duration-700 ${session.error === 'UNSUPPORTED_ISSUE_TYPE' ? 'blur-md grayscale opacity-30 pointer-events-none pt-4' : ''}`}>
-            {(!session.bugs || session.bugs.length === 0) ? (
+          {session.error === 'NO_ISSUE_TYPES_FOUND' && (
+            <div className="absolute inset-0 z-20 flex flex-col items-center justify-start pt-12 p-6 animate-in fade-in zoom-in slide-in-from-top-4 duration-700">
+              <div className="glass-panel rounded-[2rem] p-6 shadow-2xl border-[var(--status-danger)]/20 space-y-5 text-center max-w-[300px] relative overflow-hidden">
+                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-[var(--status-danger)]/40 to-transparent"></div>
+                <div className="w-14 h-14 bg-[var(--status-danger)]/10 rounded-2xl flex items-center justify-center text-[var(--status-danger)] mx-auto shadow-inner border border-[var(--status-danger)]/10">
+                  <AlertCircle size={28} />
+                </div>
+                <div className="space-y-2">
+                  <h4 className="text-base font-black text-[var(--text-main)] tracking-tight">Permission Restriction</h4>
+                  <p className="text-[11px] text-[var(--text-muted)] leading-relaxed px-2">
+                    Jira returned **0 accessible issue types** for this instance. This usually means the API Token used does not have permissions to view projects.
+                  </p>
+                </div>
+                <button 
+                  onClick={() => updateSession({ view: 'setup' })}
+                  className="w-full bg-[var(--status-info)] text-white text-[10px] font-black py-4 rounded-xl shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 uppercase tracking-widest"
+                >
+                  <RefreshCw size={12} />
+                  Check Jira Connection
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className={`transition-all duration-700 ${['UNSUPPORTED_ISSUE_TYPE', 'NO_ISSUE_TYPES_FOUND'].includes(session.error || '') ? 'blur-md grayscale opacity-30 pointer-events-none pt-4' : ''}`}>
+            {(!session.bugs || session.bugs.length === 0) && (!session.testCases || session.testCases.length === 0) ? (
         <div className="py-12 text-center space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
           <div className="relative inline-block">
             <div className="absolute inset-0 bg-[var(--status-info)]/20 blur-3xl rounded-full animate-pulse"></div>
@@ -187,12 +242,25 @@ const MainView: React.FC = () => {
           <div className="space-y-4 px-2">
             <button 
               onClick={generateBugs}
-              disabled={!session.issueData}
+              disabled={!session.issueData || !session.selectedIssueType?.id || session.issueTypes.length === 0}
               className="w-full bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-black py-4 rounded-[1.5rem] transition-all shadow-xl shadow-[var(--accent)]/20 flex items-center justify-center gap-3 enabled:hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:grayscale btn-press"
             >
               <Plus size={20} className="stroke-[3px]" />
               Analyze Story with AI
             </button>
+            <button 
+              onClick={generateTestCases}
+              disabled={!session.issueData || !session.selectedIssueType?.id || session.issueTypes.length === 0}
+              className="w-full bg-[var(--bg-card)] hover:bg-[var(--bg-app)] border border-[var(--border-main)] text-[var(--text-main)] font-bold py-4 rounded-[1.2rem] shadow-[var(--shadow-sm)] transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              <Check size={16} />
+              Generate Test Cases
+            </button>
+            {(!session.selectedIssueType?.id || session.issueTypes.length === 0) && (
+              <p className="text-[10px] text-[var(--text-muted)] px-2">
+                Waiting for Jira issue types to load before analysis can start.
+              </p>
+            )}
 
             <div className="relative">
               <div className="absolute inset-0 flex items-center" aria-hidden="true">
@@ -227,7 +295,7 @@ const MainView: React.FC = () => {
                 />
                 <button 
                   onClick={handleManualGenerate}
-                  disabled={!session.manualDesc.trim()}
+                  disabled={!session.manualDesc.trim() || !session.selectedIssueType?.id}
                   className="w-full bg-[var(--status-info)]/10 hover:bg-[var(--status-info)]/20 border border-[var(--status-info)]/20 text-[var(--status-info)] text-xs font-black py-3 rounded-xl transition-all disabled:opacity-50 uppercase tracking-widest"
                 >
                   Structure with AI
@@ -236,13 +304,185 @@ const MainView: React.FC = () => {
             )}
           </div>
         </div>
+      ) : session.testCases && session.testCases.length > 0 ? (
+        <div className="space-y-4">
+          <div className="flex justify-between items-end mb-2">
+            <div>
+              <h3 className="text-lg font-bold text-[var(--text-main)] leading-none">{session.testCases.length} Test Cases</h3>
+              {session.coverageScore !== null && (
+                <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest mt-1">Coverage {session.coverageScore}%</div>
+              )}
+            </div>
+            <div className="flex gap-4">
+              <button 
+                onClick={() => updateSession({ testCases: [], coverageScore: null, error: null, createdIssues: [], xrayWarnings: [] })} 
+                className="text-[11px] font-bold text-[var(--status-danger)]/70 hover:text-[var(--status-danger)] uppercase tracking-wider"
+              >
+                Clear
+              </button>
+              <button 
+                onClick={generateTestCases} 
+                className="text-[11px] font-bold text-[var(--status-info)] hover:text-[var(--status-info)]/80 uppercase tracking-wider"
+              >
+                Regenerate
+              </button>
+            </div>
+          </div>
+          <div className="space-y-3">
+            {session.testCases.map((testCase: TestCase, idx: number) => (
+              <div key={`${testCase.title}-${idx}`} className="bg-[var(--bg-card)] border border-[var(--border-main)] rounded-2xl p-4 shadow-[var(--shadow-sm)] space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Test Case {idx + 1}</div>
+                  <input
+                    value={testCase.priority}
+                    onChange={e => handleUpdateTestCase(idx, { priority: e.target.value })}
+                    className="w-24 bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-2 py-1 text-[10px] font-black uppercase tracking-widest text-[var(--status-info)] outline-none focus:border-[var(--status-info)] text-right"
+                  />
+                </div>
+                <AutoResizeTextarea
+                  value={testCase.title}
+                  onChange={e => handleUpdateTestCase(idx, { title: e.target.value })}
+                  className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl p-3 text-sm font-semibold text-[var(--text-main)] leading-relaxed outline-none focus:border-[var(--status-info)]"
+                />
+                <div className="space-y-1">
+                  <div className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Steps</div>
+                  <AutoResizeTextarea
+                    value={testCase.steps.join('\n')}
+                    onChange={e => handleUpdateTestCase(idx, {
+                      steps: e.target.value
+                        .split('\n')
+                        .map(step => step.trim())
+                        .filter(Boolean)
+                    })}
+                    className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl p-3 text-xs text-[var(--text-main)] leading-relaxed outline-none focus:border-[var(--status-info)]"
+                    placeholder={`1. Open the story\n2. Complete the flow\n3. Verify the result`}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <div className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Expected Result</div>
+                  <AutoResizeTextarea
+                    value={testCase.expected_result}
+                    onChange={e => handleUpdateTestCase(idx, { expected_result: e.target.value })}
+                    className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl p-3 text-xs text-[var(--text-main)] leading-relaxed outline-none focus:border-[var(--status-info)]"
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="bg-[var(--bg-card)] border border-[var(--border-main)] rounded-[1.75rem] p-5 shadow-[var(--shadow-md)] space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h4 className="text-base font-black text-[var(--text-main)]">Publish to Xray</h4>
+                <p className="text-[11px] text-[var(--text-muted)]">Create Test issues, link them to {session.issueData?.key}, and place them in a repository folder.</p>
+              </div>
+              <Send size={18} className="text-[var(--status-info)]" />
+            </div>
+
+            <div className="grid grid-cols-1 gap-3">
+              <label className="space-y-1">
+                <span className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Xray Project</span>
+                <select
+                  value={session.xrayTargetProjectId || ''}
+                  onChange={e => {
+                    const project = session.xrayProjects.find(item => item.id === e.target.value);
+                    updateSession({
+                      xrayTargetProjectId: project?.id || null,
+                      xrayTargetProjectKey: project?.key || null
+                    });
+                  }}
+                  className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-3 py-3 text-xs text-[var(--text-main)] outline-none focus:border-[var(--status-info)]"
+                >
+                  <option value="">Select target project</option>
+                  {session.xrayProjects.map(project => (
+                    <option key={project.id} value={project.id}>{project.key} · {project.name}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="space-y-1">
+                <span className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Repository Folder</span>
+                <input
+                  value={session.xrayFolderPath}
+                  onChange={e => updateSession({ xrayFolderPath: e.target.value })}
+                  className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-3 py-3 text-xs text-[var(--text-main)] outline-none focus:border-[var(--status-info)]"
+                  placeholder={session.issueData?.key || 'STORY-123'}
+                />
+              </label>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <label className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Test Issue Type</span>
+                  <input
+                    value={session.xrayTestIssueTypeName}
+                    onChange={e => updateSession({ xrayTestIssueTypeName: e.target.value })}
+                    className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-3 py-3 text-xs text-[var(--text-main)] outline-none focus:border-[var(--status-info)]"
+                    placeholder="Test"
+                  />
+                </label>
+
+                <label className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Link Type</span>
+                  <input
+                    value={session.xrayLinkType}
+                    onChange={e => updateSession({ xrayLinkType: e.target.value })}
+                    className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-3 py-3 text-xs text-[var(--text-main)] outline-none focus:border-[var(--status-info)]"
+                    placeholder="Tests"
+                  />
+                </label>
+
+                <label className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Repository Field Id</span>
+                  <input
+                    value={session.xrayRepositoryPathFieldId}
+                    onChange={e => updateSession({ xrayRepositoryPathFieldId: e.target.value })}
+                    className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-3 py-3 text-xs text-[var(--text-main)] outline-none focus:border-[var(--status-info)]"
+                    placeholder="auto-detect"
+                  />
+                </label>
+              </div>
+            </div>
+
+            {session.createdIssues.length > 0 && (
+              <div className="rounded-2xl border border-[var(--status-success)]/20 bg-[var(--status-success)]/5 p-4 space-y-2">
+                <div className="text-[10px] font-black uppercase tracking-widest text-[var(--status-success)]">Published Tests</div>
+                <div className="flex flex-wrap gap-2">
+                  {session.createdIssues.map(issue => (
+                    <span key={issue.key} className="px-2.5 py-1 rounded-xl bg-[var(--bg-app)] border border-[var(--border-main)] text-[11px] font-bold text-[var(--text-main)]">
+                      {issue.key}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {session.xrayWarnings.length > 0 && (
+              <div className="rounded-2xl border border-[var(--status-warning)]/20 bg-[var(--status-warning)]/5 p-4 space-y-2">
+                <div className="text-[10px] font-black uppercase tracking-widest text-[var(--status-warning)]">Publish Warnings</div>
+                <div className="space-y-1 text-[11px] text-[var(--text-main)]">
+                  {session.xrayWarnings.map((warning, idx) => (
+                    <div key={`${warning}-${idx}`}>{warning}</div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <button
+              onClick={publishTestCasesToXray}
+              disabled={!session.xrayTargetProjectId || session.testCases.length === 0 || session.loading}
+              className="w-full bg-[var(--status-info)] hover:bg-[var(--status-info)]/90 text-white font-black py-4 rounded-[1.3rem] transition-all shadow-xl shadow-[var(--status-info)]/20 flex items-center justify-center gap-3 disabled:opacity-50"
+            >
+              <Send size={16} />
+              Publish Test Cases to Xray
+            </button>
+          </div>
+        </div>
       ) : (
         <div className="space-y-4">
           <div className="flex justify-between items-end mb-2">
             <h3 className="text-lg font-bold text-[var(--text-main)] leading-none">{(session.bugs || []).length} Findings</h3>
             <div className="flex gap-4">
               <button 
-                onClick={() => updateSession({ bugs: [], error: null })} 
+                onClick={() => updateSession({ bugs: [], testCases: [], coverageScore: null, error: null })} 
                 className="text-[11px] font-bold text-[var(--status-danger)]/70 hover:text-[var(--status-danger)] uppercase tracking-wider"
               >
                 Clear
@@ -276,13 +516,13 @@ const MainView: React.FC = () => {
                   </div>
                 </button>
                 
-                <div className={`collapsible-grid ${session.expandedBug === idx ? 'expanded' : ''}`}>
+                <div className={`collapsible-grid ${session.expandedBug === idx ? 'expanded' : ''} relative`}>
                   <div className="collapsible-content">
                     <div className="px-4 pb-4 pt-0 space-y-4">
                       <div className="h-px bg-[var(--border-main)]"></div>
                       <div className="space-y-3">
                         <div className="space-y-1">
-                          <span className="text-[10px] font-black uppercase text-[var(--text-muted)] tracking-widest opacity-80">Description</span>
+                          <span className="text-[10px] font-black uppercase text-[var(--text-muted)] tracking-widest opacity-80">General Context</span>
                           <AutoResizeTextarea 
                             value={bug.description}
                             onChange={e => handleUpdateBug(idx, { description: e.target.value })}
@@ -318,31 +558,39 @@ const MainView: React.FC = () => {
                       </div>
 
                        {/* Dynamic Jira Fields */}
-                       {(session.visibleFields || []).length > 0 && (
-                         <div className="pt-2 space-y-4">
-                           <div className="h-px bg-[var(--border-main)]"></div>
-                           <div className="flex items-center gap-2 mb-1">
-                             <div className="h-1 w-1 bg-blue-500 rounded-full"></div>
-                             <span className="text-[10px] font-black uppercase text-blue-400 tracking-widest">Jira Project Fields</span>
-                           </div>
-                           <div className="grid grid-cols-1 gap-4">
-                             {(session.visibleFields || []).map((fieldKey: string) => {
-                               const field = session.jiraMetadata?.fields.find((f: JiraField) => f.key === fieldKey);
-                               if (!field) return null;
+                       {(() => {
+                         const metadataFields = session.jiraMetadata?.fields || [];
+                         const visibleKeys = session.visibleFields || [];
+                         const requiredKeys = metadataFields.filter(f => f.required).map(f => f.key);
+                         const allVisibleKeys = Array.from(new Set([...visibleKeys, ...requiredKeys]));
+                         
+                         if (allVisibleKeys.length === 0) return null;
+                         
+                         return (
+                          <div className="pt-2 space-y-4">
+                            <div className="h-px bg-[var(--border-main)]"></div>
+                            <div className="flex items-center gap-2 mb-1">
+                              <div className="h-1 w-1 bg-blue-500 rounded-full"></div>
+                              <span className="text-[10px] font-black uppercase text-blue-400 tracking-widest">Jira Project Fields</span>
+                            </div>
+                            <div className="grid grid-cols-1 gap-4">
+                              {allVisibleKeys.map((fieldKey: string) => {
+                                 const field = metadataFields.find((f: JiraField) => f.key === fieldKey);
+                                 if (!field) return null;
 
-                               const isMulti = field.type === 'array' || field.type === 'multi-select';
-                               const currentVal = bug.extra_fields?.[fieldKey];
+                                 const isMulti = field.type === 'array' || field.type === 'multi-select';
+                                 const currentVal = bug.extra_fields?.[fieldKey];
 
-                               return (
-                                 <div key={fieldKey} className="space-y-1.5">
-                                   <div className="flex justify-between items-center ml-0.5">
-                                    <label className="text-[10px] font-bold uppercase tracking-tight text-[var(--text-muted)] opacity-80">
-                                       {field.name} {field.required && <span className="text-red-500/80">*</span>}
-                                     </label>
-                                   </div>
+                                 return (
+                                   <div key={fieldKey} className="space-y-1.5">
+                                     <div className="flex justify-between items-center ml-0.5">
+                                      <label className="text-[10px] font-bold uppercase tracking-tight text-[var(--text-muted)] opacity-80">
+                                         {field.name} {field.required && <span className="text-red-500/80 font-black">*</span>}
+                                       </label>
+                                     </div>
                                    
                                    {(fieldKey === 'assignee' || field.type === 'user' || field.type === 'multi-user') ? (
-                                     <div className="relative">
+                                     <div className="relative z-[60]">
                                        {currentVal ? (
                                          <div className="flex items-center justify-between bg-blue-500/5 border border-blue-500/10 rounded-xl px-3 py-2.5">
                                             <div className="flex items-center gap-2">
@@ -386,7 +634,7 @@ const MainView: React.FC = () => {
                                        )}
 
                                        {!currentVal && bug.activeUserSearchField === fieldKey && (bug.userSearchQuery?.length || 0) >= 2 && (
-                                         <div className="absolute top-full left-0 w-full mt-1 bg-[var(--bg-card)] border border-[var(--border-main)] rounded-xl overflow-hidden shadow-2xl z-50 animate-in fade-in slide-in-from-top-1 duration-200 divide-y divide-[var(--border-main)]">
+                                         <div className="absolute top-full left-0 w-full mt-2 bg-[var(--bg-card)] border border-[var(--border-main)] rounded-xl overflow-hidden shadow-2xl z-[999] animate-in fade-in slide-in-from-top-2 duration-200 divide-y divide-[var(--border-main)] backdrop-blur-2xl">
                                            {bug.isSearchingUsers ? (
                                              <div className="px-4 py-3 text-center">
                                                <Loader2 size={16} className="animate-spin text-[var(--status-info)] mx-auto mb-1 opacity-50" />
@@ -544,11 +792,12 @@ const MainView: React.FC = () => {
                                      />
                                    )}
                                  </div>
-                               );
-                             })}
+                                 );
+                               })}
+                             </div>
                            </div>
-                         </div>
-                       )}
+                         );
+                       })()}
                        <div className="flex items-center justify-between">
                          <div className="flex items-center gap-2">
                            <div className="text-[10px] text-[var(--text-muted)] italic">Auto-saving edits...</div>
@@ -570,17 +819,21 @@ const MainView: React.FC = () => {
             ))}
           </div>
           <button 
-            onClick={() => submitBugs()}
-            className="w-full bg-[var(--status-success)] hover:brightness-110 text-white font-black py-4 rounded-2xl transition-all shadow-xl shadow-[var(--status-success)]/20 flex items-center justify-center gap-2 mt-6 btn-press active:scale-[0.98] hover:scale-[1.01]"
+            onClick={() => {
+              if ((session.bugs || []).length > 0) {
+                preparePreviewBug(0);
+              }
+            }}
+            className="w-full bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-black py-4 rounded-2xl transition-all shadow-xl shadow-[var(--accent)]/20 flex items-center justify-center gap-2 mt-6 btn-press active:scale-[0.98] hover:scale-[1.01]"
           >
-            <Send size={18} />
-            Push to Jira Project
+            <Layout size={18} />
+            Review & Publish Findings
           </button>
         </div>
       )}
+          </div>
         </div>
-      </div>
-    )}
+      )}
     </div>
   );
 };

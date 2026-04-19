@@ -12,7 +12,7 @@ export function useSession(log?: (tag: string, msg: string) => void) {
   const session = useMemo(() => currentTabId ? (tabSessions[currentTabId] || INITIAL_SESSION) : INITIAL_SESSION, [currentTabId, tabSessions]);
 
   // Helper to update active session
-  const updateSession = useCallback((updates: Partial<TabSession>, tabId?: number) => {
+  const updateSession = useCallback((updates: Partial<TabSession>, tabId?: number | null) => {
     const id = tabId || currentTabId;
     if (!id) return;
     setTabSessions((prev: Record<number, TabSession>) => ({
@@ -110,6 +110,8 @@ export function useSession(log?: (tag: string, msg: string) => void) {
     delete strippedSession.bugs;
     delete strippedSession.error;
     delete strippedSession.success;
+    delete strippedSession.issueTypesFetched; // Force fresh scan on reload
+    delete strippedSession.jiraMetadata;     // Force fresh schema fetch
     
     return { key: `bugmind_tab_${currentTabId}`, tabId: currentTabId, session: strippedSession, bugs: bugsToSave };
   }, [currentTabId, tabSessions]);
@@ -136,12 +138,12 @@ export function useSession(log?: (tag: string, msg: string) => void) {
     return () => clearTimeout(timeout);
   }, [serializeTarget, log]);
 
-  return {
+  return useMemo(() => ({
     tabSessions,
     currentTabId,
     session,
     updateSession,
     setTabSessions,
     sessionHydrated
-  };
+  }), [tabSessions, currentTabId, session, updateSession, sessionHydrated]);
 }

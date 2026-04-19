@@ -1,25 +1,26 @@
 import { createContext, useContext } from 'react';
 import { useSession } from './useSession';
-import { useAuth } from './useAuth';
-import { useJira } from './useJira';
-import { useAI } from './useAI';
 import { DebugLog } from '../types';
+
+import { useAuthContext } from '../context/AuthProvider';
+import { useJiraContext } from '../context/JiraProvider';
+import { useAIContext } from '../context/AIProvider';
 
 export interface BugMindContextType {
   // Session & Tab
   session: ReturnType<typeof useSession>['session'];
   updateSession: ReturnType<typeof useSession>['updateSession'];
-  currentTabId: ReturnType<typeof useSession>['currentTabId'];
+  currentTabId: number | null;
   setTabSessions: ReturnType<typeof useSession>['setTabSessions'];
   
   // Auth
-  auth: ReturnType<typeof useAuth>;
+  auth: ReturnType<typeof useAuthContext>;
   
   // Jira
-  jira: ReturnType<typeof useJira>;
+  jira: ReturnType<typeof useJiraContext>;
   
   // AI
-  ai: ReturnType<typeof useAI>;
+  ai: ReturnType<typeof useAIContext>;
   
   // Utils
   debug: {
@@ -34,7 +35,6 @@ export interface BugMindContextType {
   checkAuth: (token?: string) => Promise<void>;
   handleLogin: (e: React.FormEvent) => Promise<void>;
   handleRegister: (e: React.FormEvent) => Promise<void>;
-  handleJiraConnect: (e: React.FormEvent) => Promise<void>;
   handleSaveSettings: (e: React.FormEvent) => Promise<void>;
   saveFieldSettings: (nextFields?: string[], nextMapping?: Record<string, string>) => Promise<void>;
   handleLogout: () => void;

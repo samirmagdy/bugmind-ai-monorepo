@@ -17,6 +17,27 @@ export interface CreatedIssue {
   self: string;
 }
 
+export interface TestCase {
+  title: string;
+  steps: string[];
+  expected_result: string;
+  priority: string;
+}
+
+export interface XrayPublishResult {
+  created_tests: CreatedIssue[];
+  folder_path: string;
+  repository_path_field_id?: string | null;
+  link_type_used?: string | null;
+  warnings: string[];
+}
+
+export interface JiraProject {
+  id: string;
+  key: string;
+  name: string;
+}
+
 export interface BugReport {
   summary: string;
   description: string;
@@ -42,6 +63,8 @@ export interface TabSession {
   instanceUrl: string | null; // e.g. https://company.atlassian.net
   bugs: BugReport[];
   expandedBug: number | null;
+  testCases: TestCase[];
+  coverageScore: number | null;
   manualDesc: string;
   showManualInput: boolean;
   jiraMetadata: JiraMetadata | null;
@@ -49,11 +72,36 @@ export interface TabSession {
   selectedIssueType: IssueType | null;
   visibleFields: string[];
   aiMapping: Record<string, string>;
-  settingsTab: 'ai' | 'jira';
+  settingsTab: 'ai' | 'jira' | 'connections';
   createdIssues: CreatedIssue[];
   theme: 'light' | 'dark';
   themeSource: 'auto' | 'manual';
   onboardingCompleted: boolean;
+  jiraConnectionId: number | null;
+  connections: JiraConnection[];
+  issueTypesFetched: boolean;
+  currentTabId: number | null;
+  xrayProjects: JiraProject[];
+  xrayTargetProjectId: string | null;
+  xrayTargetProjectKey: string | null;
+  xrayTestIssueTypeName: string;
+  xrayRepositoryPathFieldId: string;
+  xrayFolderPath: string;
+  xrayLinkType: string;
+  xrayWarnings: string[];
+  previewBugIndex: number | null;
+  validationErrors: string[];
+  resolvedPayload: Record<string, any> | null;
+}
+
+export interface JiraConnection {
+  id: number;
+  auth_type: string;
+  host_url: string;
+  username: string;
+  is_active: boolean;
+  verify_ssl?: boolean;
+  icon_url?: string;
 }
 
 export interface JiraField {
@@ -75,6 +123,7 @@ export interface IssueType {
   id: string;
   name: string;
   iconUrl?: string;
+  icon_url?: string; // Align with backend
   subtask: boolean;
 }
 
@@ -85,9 +134,10 @@ export interface IssueData {
   description: string;
   acceptanceCriteria: string;
   typeName: string;
+  iconUrl?: string;
 }
 
-export type View = 'auth' | 'setup' | 'main' | 'success' | 'settings';
+export type View = 'auth' | 'setup' | 'main' | 'success' | 'settings' | 'preview';
 
 export const INITIAL_SESSION: TabSession = {
   view: 'main',
@@ -98,6 +148,8 @@ export const INITIAL_SESSION: TabSession = {
   instanceUrl: null,
   bugs: [],
   expandedBug: null,
+  testCases: [],
+  coverageScore: null,
   manualDesc: '',
   showManualInput: false,
   jiraMetadata: null,
@@ -109,7 +161,22 @@ export const INITIAL_SESSION: TabSession = {
   createdIssues: [],
   theme: 'dark',
   themeSource: 'auto',
-  onboardingCompleted: false
+  onboardingCompleted: false,
+  jiraConnectionId: null,
+  connections: [],
+  issueTypesFetched: false,
+  currentTabId: null,
+  xrayProjects: [],
+  xrayTargetProjectId: null,
+  xrayTargetProjectKey: null,
+  xrayTestIssueTypeName: 'Test',
+  xrayRepositoryPathFieldId: '',
+  xrayFolderPath: '',
+  xrayLinkType: 'Tests',
+  xrayWarnings: [],
+  previewBugIndex: null,
+  validationErrors: [],
+  resolvedPayload: null
 };
 
 

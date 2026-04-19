@@ -3,7 +3,7 @@ import { Bug, Settings, LogOut, Sun, Moon } from 'lucide-react';
 import { useBugMind } from '../../hooks/useBugMind';
 
 const Header: React.FC = () => {
-  const { session: { theme }, auth: { globalView }, ai: { fetchAISettings }, updateSession, handleLogout } = useBugMind();
+  const { session: { theme }, auth: { globalView }, ai: { fetchAISettings, usage }, updateSession, handleLogout } = useBugMind();
 
   return (
     <header className="px-5 py-4 border-b border-[var(--border-main)] flex justify-between items-center backdrop-blur-xl bg-[var(--bg-app)]/80 dark:bg-white/5 sticky top-0 z-50 shadow-[var(--shadow-sm)]">
@@ -15,6 +15,11 @@ const Header: React.FC = () => {
       </div>
       {globalView !== 'auth' && (
         <div className="flex items-center gap-1">
+          {usage && (
+            <div className="px-2.5 py-1 rounded-xl border border-[var(--border-main)] bg-[var(--bg-card)] text-[9px] font-black uppercase tracking-widest text-[var(--text-muted)] mr-1">
+              {usage.plan} {usage.remaining}/{usage.limit}
+            </div>
+          )}
           <button 
             onClick={() => { fetchAISettings(); updateSession({ view: 'settings' }); }} 
             className="p-2.5 hover:bg-blue-500/10 rounded-2xl transition-all text-[var(--text-muted)] hover:text-blue-500 border border-transparent hover:border-blue-500/20"

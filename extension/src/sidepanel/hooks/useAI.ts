@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import { TabSession, BugReport, Usage, INITIAL_SESSION, CreatedIssue, JiraUser } from '../types';
 import { apiRequest } from '../services/api';
 import { translateError } from '../utils/ErrorTranslator';
@@ -18,10 +18,19 @@ export function useAI(
   const [customKey, setCustomKey] = useState('');
   const [hasCustomKeySaved, setHasCustomKeySaved] = useState(false);
 
+  const activeFetches = useRef<Set<string>>(new Set());
+  const isFetching = (key: string) => activeFetches.current.has(key);
+  const startFetch = (key: string) => activeFetches.current.add(key);
+  const clearFetch = (key: string) => activeFetches.current.delete(key);
+
   const fetchUsage = async () => {
     if (!authToken) return;
+    const fetchKey = 'usage-fetch';
+    if (isFetching(fetchKey)) return;
+
+    startFetch(fetchKey);
     try {
-      const res = await apiRequest(`${apiBase}/bugs/usage`, { token: authToken });
+      const res = await apiRequest(`${apiBase}/ai/usage`, { token: authToken });
       if (res.ok) {
         const data = await res.json() as Usage;
         setUsage(data);
@@ -29,10 +38,17 @@ export function useAI(
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
       logDebug('USAGE-ERR', errMsg);
+    } finally {
+      clearFetch(fetchKey);
     }
   };
 
   const fetchAISettings = async () => {
+    if (!authToken) return;
+    const fetchKey = 'ai-settings-fetch';
+    if (isFetching(fetchKey)) return;
+
+    startFetch(fetchKey);
     updateSession({ loading: true });
     try {
       const res = await apiRequest(`${apiBase}/settings/ai`, { token: authToken });
@@ -44,7 +60,10 @@ export function useAI(
       logDebug('AI-SETTINGS-ERR', errMsg);
       const translated = translateError(err, 'settings');
       updateSession({ error: translated.description });
-    } finally { updateSession({ loading: false }); }
+    } finally { 
+      updateSession({ loading: false }); 
+      clearFetch(fetchKey);
+    }
   };
 
   const handleUpdateBug = (index: number, updates: Partial<BugReport>) => {
@@ -66,29 +85,43 @@ export function useAI(
 
   const generateBugs = async () => {
     if (!currentTabId || !session.issueData) return;
+    if (!session.selectedIssueType?.id) {
+      updateSession({ error: 'MISSING_ISSUE_TYPE' }, currentTabId);
+      return;
+    }
     
     updateSession({ loading: true, error: null, bugs: [] });
     logDebug('AI-START', `Analyzing ${session.issueData.key}`);
 
     try {
-      const res = await apiRequest(`${apiBase}/bugs/generate`, {
+      const res = await apiRequest(`${apiBase}/ai/generate`, {
         method: 'POST',
         token: authToken,
         onDebug: logDebug,
         body: JSON.stringify({
-          issue_key: session.issueData.key,
-          summary: session.issueData.summary,
-          description: session.issueData.description,
-          acceptance_criteria: session.issueData.acceptanceCriteria
+          selected_text: `${session.issueData.summary}\n${session.issueData.description}\n${session.issueData.acceptanceCriteria}`,
+          jira_connection_id: session.jiraConnectionId,
+          project_key: session.issueData.key.split('-')[0],
+          project_id: session.issueData.projectId,
+          issue_type_id: session.selectedIssueType.id
         })
       });
 
-      const data = await res.json();
+      const data = await res.json() as { summary: string; description: string; fields?: Record<string, unknown> };
       if (!res.ok) {
         throw new Error((data as { detail?: string }).detail || "AI Analysis failed");
       }
-      updateSession({ bugs: data as BugReport[] }, currentTabId);
-      logDebug('AI-OK', `Generated ${(data as BugReport[]).length} reports for tab ${currentTabId}`);
+      const bug: BugReport = {
+        summary: data.summary,
+        description: data.description,
+        steps_to_reproduce: '',
+        expected_result: '',
+        actual_result: '',
+        severity: 'Medium',
+        extra_fields: (data.fields || {}) as BugReport['extra_fields']
+      };
+      updateSession({ bugs: [bug] }, currentTabId);
+      logDebug('AI-OK', `Generated 1 report for tab ${currentTabId}`);
       fetchUsage();
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -102,24 +135,43 @@ export function useAI(
 
   const handleManualGenerate = async () => {
     if (!session.manualDesc.trim()) return;
+    if (!session.selectedIssueType?.id) {
+      updateSession({ error: 'MISSING_ISSUE_TYPE' });
+      return;
+    }
     updateSession({ loading: true, error: null });
     logDebug('MANUAL-START', 'Structuring manual description...');
     try {
-      const res = await apiRequest(`${apiBase}/bugs/generate/manual`, {
+      const selectedText = session.issueData
+        ? `${session.issueData.summary}\n${session.issueData.description}\n${session.issueData.acceptanceCriteria}`
+        : session.manualDesc;
+
+      const res = await apiRequest(`${apiBase}/ai/generate`, {
         method: 'POST',
         token: authToken,
         onDebug: logDebug,
         body: JSON.stringify({
-          description: session.manualDesc,
-          issue_key: session.issueData?.key || 'MANUAL',
-          jira_context: session.issueData ? `${session.issueData.summary}\n${session.issueData.description}` : undefined
+          selected_text: selectedText,
+          jira_connection_id: session.jiraConnectionId,
+          project_key: session.issueData?.key.split('-')[0] || 'MANUAL',
+          project_id: session.issueData?.projectId,
+          issue_type_id: session.selectedIssueType.id,
+          user_description: session.manualDesc
         })
       });
       
-      const rawBody = await res.text();
-      if (!res.ok) throw new Error(rawBody || "Manual processing failed");
+      const data = await res.json() as { summary: string; description: string; fields?: Record<string, unknown>; detail?: string };
+      if (!res.ok) throw new Error(data.detail || "Manual processing failed");
       
-      const newBug: BugReport = { ...(JSON.parse(rawBody) as BugReport), extra_fields: {} };
+      const newBug: BugReport = {
+        summary: data.summary,
+        description: data.description,
+        steps_to_reproduce: '',
+        expected_result: '',
+        actual_result: '',
+        severity: 'Medium',
+        extra_fields: (data.fields || {}) as BugReport['extra_fields']
+      };
       logDebug('MANUAL-SUCCESS', `Structured: ${newBug.summary}`);
       const existingBugs = session.bugs || [];
       updateSession({ 
@@ -142,32 +194,40 @@ export function useAI(
 
   const submitBugs = async () => {
     const bugs = session.bugs || [];
-    if (!session.issueData || !bugs.length) return;
+    if (!session.issueData || !bugs.length || !session.jiraConnectionId) return;
     
     updateSession({ loading: true, error: null });
     try {
       const pKey = session.issueData.key.split('-')[0];
       
-      const res = await apiRequest(`${apiBase}/bugs/submit/batch`, {
-        method: 'POST',
-        token: authToken,
-        onDebug: logDebug,
-        body: JSON.stringify({
-          issue_key: session.issueData.key,
-          project_key: pKey,
-          project_id: session.issueData.projectId,
-          base_url: session.instanceUrl,
-          bugs: bugs
-        })
-      });
-      const data = await res.json() as { detail?: string; issues?: CreatedIssue[]; created_count?: number };
-      if (!res.ok) throw new Error(data.detail || "Submission failed");
-      
-      updateSession({ 
-        view: 'success',
-        createdIssues: data.issues || []
-      });
-      logDebug('SUBMIT-OK', `Batch of ${data.created_count || (session.bugs || []).length} pushed to Jira`);
+      const projId = session.issueData.projectId || pKey;
+      const createdIssues: CreatedIssue[] = [];
+
+      for (const bug of bugs) {
+        const payload = {
+          fields: {
+            summary: bug.summary,
+            description: bug.description,
+            issuetype: { id: session.selectedIssueType?.id },
+            ...bug.extra_fields
+          }
+        };
+
+        const res = await apiRequest(`${apiBase}/jira/connections/${session.jiraConnectionId}/projects/${projId}/issues`, {
+          method: 'POST',
+          token: authToken,
+          onDebug: logDebug,
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json() as { detail?: string; issue_key?: string };
+        if (!res.ok) throw new Error(data.detail || "Submission failed");
+        if (data.issue_key) {
+          createdIssues.push({ id: data.issue_key, key: data.issue_key, self: '' });
+        }
+      }
+
+      updateSession({ view: 'success', createdIssues });
+      logDebug('SUBMIT-OK', `Batch of ${createdIssues.length} pushed to Jira`);
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
       logDebug('SUBMIT-ERR', errMsg);
@@ -178,8 +238,10 @@ export function useAI(
     }
   };
 
-  const searchUsers = async (query: string, baseUrl: string, projectId?: string, projectKey?: string, bugIndex?: number) => {
+  const searchUsers = async (query: string, projectId?: string, projectKey?: string, bugIndex?: number) => {
     if (query.length < 2) return;
+    const connId = session.jiraConnectionId;
+    if (!connId) return;
 
     if (bugIndex !== undefined) {
       handleUpdateBug(bugIndex, { 
@@ -189,14 +251,12 @@ export function useAI(
     }
 
     if (searchControllerRef.current) {
-      logDebug('SEARCH-ABORT', 'Aborting previous search request...');
       searchControllerRef.current.abort();
     }
     searchControllerRef.current = new AbortController();
 
     try {
-      let url = `${apiBase}/jira/users/search?project_key=${projectId || projectKey || ''}&query=${encodeURIComponent(query)}&base_url=${encodeURIComponent(baseUrl)}`;
-      if (projectId) url += `&project_id=${projectId}`;
+      const url = `${apiBase}/jira/connections/${connId}/users/search?query=${encodeURIComponent(query)}&project_id=${projectId || ''}&project_key=${projectKey || ''}`;
       
       const res = await apiRequest(url, { 
         token: authToken,
@@ -208,14 +268,12 @@ export function useAI(
           handleUpdateBug(bugIndex, { 
             userSearchResults: users,
             isSearchingUsers: false 
-            // Note: handleUpdateBug will set isSearchingUsers to false via the spread
           });
           return;
         }
       }
     } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      logDebug('SEARCH-ERR', `User search failed: ${errMsg}`);
+      // Ignore abort errors
     } finally {
       if (bugIndex !== undefined) {
         handleUpdateBug(bugIndex, { isSearchingUsers: false });
@@ -223,7 +281,8 @@ export function useAI(
     }
   };
 
-  return {
+
+  return useMemo(() => ({
     usage, fetchUsage,
     customModel, setCustomModel,
     customKey, setCustomKey,
@@ -234,5 +293,9 @@ export function useAI(
     handleManualGenerate,
     submitBugs,
     searchUsers
-  };
+  }), [
+    usage, customModel, customKey, hasCustomKeySaved,
+    session.issueData, session.bugs, session.instanceUrl, session.manualDesc, 
+    currentTabId, updateSession, setTabSessions
+  ]);
 }

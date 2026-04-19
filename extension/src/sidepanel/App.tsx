@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { Loader2, AlertCircle, Plus } from 'lucide-react';
 
 // Context
@@ -12,41 +12,45 @@ import SetupView from './components/views/SetupView';
 import MainView from './components/views/MainView';
 import SuccessView from './components/views/SuccessView';
 import SettingsView from './components/views/SettingsView';
+import PreviewView from './components/views/PreviewView';
 import DebugConsole from './components/layout/DebugConsole';
 import BlockingLoader from './components/common/BlockingLoader';
 import OnboardingTour from './components/common/OnboardingTour';
-import { INTERVALS, APP_VERSION } from './constants';
+import { APP_VERSION } from './constants';
 
 export default function App() {
   const { 
     session, updateSession, auth, initializing, checkAuth, refreshIssue, debug, handleLogout, sessionHydrated 
   } = useBugMind();
+  
+  const lastEffectiveView = useRef<string | null>(null);
 
   useEffect(() => {
-    checkAuth();
-  }, [auth.authToken, checkAuth]);
+    if (auth.storageLoaded) {
+      checkAuth();
+    }
+  }, [auth.storageLoaded, auth.authToken, checkAuth]);
 
+  // Logic to determine which view to show
+  const activeView = (auth.globalView === 'auth' || auth.globalView === 'setup') 
+    ? auth.globalView 
+    : session.view;
+    
   // Sync logic: Primary refresh when entering main view
   useEffect(() => {
-    if (auth.authToken && session.view === 'main' && auth.globalView === 'main') {
+    const isMain = auth.authToken && session.view === 'main' && auth.globalView === 'main';
+    
+    if (isMain && lastEffectiveView.current !== activeView) {
       debug.log('INIT-SYNC', 'App entering main view, triggering refresh...');
       refreshIssue();
     }
-  }, [auth.authToken, session.view, auth.globalView, debug, refreshIssue]);
+    
+    // Track current view for next transition
+    lastEffectiveView.current = activeView;
+  }, [auth.authToken, session.view, auth.globalView, activeView, refreshIssue, debug.log]);
 
-  // Context Discovery Poller: Only runs in background when main view is active
-  useEffect(() => {
-    if (auth.authToken && session.view === 'main' && auth.globalView === 'main') {
-      const interval = setInterval(() => {
-        // Only trigger poll if we DON'T have data and aren't already fetching
-        if (!session.issueData && !session.loading) {
-          debug.log('POLL-SYNC', 'Poller triggering dynamic refresh...');
-          refreshIssue();
-        }
-      }, INTERVALS.CONTEXT_DISCOVERY);
-      return () => clearInterval(interval);
-    }
-  }, [auth.authToken, session.view, auth.globalView, session.issueData, session.loading, debug, refreshIssue]);
+
+
 
   if (initializing) {
     return (
@@ -70,8 +74,6 @@ export default function App() {
     );
   }
 
-  // Determine active view
-  const activeView = auth.globalView === 'auth' || auth.globalView === 'setup' ? auth.globalView : session.view;
 
   return (
     <div className={`flex flex-col h-screen text-[var(--text-main)] overflow-hidden font-sans selection:bg-[var(--status-info)]/30 transition-colors duration-500 ${session.theme === 'light' ? 'theme-light bg-[var(--bg-app)]' : 'bg-[var(--bg-app)]'}`}>
@@ -122,6 +124,7 @@ export default function App() {
 
           {activeView === 'success' && <SuccessView />}
           {activeView === 'settings' && <SettingsView />}
+          {activeView === 'preview' && <PreviewView />}
         </div>
       </main>
 

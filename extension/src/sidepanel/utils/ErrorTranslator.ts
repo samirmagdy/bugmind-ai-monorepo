@@ -29,6 +29,13 @@ export function translateError(error: unknown, context?: string): TranslatedErro
     };
   }
 
+  if (message.includes('Timed out connecting to Jira')) {
+    return {
+      title: 'Jira Connection Timed Out',
+      description: message
+    };
+  }
+
   // 2. Handle Auth Errors
   if (message === 'Unauthorized' || message.includes('401')) {
     return {
@@ -59,10 +66,27 @@ export function translateError(error: unknown, context?: string): TranslatedErro
   }
 
   // 3. Handle Jira Errors
+  if (message.includes('Access Denied') || message.includes('permissions') || message.includes('not found')) {
+    return {
+      title: 'Jira Access Issue',
+      description: message.includes('Browse Projects') 
+        ? message 
+        : 'Access denied to Jira. Please verify your API Token permissions and project access.'
+    };
+  }
+
   if (message.includes('Jira fields') || message.includes('issue types')) {
     return {
       title: 'Jira Sync Failed',
       description: 'We had trouble pulling configuration from Jira. Ensure your URLs and API tokens are correct.'
+    };
+  }
+
+  if (message.startsWith('XRAY_TEST_ISSUE_TYPE_MISSING:') || message.includes('Could not find an Xray Test issue type')) {
+    const projectRef = message.split(':')[1] || 'the selected project';
+    return {
+      title: 'Xray Not Available',
+      description: `Project ${projectRef} does not expose a Jira issue type for Xray Tests. Add Xray Test issue types to that project or choose a different test repository project.`
     };
   }
 
@@ -74,17 +98,24 @@ export function translateError(error: unknown, context?: string): TranslatedErro
   }
 
   // 4. Handle AI Errors
+  if (message.includes('AI Quota Exceeded') || message.includes('402') || message.includes('credits')) {
+    return {
+      title: 'AI Credits Exhausted',
+      description: 'Your AI credit limit has been reached. Please check your OpenRouter account settings or add credits.'
+    };
+  }
+
+  if (message.includes('429') || message.includes('limit') || message.includes('Too many requests')) {
+    return {
+      title: 'Rate Limit Reached',
+      description: 'You have reached the limit of requests for now. Please wait a few minutes before trying again.'
+    };
+  }
+
   if (message.includes('AI Analysis failed') || message.includes('content') || message.includes('Empty response')) {
     return {
       title: 'AI Analysis Error',
       description: 'BugMind AI failed to analyze the issue. This might be a temporary issue with the AI provider. Please try again.'
-    };
-  }
-
-  if (message.includes('429') || message.includes('limit')) {
-    return {
-      title: 'Rate Limit Reached',
-      description: 'You have reached the limit of requests for now. Please wait a few minutes before trying again.'
     };
   }
 
@@ -107,6 +138,13 @@ export function translateError(error: unknown, context?: string): TranslatedErro
     return {
       title: 'Not a User Story',
       description: 'BugMind is optimized for Requirement Analysis of User Stories.'
+    };
+  }
+
+  if (message === 'MISSING_ISSUE_TYPE') {
+    return {
+      title: 'Jira Config Still Loading',
+      description: 'Wait for Jira issue types to load, then try the analysis again.'
     };
   }
 

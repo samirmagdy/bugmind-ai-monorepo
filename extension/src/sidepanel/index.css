@@ -199,6 +199,14 @@ body {
   min-height: 0;
 }
 
+.collapsible-grid.expanded .collapsible-content {
+  overflow: visible;
+}
+
+.collapsible-grid.expanded .collapsible-content {
+  overflow: visible;
+}
+
 /* Utilities: Glassmorphism & Blurs */
 .glass-panel {
   background: var(--bg-card);

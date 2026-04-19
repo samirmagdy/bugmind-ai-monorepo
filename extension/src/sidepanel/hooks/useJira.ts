@@ -1,77 +1,43 @@
-import { useState, useEffect } from 'react';
+import { useState, useRef, useMemo, useCallback } from 'react';
 import { TabSession, IssueType, JiraField, JiraMetadata } from '../types';
 import { apiRequest } from '../services/api';
 import { translateError } from '../utils/ErrorTranslator';
-import { obfuscate, deobfuscate } from '../utils/StorageObfuscator';
 
 export function useJira(
   apiBase: string,
   authToken: string | null,
   logDebug: (tag: string, msg: string) => void,
   session: TabSession,
-  updateSession: (updates: Partial<TabSession>, tabId?: number) => void
+  updateSession: (updates: Partial<TabSession>, tabId?: number | null) => void
 ) {
-  const [jiraPlatform, setJiraPlatform] = useState<'cloud' | 'server'>('cloud');
-  const [cloudUrl, setCloudUrl] = useState('');
-  const [cloudUsername, setCloudUsername] = useState('');
-  const [cloudToken, setCloudToken] = useState('');
-  const [serverUrl, setServerUrl] = useState('');
-  const [serverUsername, setServerUsername] = useState('');
-  const [serverToken, setServerToken] = useState('');
-  const [verifySsl, setVerifySsl] = useState(true);
-  const [jiraConnected, setJiraConnected] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
+  const activeFetches = useRef<Set<string>>(new Set());
 
-  // Persistence logic
-  const saveJiraConfig = (updates: Record<string, string | boolean | undefined>) => {
-    chrome.storage.local.get(['bugmind_jira_config'], (res) => {
-      const current = (res.bugmind_jira_config as Record<string, string | boolean | undefined>) || {};
-      
-      // Obfuscate sensitive fields before saving
-      const secureUpdates = { ...updates };
-      if (typeof secureUpdates.cloudToken === 'string') secureUpdates.cloudToken = obfuscate(secureUpdates.cloudToken);
-      if (typeof secureUpdates.serverToken === 'string') secureUpdates.serverToken = obfuscate(secureUpdates.serverToken);
-      if (typeof secureUpdates.cloudUsername === 'string') secureUpdates.cloudUsername = obfuscate(secureUpdates.cloudUsername);
-      if (typeof secureUpdates.serverUsername === 'string') secureUpdates.serverUsername = obfuscate(secureUpdates.serverUsername);
-      
-      chrome.storage.local.set({ 'bugmind_jira_config': { ...current, ...secureUpdates } });
-    });
-  };
+  const isFetching = (key: string) => activeFetches.current.has(key);
+  const startFetch = (key: string) => activeFetches.current.add(key);
+  const clearFetch = (key: string) => activeFetches.current.delete(key);
 
-  useEffect(() => {
-    chrome.storage.local.get(['bugmind_jira_config'], (res) => {
-      if (res.bugmind_jira_config) {
-        const c = res.bugmind_jira_config;
-        if (c.platform) setJiraPlatform(c.platform);
-        if (c.cloudUrl) setCloudUrl(c.cloudUrl);
-        if (c.cloudUsername) setCloudUsername(deobfuscate(c.cloudUsername));
-        if (c.cloudToken) setCloudToken(deobfuscate(c.cloudToken));
-        if (c.serverUrl) setServerUrl(c.serverUrl);
-        if (c.serverUsername) setServerUsername(deobfuscate(c.serverUsername));
-        if (c.serverToken) setServerToken(deobfuscate(c.serverToken));
-        if (c.verifySsl !== undefined) setVerifySsl(c.verifySsl);
-      }
-      setIsInitializing(false);
-    });
-  }, []);
-
-  const normalizeUrl = (url: string | null | undefined) => {
-    if (!url) return null;
-    return url.trim().replace(/\/$/, '');
-  };
-
-  const fetchIssueTypes = async (projectKey: string, baseUrl: string, tabId?: number, projectId?: string) => {
+  const fetchIssueTypes = async (connectionId: number, projectKey: string, tabId?: number | null, projectId?: string) => {
     if (!authToken) return;
-    logDebug('TYPES-START', `Fetching issue types for ${projectKey} on ${baseUrl}`);
+    const fetchKey = `types-${projectKey}-${connectionId}`;
+    if (isFetching(fetchKey)) return;
+    
+    startFetch(fetchKey);
+    logDebug('TYPES-SCAN', `Triggering issue-type fetch for ${projectKey} on connection ${connectionId}`);
     try {
-      let url = `${apiBase}/jira/issue-types?project_key=${projectKey}&base_url=${encodeURIComponent(baseUrl)}`;
-      if (projectId) url += `&project_id=${projectId}`;
+      const projId = projectId || projectKey;
+      const finalUrl = `${apiBase}/jira/connections/${connectionId}/projects/${projId}/metadata`;
       
-      const res = await apiRequest(url, { token: authToken, onDebug: logDebug });
+      const res = await apiRequest(finalUrl, { token: authToken, onDebug: logDebug });
       if (res.ok) {
         const types = await res.json() as IssueType[];
-        logDebug('TYPES-OK', `Found ${types.length} issue types`);
-        updateSession({ issueTypes: types }, tabId);
+        
+        if (types.length === 0) {
+          updateSession({ issueTypes: [], issueTypesFetched: true, error: 'NO_ISSUE_TYPES_FOUND' }, tabId);
+          return;
+        }
+
+        updateSession({ issueTypes: types, issueTypesFetched: true, error: null }, tabId);
         
         if (!session.selectedIssueType) {
           const bugType = types.find((t: IssueType) => t.name.toLowerCase().includes('bug'));
@@ -87,22 +53,24 @@ export function useJira(
       logDebug('TYPES-ERROR', errMsg);
       const translated = translateError(err, 'jira-types');
       updateSession({ error: translated.description }, tabId);
+    } finally {
+      clearFetch(fetchKey);
     }
   };
 
-  const fetchJiraMetadata = async (projectKey: string, baseUrl: string, issueTypeId?: string, tabId?: number, projectId?: string) => {
+  const fetchJiraMetadata = async (connectionId: number, projectKey: string, issueTypeId: string, tabId?: number | null, projectId?: string) => {
     if (!authToken) return;
-    logDebug('META-START', `Fetching schema for ${projectKey} on ${baseUrl}`);
+    const fetchKey = `meta-${projectKey}-${connectionId}-${issueTypeId || 'none'}`;
+    if (isFetching(fetchKey)) return;
+
+    startFetch(fetchKey);
+    const projId = projectId || projectKey;
+    const finalUrl = `${apiBase}/jira/connections/${connectionId}/projects/${projId}/issue-types/${issueTypeId}/fields`;
+
     try {
-      let url = `${apiBase}/jira/metadata?project_key=${projectKey}&base_url=${encodeURIComponent(baseUrl)}`;
-      if (issueTypeId) url += `&issue_type_id=${issueTypeId}`;
-      if (projectId) url += `&project_id=${projectId}`;
-      
-      const res = await apiRequest(url, { token: authToken, onDebug: logDebug });
+      const res = await apiRequest(finalUrl, { token: authToken, onDebug: logDebug });
       if (res.ok) {
         const data = await res.json() as JiraMetadata;
-        logDebug('META-OK', `Received ${data.fields?.length || 0} fields`);
-        
         const updates: Partial<TabSession> = { jiraMetadata: data };
         if (session.visibleFields.length === 0 && data.fields) {
           const requiredFields = data.fields.filter((f: JiraField) => f.required).map((f: JiraField) => f.key);
@@ -111,106 +79,137 @@ export function useJira(
         updateSession(updates, tabId);
       }
     } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      logDebug('META-ERROR', errMsg);
       const translated = translateError(err, 'jira-metadata');
       updateSession({ error: translated.description }, tabId);
+    } finally {
+      clearFetch(fetchKey);
     }
   };
 
-  const fetchFieldSettings = async (projectKey: string, baseUrl: string, issueTypeId?: string, tabId?: number, projectId?: string) => {
+  const fetchFieldSettings = async (connectionId: number, projectKey: string, tabId?: number | null, issueTypeId?: string, projectId?: string) => {
     if (!authToken) return;
-    logDebug('SETTINGS-FETCH', `Pulling project field settings for ${projectKey}...`);
-    try {
-      let url = `${apiBase}/jira/field-settings?project_key=${projectKey}&base_url=${encodeURIComponent(baseUrl)}`;
-      if (issueTypeId) url += `&issue_type_id=${issueTypeId}`;
-      if (projectId) url += `&project_id=${projectId}`;
+    const fetchKey = `settings-${projectKey}-${connectionId}`;
+    if (isFetching(fetchKey)) return;
+    startFetch(fetchKey);
 
-      const res = await apiRequest(url, { token: authToken });
+    const settingsProjectId = projectId || projectKey;
+    const finalUrl = `${apiBase}/jira/connections/${connectionId}/projects/${settingsProjectId}/field-settings${issueTypeId ? `?issue_type_id=${issueTypeId}` : ''}`;
+    
+    try {
+      const res = await apiRequest(finalUrl, { token: authToken });
       if (res.ok) {
         const data = await res.json() as { visible_fields?: string[]; ai_mapping?: Record<string, string> };
+        const nextVisible = data.visible_fields || [];
+        
+        // If we don't have saved settings but we do have metadata, pre-fill with required fields
+        if (nextVisible.length === 0 && session.jiraMetadata?.fields) {
+          const required = session.jiraMetadata.fields.filter((f: JiraField) => f.required).map((f: JiraField) => f.key);
+          if (required.length > 0) {
+            updateSession({ visibleFields: required, aiMapping: data.ai_mapping || {} }, tabId);
+            return;
+          }
+        }
+
         updateSession({ 
-          visibleFields: data.visible_fields || [],
+          visibleFields: nextVisible,
           aiMapping: data.ai_mapping || {}
         }, tabId);
       }
     } catch (err: unknown) {
       // Background fetch, ignore errors
+    } finally {
+      clearFetch(fetchKey);
     }
   };
 
-  const checkJiraStatus = async (isInit: boolean = false, signal?: AbortSignal, tokenOverride?: string, urlOverride?: string, tabId?: number): Promise<boolean> => {
+  const checkJiraStatus = useCallback(async (isInit: boolean = false, signal?: AbortSignal, tokenOverride?: string, tabId?: number | null): Promise<boolean> => {
+    if (!authToken && !tokenOverride) {
+      setIsInitializing(false);
+      return false;
+    }
+
+    const fetchKey = 'status-check';
+    if (isFetching(fetchKey)) return false;
+
+    startFetch(fetchKey);
     if (!isInit) updateSession({ loading: true }, tabId);
-    const targetUrl = urlOverride || session.instanceUrl;
-    logDebug('JIRA-STATUS', `Verifying connection... ${targetUrl || '(global)'}`);
     
     try {
-      let url = `${apiBase}/jira/status`;
-      if (targetUrl) url += `?base_url=${encodeURIComponent(targetUrl)}`;
-      
-      const res = await apiRequest(url, { signal, token: tokenOverride || authToken, onDebug: logDebug });
-      const data = await res.json() as { connected?: boolean; connections?: { auth_type?: 'cloud' | 'server'; base_url: string; verify_ssl?: boolean }[] };
-      
-      if (data.connected || (data.connections && data.connections.length > 0)) {
-        logDebug('JIRA-OK', 'Jira connected successfully');
-        setJiraConnected(true);
+      const res = await apiRequest(`${apiBase}/jira/connections`, { signal, token: tokenOverride || authToken, onDebug: logDebug });
+      if (res.ok) {
+        const connections = await res.json();
         
-        // If we don't have a targetUrl, use the first active connection
-        const activeConn = data.connections && data.connections[0];
-        if (activeConn || data.connected) {
-          // Special case: if data.connected is true but activeConn is null, it might be the status of the CURRENT requested targetUrl
-          const conn = activeConn || { auth_type: 'cloud', base_url: targetUrl || '', verify_ssl: true };
-          const platform = conn.auth_type || 'cloud';
-          const normalizedBase = normalizeUrl(conn.base_url) || targetUrl;
-          
-          if (normalizedBase) {
-            setJiraPlatform(platform);
-            if (platform === 'cloud') setCloudUrl(normalizedBase);
-            if (platform === 'server') setServerUrl(normalizedBase);
-            setVerifySsl(conn.verify_ssl ?? true);
-            
-            // Persist the identified base URL for the form too
-            saveJiraConfig({ 
-              platform, 
-              [platform === 'cloud' ? 'cloudUrl' : 'serverUrl']: normalizedBase,
-              verifySsl: conn.verify_ssl ?? true
-            });
+        const updates: Partial<TabSession> = { connections };
 
-            updateSession({ view: 'main', instanceUrl: normalizedBase }, tabId);
-            return true;
-          }
+        if (connections.length > 0 && !updates.jiraConnectionId) {
+          updates.jiraConnectionId = connections[0].id;
         }
-        return true;
-      } else {
-        logDebug('JIRA-SETUP', 'Account valid but Jira not connected');
-        if (targetUrl) updateSession({ view: 'setup' }, tabId);
-        return false;
+
+        updateSession(updates, tabId);
+        return connections.length > 0;
       }
+      return false;
     } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      logDebug('JIRA-ERR', `Status check failed: ${errMsg}`);
+      logDebug('JIRA-ERR', `Status check failed: ${err}`);
       return false;
     } finally {
+      setIsInitializing(false);
       if (!isInit) updateSession({ loading: false }, tabId);
+      clearFetch(fetchKey);
+    }
+  }, [apiBase, authToken, logDebug, session.jiraConnectionId, updateSession]);
+
+  const createConnection = async (config: any) => {
+    if (!authToken) return;
+    updateSession({ loading: true });
+    try {
+      const res = await apiRequest(`${apiBase}/jira/connections`, {
+        method: 'POST',
+        token: authToken,
+        body: JSON.stringify(config)
+      });
+      if (res.ok) {
+        await checkJiraStatus(false);
+        updateSession({ view: 'main' });
+      } else {
+        const data = await res.json();
+        updateSession({ error: data.detail || 'Failed to create connection' });
+      }
+    } catch (err) {
+      updateSession({ error: 'Connection failed' });
+    } finally {
+      updateSession({ loading: false });
     }
   };
 
-  return {
-    jiraPlatform, setJiraPlatform,
-    cloudUrl, setCloudUrl,
-    cloudUsername, setCloudUsername,
-    cloudToken, setCloudToken,
-    serverUrl, setServerUrl,
-    serverUsername, setServerUsername,
-    serverToken, setServerToken,
-    verifySsl, setVerifySsl,
-    jiraConnected, setJiraConnected,
+  const deleteConnection = async (id: number, tabId?: number | null) => {
+    if (!authToken) return;
+    updateSession({ loading: true }, tabId);
+    try {
+      await apiRequest(`${apiBase}/jira/connections/${id}`, {
+        method: 'DELETE',
+        token: authToken
+      });
+      await checkJiraStatus(false, undefined, undefined, tabId);
+    } catch (err) {
+      logDebug('CONN-DEL-ERR', String(err));
+    } finally {
+      updateSession({ loading: false }, tabId);
+    }
+  };
+
+  const switchConnection = async (id: number) => {
+    updateSession({ jiraConnectionId: id });
+  };
+
+  return useMemo(() => ({
     isInitializing,
-    saveJiraConfig,
     fetchIssueTypes,
     fetchJiraMetadata,
     fetchFieldSettings,
     checkJiraStatus,
-    normalizeUrl
-  };
+    createConnection,
+    deleteConnection,
+    switchConnection
+  }), [isInitializing, fetchIssueTypes, fetchJiraMetadata, fetchFieldSettings, checkJiraStatus, createConnection, deleteConnection, switchConnection]);
 }

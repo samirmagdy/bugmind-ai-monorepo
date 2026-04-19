@@ -1,530 +1,382 @@
-import React, { ReactNode, useCallback, useMemo } from 'react';
+import React, { ReactNode, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useSession } from '../hooks/useSession';
-import { useAuth } from '../hooks/useAuth';
-import { useJira } from '../hooks/useJira';
-import { useAI } from '../hooks/useAI';
-import { INITIAL_SESSION } from '../types';
+
+import { TIMEOUTS, LIMITS } from '../constants';
 import { translateError } from '../utils/ErrorTranslator';
-import { apiRequest } from '../services/api';
-import { TIMEOUTS, LIMITS, DOMAINS } from '../constants';
-import { obfuscate } from '../utils/StorageObfuscator';
+import { apiRequest, readJsonResponse } from '../services/api';
 import { BugMindContext, BugMindContextType } from '../hooks/useBugMind';
+import { obfuscate } from '../utils/StorageObfuscator';
 
-export const BugMindProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  // 1. Utilities (Debug)
-  const [internalLogs, setInternalLogs] = React.useState<{timestamp: string, tag: string, msg: string}[]>([]);
-  const [showDebug, setShowDebug] = React.useState(false);
+// New Specialized Providers
+import { AuthProvider, useAuthContext } from './AuthProvider';
+import { JiraProvider, useJiraContext } from './JiraProvider';
+import { AIProvider, useAIContext } from './AIProvider';
 
-  const logDebug = useCallback((tag: string, msg: string) => {
-    const timestamp = new Date().toLocaleTimeString();
-    
-    // Security: Scrub sensitive data from logs
-    let scrubbedMsg = msg;
-    scrubbedMsg = scrubbedMsg.replace(/eyJ[a-zA-Z0-9_-]+\.eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+/g, '[JWT_TOKEN]');
-    scrubbedMsg = scrubbedMsg.replace(/Basic [a-zA-Z0-9+/=]+/g, 'Basic [REDACTED]');
-    scrubbedMsg = scrubbedMsg.replace(/Bearer [a-zA-Z0-9_-]+/g, 'Bearer [REDACTED]');
+/**
+ * Inner Provider that orchestrates sub-providers and handles global messaging.
+ */
+const BugMindOrchestrator: React.FC<{ 
+  children: ReactNode, 
+  logDebug: (tag: string, msg: string) => void, 
+  internalLogs: any[], 
+  showDebug: boolean, 
+  setShowDebug: (v: boolean) => void, 
+  clearLogs: () => void,
+  sessionData: ReturnType<typeof useSession> 
+}> = ({ 
+  children, logDebug, internalLogs, showDebug, setShowDebug, clearLogs, sessionData 
+}) => {
+  const auth = useAuthContext();
+  const jira = useJiraContext();
+  const ai = useAIContext();
 
-    setInternalLogs(prev => [{ timestamp, tag, msg: scrubbedMsg }, ...prev].slice(0, LIMITS.MAX_DEBUG_LOGS));
-  }, []);
-
-  const clearLogs = useCallback(() => setInternalLogs([]), []);
-
-  // 2. Initialize Hooks
-  const sessionData = useSession(logDebug);
-  const authData = useAuth(logDebug);
-  const jiraData = useJira(
-    authData.apiBase, 
-    authData.authToken, 
-    logDebug, 
-    sessionData.session, 
-    sessionData.updateSession
-  );
-  const aiData = useAI(
-    authData.apiBase,
-    authData.authToken,
-    logDebug,
-    sessionData.session,
-    sessionData.updateSession,
-    sessionData.currentTabId,
-    sessionData.setTabSessions
-  );
-
-  // 3. Orchestration Logic
-
-  const checkAuth = useCallback(async (token?: string) => {
-    logDebug('AUTH-INIT', 'Checking for existing session...');
-    
-    chrome.storage.local.get(['bugmind_onboarding_completed'], (res) => {
-      if (res.bugmind_onboarding_completed) {
-        sessionData.updateSession({ onboardingCompleted: true });
-      }
-    });
-
-    const activeToken = token || authData.authToken;
-    if (!activeToken) {
-      authData.setGlobalView('auth');
-      authData.setInitializing(false);
-      return;
-    }
-
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), TIMEOUTS.API_REQUEST);
-
-      const res = await apiRequest(`${authData.apiBase}/auth/login/verify`, {
-        token: activeToken,
-        signal: controller.signal
+  // 1. Initial Context Hydration (Phase 1)
+  useEffect(() => {
+    if (sessionData.currentTabId && sessionData.sessionHydrated) {
+      logDebug('SYS-INIT', `Hydrating context for tab ${sessionData.currentTabId}...`);
+      chrome.runtime.sendMessage({ 
+        type: 'GET_CURRENT_CONTEXT', 
+        tabId: sessionData.currentTabId 
+      }, (response) => {
+        if (response && !response.error) {
+          logDebug('SYS-INIT-OK', 'Received initial context from background');
+          sessionData.updateSession(response);
+        }
       });
-      clearTimeout(timeoutId);
+    }
+  }, [sessionData.currentTabId, sessionData.sessionHydrated]);
 
-      if (res.ok) {
-        logDebug('AUTH-OK', 'Token valid.');
-        authData.setGlobalView('main');
-        await jiraData.checkJiraStatus(true, undefined, activeToken, undefined, sessionData.currentTabId || undefined);
-        aiData.fetchUsage(); 
-        aiData.fetchAISettings();
-      } else {
-        logDebug('AUTH-ERROR', 'Session expired');
-        authData.setAuthToken(null);
-        authData.setGlobalView('auth');
+  // 2. Listen for Background Events (Phase 1)
+  useEffect(() => {
+    const handleMessage = (message: any) => {
+      if (message.type === 'CONTEXT_UPDATED' && message.tabId === sessionData.currentTabId) {
+        logDebug('SYS-SYNC', 'Received context update from background');
+        sessionData.updateSession(message.context);
       }
-    } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      logDebug('AUTH-ERROR', errMsg);
-      const translated = translateError(err, 'auth');
-      sessionData.updateSession({ error: translated.description });
-    } finally {
-      logDebug('AUTH-READY', 'Initialization complete');
-      authData.setInitializing(false);
-    }
-  }, [authData, logDebug, jiraData, aiData, sessionData]);
+      if (message.type === 'THEME_CHANGED' && sessionData.session.themeSource === 'auto') {
+        logDebug('SYS-THEME', `Theme update: ${message.theme}`);
+        sessionData.updateSession({ theme: message.theme });
+      }
+    };
+    chrome.runtime.onMessage.addListener(handleMessage);
+    return () => chrome.runtime.onMessage.removeListener(handleMessage);
+  }, [sessionData.currentTabId, sessionData.session.themeSource, sessionData.updateSession, logDebug]);
 
-  const refreshIssue = useCallback((force = false) => {
-    if (sessionData.session.loading && !force) {
-      logDebug('EXTRACT-SKIP', 'Already refreshing context...');
-      return;
-    }
+  const lastStaleCheck = useRef<number | null>(null);
 
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      const tab = tabs[0];
-      if (!tab?.id || !tab?.url) return;
+  // 3. Orchestration Logic (Sync dependencies)
+  useEffect(() => {
+    // CIRCUIT BREAKER: Stop all automated sync attempts if we have an error or are already loading
+    if (sessionData.session.error || sessionData.session.loading || !sessionData.sessionHydrated) return;
+
+    // 1. Logic to define defaults
+    const isMain = auth.authToken && auth.globalView === 'main';
+    const hasContext = sessionData.session.issueData?.key && sessionData.session.instanceUrl;
+    
+    // Auto-recovery if stuck without context
+    if (isMain && !hasContext && sessionData.sessionHydrated) {
+      if (!lastStaleCheck.current) { lastStaleCheck.current = Date.now(); }
+      const staleTime = Date.now() - lastStaleCheck.current;
       
-      const tabId = tab.id;
-      const url = tab.url;
-      logDebug('EXTRACT', `Hunting for Jira issue context in tab ${tabId}...`);
+      if (staleTime > 2000) { // 2 seconds without context
+        logDebug('SYNC-STALE', 'Still no context after 2s. Re-requesting background scan...');
+        chrome.runtime.sendMessage({ 
+          type: 'GET_CURRENT_CONTEXT', 
+          tabId: sessionData.currentTabId,
+          force: true 
+        });
+        lastStaleCheck.current = Date.now();
+      }
+    } else {
+      lastStaleCheck.current = null;
+    }
 
-      if (!url.includes(DOMAINS.JIRA_CLOUD) && !url.includes(DOMAINS.BROWSE_PATH) && !url.includes(DOMAINS.ISSUES_PATH)) {
-        logDebug('EXTRACT-SKIP', 'Not a Jira URL');
-        sessionData.updateSession({ issueData: null, error: 'NOT_A_JIRA_PAGE' }, tabId);
+    if (isMain && hasContext) {
+      if (!sessionData.session.jiraConnectionId) {
+        logDebug('SYNC-CONN', 'Connection ID missing. Discovering connection...');
+        jira.checkJiraStatus(true, undefined, undefined, sessionData.session.instanceUrl || undefined, sessionData.currentTabId || undefined);
         return;
       }
 
-      chrome.tabs.sendMessage(tabId, { type: 'PING' }, (pingRes) => {
-        const isHealthy = !chrome.runtime.lastError && pingRes?.type === 'PONG' && pingRes?.version === '1.2.0';
-        
-        if (isHealthy) {
-          logDebug('EXTRACT', 'Content script healthy, requesting data...');
-          chrome.tabs.sendMessage(tabId, { type: 'GET_ISSUE_DATA' }, (response) => {
-            if (response?.type === 'ISSUE_DATA_SUCCESS') {
-              const detectedInstance = url.split('/browse/')[0].split('/issues/')[0];
-              const isStory = response.data.typeName?.toLowerCase().includes('story');
-              
-              if (!isStory) {
-                logDebug('EXTRACT-SKIP', `Issue type ${response.data.typeName} is not a Story. Blocking.`);
-                sessionData.updateSession({ 
-                  issueData: response.data,
-                  instanceUrl: detectedInstance,
-                  error: 'UNSUPPORTED_ISSUE_TYPE' 
-                }, tabId);
-                return;
-              }
+      const pKey = sessionData.session.issueData!.key.split('-')[0];
+      const pId = sessionData.session.issueData!.projectId;
 
-              sessionData.updateSession({ 
-                issueData: response.data,
-                instanceUrl: detectedInstance,
-                theme: sessionData.session.themeSource === 'auto' 
-                  ? (response.data.theme || sessionData.session.theme) 
-                  : sessionData.session.theme,
-                error: null 
-              }, tabId);
-            } else {
-              logDebug('EXTRACT-FAIL', 'Healthy script failed to return valid data');
-              sessionData.updateSession({ error: 'STALE_PAGE' }, tabId);
-            }
-          });
-        } else {
-          logDebug('EXTRACT-HEAL', `Script unhealthy: ${chrome.runtime.lastError?.message || 'Version Mismatch'}. Healing...`);
-          
-          chrome.scripting.executeScript({
-            target: { tabId },
-            files: ['assets/content.js']
-          }).then(() => {
-            logDebug('HEAL-OK', 'Content script healed. Extracting...');
-            chrome.tabs.sendMessage(tabId, { type: 'GET_ISSUE_DATA' }, (retryResponse) => {
-              if (retryResponse?.type === 'ISSUE_DATA_SUCCESS') {
-                const detectedInstance = url.split('/browse/')[0].split('/issues/')[0];
-                const isStory = retryResponse.data.typeName?.toLowerCase().includes('story');
-                
-                if (!isStory) {
-                  logDebug('HEAL-EXTRACT-SKIP', `Healed issue type ${retryResponse.data.typeName} is not a Story.`);
-                  sessionData.updateSession({ 
-                    issueData: retryResponse.data,
-                    instanceUrl: detectedInstance,
-                    error: 'UNSUPPORTED_ISSUE_TYPE' 
-                  }, tabId);
-                  return;
-                }
+      // Sync Issue Types
+      const hasTypes = sessionData.session.issueTypes.length > 0;
+      if (!sessionData.session.issueTypesFetched || !hasTypes) {
+        logDebug('SYNC-INIT', `Refreshing issue types for ${pKey}...`);
+        jira.fetchIssueTypes(sessionData.session.jiraConnectionId, pKey, sessionData.currentTabId!, pId);
+      } else if (!sessionData.session.selectedIssueType) {
+        // FAIL-SAFE: Selection missing
+        const bugType = sessionData.session.issueTypes.find((t: any) => t.name.toLowerCase().includes('bug')) || sessionData.session.issueTypes[0];
+        logDebug('SYNC-HEAL', `Auto-selected issue type: ${bugType.name}`);
+        sessionData.updateSession({ selectedIssueType: bugType });
+      }
 
-                logDebug('HEAL-EXTRACT-OK', 'Extraction recovered after healing');
-                sessionData.updateSession({ 
-                  issueData: retryResponse.data,
-                  instanceUrl: detectedInstance,
-                  theme: sessionData.session.themeSource === 'auto' 
-                    ? (retryResponse.data.theme || sessionData.session.theme) 
-                    : sessionData.session.theme,
-                  error: null 
-                }, tabId);
-              } else {
-                logDebug('HEAL-EXTRACT-FAIL', 'Extraction failed even after healing');
-                sessionData.updateSession({ error: 'STALE_PAGE' }, tabId);
-              }
-            });
-          }).catch((err) => {
-            logDebug('HEAL-FAIL', `Heal failed: ${err.message}`);
-            sessionData.updateSession({ error: 'STALE_PAGE' }, tabId);
-          });
+      // Sync Metadata when issue type is selected
+      if (sessionData.session.selectedIssueType) {
+        const itId = sessionData.session.selectedIssueType.id;
+        const hasMeta = sessionData.session.jiraMetadata?.project_key === pKey && sessionData.session.jiraMetadata?.issue_type_id === itId;
+        if (!hasMeta) {
+          logDebug('SYNC-META', `Syncing schema for ${pKey}:${sessionData.session.selectedIssueType.name}`);
+          jira.fetchJiraMetadata(sessionData.session.jiraConnectionId, pKey, itId, sessionData.currentTabId!, pId);
+          jira.fetchFieldSettings(sessionData.session.jiraConnectionId, pKey, sessionData.currentTabId!, itId, pId);
         }
-      });
-    });
-  }, [logDebug, sessionData]);
+      }
+    } else if (isMain) {
+      const missing = [];
+      if (!sessionData.session.issueData?.key) missing.push('Issue Key (Context)');
+      if (!sessionData.session.instanceUrl) missing.push('Jira Hub URL');
+      if (missing.length > 0) {
+        logDebug('SYNC-WAIT', `Waiting for: ${missing.join(', ')}`);
+      }
+    }
+  }, [
+    auth.authToken, auth.globalView, 
+    sessionData.session.issueData?.key, 
+    sessionData.session.jiraConnectionId,
+    sessionData.session.selectedIssueType?.id,
+    sessionData.session.issueTypesFetched,
+    sessionData.session.issueTypes.length,
+    sessionData.session.jiraMetadata?.issue_type_id,
+    sessionData.currentTabId, sessionData.sessionHydrated,
+    jira, sessionData.updateSession, logDebug
+  ]);
+
+
+
+  // Handle Authentication Logic (Login/Verify)
+  const checkAuth = useCallback(async (token?: string) => {
+    const activeToken = token || auth.authToken;
+    if (!activeToken) {
+      if (auth.globalView !== 'auth') auth.setGlobalView('auth');
+      auth.setInitializing(false);
+      return;
+    }
+    try {
+      const res = await apiRequest(`${auth.apiBase}/auth/me`, { token: activeToken, onUnauthorized: auth.refreshSession });
+      if (res.ok) {
+        logDebug('AUTH-OK', 'Token valid. Checking Jira connection...');
+        const connected = await jira.checkJiraStatus(true, undefined, activeToken, undefined, sessionData.currentTabId || undefined);
+        
+        if (connected) {
+          // Only auto-redirect if we are explicitly sitting on the Auth screen
+          if (auth.globalView === 'auth') {
+            logDebug('AUTH-REDIRECT', 'Connected. Moving to MAIN.');
+            auth.setGlobalView('main');
+          }
+        } else {
+          logDebug('AUTH-SETUP', 'No Jira connection found.');
+          // Only auto-redirect if we are explicitly sitting on the Auth screen
+          if (auth.globalView === 'auth') {
+            auth.setGlobalView('setup');
+          }
+        }
+      } else {
+        logDebug('AUTH-FAIL', 'Session invalid. Redirecting to login.');
+        auth.setAuthToken(null);
+        auth.setGlobalView('auth');
+      }
+    } catch (err) {
+      logDebug('AUTH-ERR', `Background verification failed: ${err}`);
+      // Don't force redirect on network errors, just show the error
+      sessionData.updateSession({ error: translateError(err, 'auth').description });
+    } finally {
+      auth.setInitializing(false);
+    }
+  }, [auth.authToken, auth.globalView, auth.setGlobalView, auth.setAuthToken, auth.setInitializing, auth.apiBase, jira, sessionData.currentTabId, sessionData.updateSession, logDebug]);
 
   const handleLogin = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
-    logDebug('LOGIN-START', `Attempting login for ${authData.email}`);
-    sessionData.updateSession({ error: null });
+    logDebug('LOGIN-START', `Attempting login for ${auth.email}`);
+    sessionData.updateSession({ error: null, loading: true });
     try {
       const formData = new URLSearchParams();
-      formData.append('username', authData.email);
-      formData.append('password', authData.password);
+      formData.append('username', auth.email);
+      formData.append('password', auth.password);
 
-      const response = await apiRequest(`${authData.apiBase}/auth/login`, {
+      const response = await apiRequest(`${auth.apiBase}/auth/login`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded'
-        },
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: formData.toString()
       });
-      const data = await response.json();
+      const data = await readJsonResponse<{ access_token?: string; refresh_token?: string; detail?: string }>(response);
       if (data.access_token) {
-        logDebug('LOGIN-OK', `Login successful. Remember: ${authData.rememberMe}`);
-        authData.setAuthToken(data.access_token);
-        chrome.storage.local.set({ 
-          bugmind_email: authData.email,
-          bugmind_remember_me: authData.rememberMe
-        });
-        const secureToken = obfuscate(data.access_token);
-        if (authData.rememberMe) {
-          chrome.storage.local.set({ bugmind_token: secureToken });
-        } else {
-          chrome.storage.session.set({ bugmind_token: secureToken });
-        }
-        authData.setGlobalView('main');
+        auth.setAuthToken(data.access_token);
+        if (data.refresh_token) auth.setRefreshToken(data.refresh_token);
         
-        await jiraData.checkJiraStatus(true, undefined, data.access_token, undefined, sessionData.currentTabId || undefined);
-        aiData.fetchUsage();
-        aiData.fetchAISettings();
-        refreshIssue();
-
-        sessionData.updateSession({ success: `Welcome back, ${authData.email}!` });
+        // Phase 3 Secure Storage
+        const secureToken = obfuscate(data.access_token);
+        const secureRefreshToken = data.refresh_token ? obfuscate(data.refresh_token) : '';
+        if (auth.rememberMe) {
+          chrome.storage.local.set({ bugmind_token: secureToken, bugmind_refresh_token: secureRefreshToken, bugmind_email: auth.email, bugmind_remember_me: true });
+        }
+        chrome.storage.session.set({ bugmind_token: secureToken, bugmind_refresh_token: secureRefreshToken });
+        
+        logDebug('LOGIN-OK', 'Login successful. Verifying Jira status...');
+        const connected = await jira.checkJiraStatus(true, undefined, data.access_token, undefined, sessionData.currentTabId || undefined);
+        
+        if (connected) {
+          auth.setGlobalView('main');
+          sessionData.updateSession({ success: `Welcome back, ${auth.email}!` });
+        } else {
+          auth.setGlobalView('setup');
+          sessionData.updateSession({ success: 'Login successful! Please connect your Jira instance.' });
+        }
+        
+        ai.fetchUsage();
+        ai.fetchAISettings();
         setTimeout(() => sessionData.updateSession({ success: null }), TIMEOUTS.NOTIFICATION_AUTO_HIDE_LONG);
       } else {
         throw new Error(data.detail || 'Login failed');
       }
-    } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      logDebug('LOGIN-ERR', errMsg);
-      const translated = translateError(err, 'login');
-      sessionData.updateSession({ error: translated.description });
-    }
-  }, [authData, logDebug, sessionData, jiraData, aiData, refreshIssue]);
-
-  const handleRegister = useCallback(async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (authData.password !== authData.confirmPassword) {
-      sessionData.updateSession({ error: "Passwords do not match" });
-      return;
-    }
-    logDebug('REG-START', `Registering account: ${authData.email}`);
-    sessionData.updateSession({ error: null });
-    try {
-      const response = await apiRequest(`${authData.apiBase}/auth/register`, {
-        method: 'POST',
-        body: JSON.stringify({
-          email: authData.email,
-          password: authData.password
-        })
-      });
-      const data = await response.json();
-      if (data.id) {
-        logDebug('REG-OK', 'Registration successful');
-        authData.setAuthMode('login');
-        sessionData.updateSession({ error: null, success: 'Account created! You can now sign in.' });
-        setTimeout(() => sessionData.updateSession({ success: null }), TIMEOUTS.NOTIFICATION_AUTO_HIDE_LONG);
-      } else {
-        throw new Error(data.detail || 'Registration failed');
-      }
-    } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      logDebug('REG-ERR', errMsg);
-      const translated = translateError(err, 'register');
-      sessionData.updateSession({ error: translated.description });
-    }
-  }, [authData, logDebug, sessionData]);
-
-  const handleJiraConnect = useCallback(async (e: React.FormEvent) => {
-    e.preventDefault();
-    logDebug('JIRA-CONNECT', 'Saving connection settings...');
-    sessionData.updateSession({ loading: true, error: null });
-    
-    try {
-      const url = jiraData.jiraPlatform === 'cloud' ? jiraData.cloudUrl : jiraData.serverUrl;
-      const connected = await jiraData.checkJiraStatus(
-        true, 
-        undefined, 
-        authData.authToken || undefined, 
-        url, 
-        sessionData.currentTabId || undefined
-      );
-
-      if (connected) {
-        logDebug('JIRA-OK', 'Connection verified and saved');
-        authData.setGlobalView('main');
-        sessionData.updateSession({ success: 'Jira connected successfully' });
-        setTimeout(() => sessionData.updateSession({ success: null }), TIMEOUTS.NOTIFICATION_AUTO_HIDE);
-      }
-    } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      logDebug('JIRA-ERR', errMsg);
-      const translated = translateError(err, 'jira-connect');
-      sessionData.updateSession({ error: translated.description });
+    } catch (err) {
+      sessionData.updateSession({ error: translateError(err, 'login').description });
     } finally {
       sessionData.updateSession({ loading: false });
     }
-  }, [authData, jiraData, logDebug, sessionData]);
+  }, [auth, jira, ai, sessionData.currentTabId, sessionData.updateSession, logDebug]);
 
-  const handleSaveSettings = useCallback(async (e: React.FormEvent) => {
-    e.preventDefault();
-    logDebug('SETTINGS-SAVE', 'Updating AI overrides...');
-    sessionData.updateSession({ loading: true });
-    try {
-      const res = await apiRequest(`${authData.apiBase}/settings/ai`, {
-        method: 'POST',
-        token: authData.authToken,
-        body: JSON.stringify({
-          custom_model: aiData.customModel,
-          openrouter_key: aiData.customKey
-        })
-      });
-      if (res.ok) {
-        logDebug('SETTINGS-OK', 'Settings saved successfully');
-        aiData.setHasCustomKeySaved(!!aiData.customKey || aiData.hasCustomKeySaved);
-        aiData.setCustomKey('');
-        sessionData.updateSession({ success: 'AI settings updated successfully' });
-        setTimeout(() => sessionData.updateSession({ success: null }), TIMEOUTS.NOTIFICATION_AUTO_HIDE);
-      } else {
-        const data = await res.json();
-        throw new Error(data.detail || 'Failed to save settings');
-      }
-    } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      logDebug('SETTINGS-ERR', errMsg);
-      const translated = translateError(err, 'settings');
-      sessionData.updateSession({ error: translated.description });
-    } finally {
-      sessionData.updateSession({ loading: false });
-    }
-  }, [aiData, authData.apiBase, authData.authToken, logDebug, sessionData]);
-
-  const saveFieldSettings = useCallback(async (nextFields?: string[], nextMapping?: Record<string, string>) => {
-    if (!sessionData.session.instanceUrl || !sessionData.session.jiraMetadata) return;
-    const pKey = sessionData.session.jiraMetadata.project_key;
-    const pId = sessionData.session.issueData?.projectId;
-    const issueTypeId = sessionData.session.selectedIssueType?.id;
-    if (!issueTypeId) return;
-
-    const visibleFields = nextFields || sessionData.session.visibleFields;
-    const aiMapping = nextMapping || sessionData.session.aiMapping;
-
-    logDebug('SETTINGS-SYNC', `Saving project field configuration...`);
-    sessionData.updateSession({ visibleFields, aiMapping });
-
-    try {
-      await apiRequest(`${authData.apiBase}/settings/jira`, {
-        method: 'POST',
-        token: authData.authToken,
-        body: JSON.stringify({
-          base_url: sessionData.session.instanceUrl,
-          project_key: pKey,
-          project_id: pId,
-          issue_type_id: issueTypeId,
-          visible_fields: visibleFields,
-          ai_mapping: aiMapping
-        })
-      });
-      logDebug('SETTINGS-OK', 'Project settings persisted to cloud');
-      sessionData.updateSession({ success: 'Field configuration synced' });
-      setTimeout(() => sessionData.updateSession({ success: null }), TIMEOUTS.NOTIFICATION_AUTO_HIDE);
-    } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      logDebug('SETTINGS-ERR', `Failed to sync settings: ${errMsg}`);
-      const translated = translateError(err, 'settings-sync');
-      sessionData.updateSession({ error: translated.description });
-    }
-  }, [authData.apiBase, authData.authToken, logDebug, sessionData]);
-
-  const handleLogout = useCallback(() => {
-    authData.handleLogout(() => sessionData.setTabSessions({}));
-  }, [authData, sessionData]);
-
-  const handleTabReload = useCallback(() => {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (tabs[0]?.id) {
-        chrome.tabs.reload(tabs[0].id);
-        logDebug('SYS-RELOAD', 'Target tab reload triggered');
-      }
-    });
-  }, [logDebug]);
-
-  const completeOnboarding = useCallback(async () => {
-    logDebug('SYS-ONBOARD', 'Onboarding completed');
-    await chrome.storage.local.set({ 'bugmind_onboarding_completed': true });
-    const nextTabSessions = { ...sessionData.tabSessions };
-    Object.keys(nextTabSessions).forEach(id => {
-      const tid = Number(id);
-      nextTabSessions[tid] = { ...(nextTabSessions[tid] || INITIAL_SESSION), onboardingCompleted: true };
-    });
-    sessionData.setTabSessions(nextTabSessions);
-  }, [logDebug, sessionData]);
-
-  // 4. Global Effects
-  
-  const currentTabIdRef = React.useRef(sessionData.currentTabId);
-  React.useEffect(() => {
-    currentTabIdRef.current = sessionData.currentTabId;
-  }, [sessionData.currentTabId, sessionData]);
-
-  React.useEffect(() => {
-    const handleTabLoad = (tabId: number, changeInfo: chrome.tabs.TabChangeInfo) => {
-      if (changeInfo.status === 'complete' && tabId === currentTabIdRef.current) {
-        logDebug('SYS-SYNC', 'Tab refreshed. Re-scanning context...');
-        refreshIssue();
-      }
-    };
-    chrome.tabs.onUpdated.addListener(handleTabLoad);
-    
-    const handleRuntimeMessage = (message: { type: string, theme?: 'light' | 'dark' }) => {
-      if (message.type === 'THEME_CHANGED' && message.theme) {
-        if (sessionData.session.themeSource === 'auto') {
-          logDebug('SYS-THEME', `Jira theme change detected: ${message.theme}`);
-          sessionData.updateSession({ theme: message.theme });
-        } else {
-          logDebug('SYS-THEME', 'Jira theme change ignored (Manual override active)');
-        }
-      }
-    };
-    chrome.runtime.onMessage.addListener(handleRuntimeMessage);
-
-    return () => {
-      chrome.tabs.onUpdated.removeListener(handleTabLoad);
-      chrome.runtime.onMessage.removeListener(handleRuntimeMessage);
-    };
-  }, [logDebug, refreshIssue, sessionData]);
-
-  React.useEffect(() => {
-    const issueKey = sessionData.session.issueData?.key;
-    const instanceUrl = sessionData.session.instanceUrl;
-    const projectId = sessionData.session.issueData?.projectId;
-    const tabId = sessionData.currentTabId;
-
-    if (issueKey && instanceUrl) {
-      if (sessionData.session.issueTypes.length > 0) return;
-      const pKey = issueKey.split('-')[0];
-      jiraData.fetchIssueTypes(pKey, instanceUrl, tabId || undefined, projectId);
-    }
-  }, [sessionData, jiraData]);
-
-  React.useEffect(() => {
-    const issueKey = sessionData.session.issueData?.key;
-    const instanceUrl = sessionData.session.instanceUrl;
-    const selectedIssueType = sessionData.session.selectedIssueType;
-    const projectId = sessionData.session.issueData?.projectId;
-    const tabId = sessionData.currentTabId;
-
-    if (issueKey && instanceUrl && selectedIssueType) {
-      const pKey = issueKey.split('-')[0];
-      const issueTypeId = selectedIssueType.id;
-      
-      const hasMetadata = sessionData.session.jiraMetadata?.project_key === pKey && sessionData.session.jiraMetadata?.issue_type_id === issueTypeId;
-      if (!hasMetadata) {
-        jiraData.fetchJiraMetadata(pKey, instanceUrl, issueTypeId, tabId || undefined, projectId);
-      }
-      
-      if (sessionData.session.visibleFields.length === 0) {
-        jiraData.fetchFieldSettings(pKey, instanceUrl, issueTypeId, tabId || undefined, projectId);
-      }
-    }
-  }, [sessionData, jiraData]);
-
-  React.useEffect(() => {
-    const error = sessionData.session.error;
-
-    if (error && !['STALE_PAGE', 'NOT_A_JIRA_PAGE', 'UNSUPPORTED_ISSUE_TYPE'].includes(error)) {
-      sessionData.updateSession({ error: null });
-    }
-  }, [sessionData, authData.globalView]);
-
-  React.useEffect(() => {
-    const isInit = authData.initializing;
-    const tabExists = !!sessionData.currentTabId;
-
-    if (!isInit && tabExists) {
-      logDebug('SYS-INIT', 'Authentication ready. Triggering initial context scan...');
-      refreshIssue();
-    }
-  }, [authData.initializing, sessionData.currentTabId, logDebug, refreshIssue, sessionData]);
 
   const value: BugMindContextType = {
     session: sessionData.session,
     updateSession: sessionData.updateSession,
     currentTabId: sessionData.currentTabId,
     setTabSessions: sessionData.setTabSessions,
-    auth: authData,
-    jira: jiraData,
-    ai: aiData,
+    auth: auth as any,
+    jira: jira,
+    ai: ai,
     debug: useMemo(() => ({
       logs: internalLogs,
       show: showDebug,
       setShow: setShowDebug,
       log: logDebug,
       clear: clearLogs
-    }), [internalLogs, showDebug, logDebug, clearLogs]),
-    refreshIssue,
+    }), [internalLogs, showDebug, setShowDebug, logDebug, clearLogs]),
+    refreshIssue: (force) => {
+      logDebug('MANUAL-SYNC', 'Triggering manual context refresh via worker...');
+      chrome.runtime.sendMessage({ type: 'GET_CURRENT_CONTEXT', tabId: sessionData.currentTabId, force });
+    },
     checkAuth,
     handleLogin,
-    handleRegister,
-    handleJiraConnect,
-    handleSaveSettings,
-    saveFieldSettings,
-    handleLogout,
-    handleTabReload,
-    completeOnboarding,
-    initializing: authData.initializing,
+    handleRegister: async (e) => {
+      e.preventDefault();
+      try {
+        const res = await apiRequest(`${auth.apiBase}/auth/register`, {
+          method: 'POST',
+          body: JSON.stringify({ email: auth.email, password: auth.password })
+        });
+        if (res.ok) {
+          auth.setAuthMode('login');
+          sessionData.updateSession({ success: 'Account created! Please sign in.' });
+        }
+      } catch (err) { sessionData.updateSession({ error: translateError(err, 'register').description }); }
+    },
+    handleSaveSettings: async (e) => {
+      e.preventDefault();
+      try {
+        const res = await apiRequest(`${auth.apiBase}/settings/ai`, {
+          method: 'POST', token: auth.authToken, onUnauthorized: auth.refreshSession,
+          body: JSON.stringify({ custom_model: ai.customModel, openrouter_key: ai.customKey })
+        });
+        if (!res.ok) {
+          throw new Error(await res.text() || `Request failed with status ${res.status}`);
+        }
+        if (res.ok) {
+          ai.setHasCustomKeySaved(true);
+          ai.setCustomKey('');
+          sessionData.updateSession({ success: 'Saved' });
+        }
+      } catch (err) { sessionData.updateSession({ error: translateError(err, 'settings').description }); }
+    },
+    saveFieldSettings: async (nf, nm) => {
+      try {
+        const pKey = sessionData.session.issueData?.key.split('-')[0];
+        await apiRequest(`${auth.apiBase}/settings/jira`, {
+          method: 'POST', token: auth.authToken, onUnauthorized: auth.refreshSession,
+          body: JSON.stringify({
+            jira_connection_id: sessionData.session.jiraConnectionId,
+            project_key: pKey,
+            project_id: sessionData.session.issueData?.projectId,
+            issue_type_id: sessionData.session.selectedIssueType?.id,
+            visible_fields: nf || sessionData.session.visibleFields,
+            ai_mapping: nm || sessionData.session.aiMapping
+          })
+        });
+        sessionData.updateSession({ visibleFields: nf || sessionData.session.visibleFields, aiMapping: nm || sessionData.session.aiMapping, success: 'Synced' });
+      } catch (err) { sessionData.updateSession({ error: 'Sync failed' }); }
+    },
+    handleLogout: () => auth.handleLogout(() => sessionData.setTabSessions({})),
+    handleTabReload: () => chrome.tabs.reload(sessionData.currentTabId!),
+    completeOnboarding: async () => {
+      await chrome.storage.local.set({ bugmind_onboarding_completed: true });
+      sessionData.setTabSessions(prev => {
+        const next = { ...prev };
+        Object.keys(next).forEach(id => { next[Number(id)] = { ...next[Number(id)], onboardingCompleted: true }; });
+        return next;
+      });
+    },
+    initializing: auth.initializing,
     sessionHydrated: sessionData.sessionHydrated
   };
 
+  return <BugMindContext.Provider value={value}>{children}</BugMindContext.Provider>;
+}
+
+export const BugMindProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  const [internalLogs, setInternalLogs] = React.useState<{timestamp: string, tag: string, msg: string}[]>([]);
+  const [showDebug, setShowDebug] = React.useState(false);
+  const lastLogRef = useRef<string>('');
+  const lastLogTimeRef = useRef<number>(0);
+
+  const logDebug = useCallback((tag: string, msg: string) => {
+    const timestamp = new Date().toLocaleTimeString();
+    const logKey = `${tag}:${msg}`;
+    if (lastLogRef.current === logKey && (Date.now() - lastLogTimeRef.current < 50)) return;
+    lastLogRef.current = logKey;
+    lastLogTimeRef.current = Date.now();
+    setInternalLogs(prev => [{ timestamp, tag, msg }, ...prev].slice(0, LIMITS.MAX_DEBUG_LOGS));
+  }, []);
+
+  const clearLogs = useCallback(() => setInternalLogs([]), []);
+
   return (
-    <BugMindContext.Provider value={value}>
-      {children}
-    </BugMindContext.Provider>
+    <AuthProvider logDebug={logDebug}>
+      <AuthContextValueWrapper logDebug={logDebug} internalLogs={internalLogs} showDebug={showDebug} setShowDebug={setShowDebug} clearLogs={clearLogs}>
+        {children}
+      </AuthContextValueWrapper>
+    </AuthProvider>
   );
 };
+
+// Intermediate wrapper to access Auth context before Jira/AI providers
+const AuthContextValueWrapper: React.FC<any> = ({ children, logDebug, ...props }) => {
+  const auth = useAuthContext();
+  const sessionData = useSession(logDebug); // We need session in Jira/AI too
+
+  return (
+    <JiraProvider 
+      logDebug={logDebug} 
+      apiBase={auth.apiBase} 
+      authToken={auth.authToken} 
+      refreshAuthToken={auth.refreshSession}
+      session={sessionData.session} 
+      updateSession={sessionData.updateSession}
+    >
+      <AIProvider 
+        logDebug={logDebug} 
+        apiBase={auth.apiBase} 
+        authToken={auth.authToken} 
+        refreshAuthToken={auth.refreshSession}
+        session={sessionData.session} 
+        updateSession={sessionData.updateSession} 
+        currentTabId={sessionData.currentTabId} 
+        setTabSessions={sessionData.setTabSessions}
+      >
+        <BugMindOrchestrator logDebug={logDebug} sessionData={sessionData} {...props}>
+          {children}
+        </BugMindOrchestrator>
+      </AIProvider>
+    </JiraProvider>
+  );
+}
