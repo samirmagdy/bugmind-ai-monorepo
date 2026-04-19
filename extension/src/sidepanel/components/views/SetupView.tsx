@@ -16,6 +16,7 @@ const SetupView: React.FC = () => {
   const [username, setUsername] = useState('');
   const [token, setToken] = useState('');
   const [verifySsl, setVerifySsl] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     if (session.instanceUrl) {
@@ -33,19 +34,24 @@ const SetupView: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const connected = await jira.createConnection({
-      auth_type: platform,
-      base_url: url,
-      username,
-      token,
-      verify_ssl: verifySsl
-    });
+    setIsSubmitting(true);
+    try {
+      const connected = await jira.createConnection({
+        auth_type: platform,
+        base_url: url,
+        username,
+        token,
+        verify_ssl: verifySsl
+      });
 
-    if (connected) {
-      updateSession({ success: 'Connection saved successfully.' });
-      setGlobalView('main');
-    } else {
-      updateSession({ error: 'Failed to save Jira connection.' });
+      if (connected) {
+        updateSession({ success: 'Connection saved successfully.' });
+        setGlobalView('main');
+      } else {
+        updateSession({ error: 'Failed to save Jira connection.' });
+      }
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -172,10 +178,10 @@ const SetupView: React.FC = () => {
 
         <button 
           type="submit" 
-          disabled={jira.isInitializing}
+          disabled={isSubmitting}
           className="w-full bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-bold py-3.5 rounded-xl transition-all shadow-lg"
         >
-          {jira.isInitializing ? 'Connecting...' : 'Test & Save Connection'}
+          {isSubmitting ? 'Connecting...' : 'Test & Save Connection'}
         </button>
       </form>
     </div>

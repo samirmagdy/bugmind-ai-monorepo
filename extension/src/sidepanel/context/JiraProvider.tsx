@@ -62,12 +62,8 @@ export const JiraProvider: React.FC<{
   const [cloudUrl, setCloudUrl] = useState('');
   const [serverUrl, setServerUrl] = useState('');
   const [verifySsl, setVerifySslState] = useState(true);
-  const [isInitializing, setIsInitializing] = useState(true);
-
   const activeFetches = useRef<Set<string>>(new Set());
-  const statusCheckPromiseRef = useRef<Promise<boolean> | null>(null);
   const bootstrapPromiseRef = useRef<Map<string, Promise<JiraBootstrapContext | null>>>(new Map());
-  const isFetching = (key: string) => activeFetches.current.has(key);
   const startFetch = (key: string) => activeFetches.current.add(key);
   const clearFetch = (key: string) => activeFetches.current.delete(key);
 
@@ -223,120 +219,6 @@ export const JiraProvider: React.FC<{
       }
     });
   }, []);
-
-  const fetchIssueTypes = useCallback(async (_connectionId: number, projectKey: string, tabId?: number | null, projectId?: string, force?: boolean) => {
-    const instanceUrl = session.instanceUrl;
-    if (!instanceUrl) return;
-
-    updateSession({ loading: true }, tabId);
-    logDebug('TYPES-SCAN', `Triggering issue-type fetch for project: ${projectId || projectKey}`);
-    try {
-      const data = await bootstrapContext({ instanceUrl, projectKey, projectId, tabId, force });
-      if (data) {
-        logDebug('TYPES-OK', `Found ${data.issue_types.length} issue types.`);
-      }
-    } catch (err: unknown) {
-      logDebug('TYPES-ERROR', String(err));
-      updateSession({ error: translateError(err, 'jira-types').description, issueTypesFetched: true }, tabId);
-    } finally {
-      updateSession({ loading: false }, tabId);
-    }
-  }, [bootstrapContext, logDebug, session.instanceUrl, updateSession]);
-
-  const fetchJiraMetadata = useCallback(async (_connectionId: number, projectKey: string, issueTypeId: string, tabId?: number | null, projectId?: string, force?: boolean) => {
-    const instanceUrl = session.instanceUrl;
-    if (!instanceUrl) return;
-
-    updateSession({ loading: true }, tabId);
-    try {
-      const data = await bootstrapContext({ instanceUrl, projectKey, projectId, issueTypeId, tabId, force });
-      if (data?.jira_metadata) {
-        logDebug('META-OK', `Received ${data.jira_metadata.fields.length || 0} fields`);
-      }
-    } catch (err: unknown) {
-      logDebug('META-ERROR', String(err));
-      updateSession({ error: translateError(err, 'jira-metadata').description }, tabId);
-    } finally {
-      updateSession({ loading: false }, tabId);
-    }
-  }, [bootstrapContext, logDebug, session.instanceUrl, updateSession]);
-
-  const fetchFieldSettings = useCallback(async (_connectionId: number, projectKey: string, tabId?: number | null, issueTypeId?: string, projectId?: string, force?: boolean) => {
-    const instanceUrl = session.instanceUrl;
-    if (!instanceUrl) return;
-
-    try {
-      await bootstrapContext({ instanceUrl, projectKey, projectId, issueTypeId, tabId, force });
-    } catch {
-      // Background fetch, ignore errors
-    }
-  }, [bootstrapContext, session.instanceUrl]);
-
-  const checkJiraStatus = useCallback(async (isInit: boolean = false, signal?: AbortSignal, tokenOverride?: string, urlOverride?: string, tabId?: number | null): Promise<boolean> => {
-    const fetchKey = 'status-check';
-    if (isFetching(fetchKey)) {
-      return statusCheckPromiseRef.current ?? false;
-    }
-
-    startFetch(fetchKey);
-    if (!isInit) updateSession({ loading: true }, tabId);
-    const targetUrl = normalizeJiraUrl(urlOverride || session.instanceUrl);
-
-    logDebug('JIRA-STATUS', `Verifying connection... ${targetUrl || '(global)'}`);
-
-    const statusPromise = (async () => {
-      try {
-        const res = await apiRequest(`${apiBase}/jira/connections`, { signal, token: tokenOverride || authToken, onUnauthorized: tokenOverride ? undefined : refreshAuthToken, onDebug: logDebug });
-        if (res.ok) {
-          const connections = await res.json() as JiraConnection[];
-          updateSession({ connections });
-
-          if (connections && connections.length > 0) {
-            setJiraConnected(true);
-
-            const conn = resolveConnectionForUrl(connections, targetUrl);
-            const platform = conn ? ((conn.auth_type as 'cloud' | 'server') || inferPlatformFromUrl(targetUrl || conn.host_url)) : inferPlatformFromUrl(targetUrl);
-            const normalizedBase = normalizeJiraUrl(conn?.host_url || targetUrl);
-
-            if (normalizedBase) {
-              setJiraPlatform(platform);
-              setVerifySslState(conn?.verify_ssl ?? true);
-              if (platform === 'cloud') setCloudUrl(normalizedBase);
-              if (platform === 'server') setServerUrl(normalizedBase);
-
-              saveJiraConfig({
-                platform,
-                [platform === 'cloud' ? 'cloudUrl' : 'serverUrl']: normalizedBase,
-                verifySsl: conn?.verify_ssl ?? true
-              });
-
-              updateSession({
-                instanceUrl: normalizedBase,
-                jiraConnectionId: conn?.id ?? null
-              }, tabId);
-
-              if (conn) {
-                logDebug('JIRA-OK', `Connected via connection ID: ${conn.id}`);
-                return true;
-              }
-            }
-          }
-        }
-        return false;
-      } catch (err: unknown) {
-        logDebug('JIRA-ERR', String(err));
-        return false;
-      } finally {
-        if (!isInit) updateSession({ loading: false }, tabId || undefined);
-        if (isInit) setIsInitializing(false);
-        clearFetch(fetchKey);
-        statusCheckPromiseRef.current = null;
-      }
-    })();
-
-    statusCheckPromiseRef.current = statusPromise;
-    return await statusPromise;
-  }, [apiBase, authToken, logDebug, refreshAuthToken, saveJiraConfig, session.instanceUrl, updateSession]);
 
   const fetchConnections = useCallback(async () => {
     if (!authToken) return;
@@ -578,13 +460,9 @@ export const JiraProvider: React.FC<{
     setJiraPlatform,
     jiraConnected,
     setJiraConnected,
-    fetchIssueTypes,
-    fetchJiraMetadata,
-    fetchFieldSettings,
     saveFieldSettings,
     bootstrapContext,
     applyBootstrapContext,
-    checkJiraStatus,
     cloudUrl, setCloudUrl,
     serverUrl, setServerUrl,
     verifySsl, setVerifySsl,
@@ -595,12 +473,9 @@ export const JiraProvider: React.FC<{
     setActiveConnection,
     updateConnection,
     fetchProjects,
-    fetchXrayDefaults,
-    isInitializing
+    fetchXrayDefaults
   }), [
-    jiraPlatform, jiraConnected, fetchIssueTypes, fetchJiraMetadata, fetchFieldSettings,
-    saveFieldSettings, bootstrapContext, applyBootstrapContext, checkJiraStatus, cloudUrl, serverUrl, verifySsl, setVerifySsl, saveJiraConfig, createConnection, fetchConnections, deleteConnection, setActiveConnection, updateConnection, fetchProjects, fetchXrayDefaults,
-    isInitializing
+    jiraPlatform, jiraConnected, saveFieldSettings, bootstrapContext, applyBootstrapContext, cloudUrl, serverUrl, verifySsl, setVerifySsl, saveJiraConfig, createConnection, fetchConnections, deleteConnection, setActiveConnection, updateConnection, fetchProjects, fetchXrayDefaults
   ]);
 
   return <JiraContext.Provider value={value}>{children}</JiraContext.Provider>;

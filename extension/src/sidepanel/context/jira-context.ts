@@ -21,9 +21,6 @@ export interface JiraContextType {
   updateConnection: (id: number, updates: Record<string, unknown>) => Promise<boolean>;
   fetchProjects: (id: number) => Promise<JiraProject[]>;
   fetchXrayDefaults: (id: number, storyIssueKey?: string) => Promise<XrayDefaultsResponse | null>;
-  fetchIssueTypes: (connectionId: number, projectKey: string, tabId?: number | null, projectId?: string, force?: boolean) => Promise<void>;
-  fetchJiraMetadata: (connectionId: number, projectKey: string, issueTypeId: string, tabId?: number | null, projectId?: string, force?: boolean) => Promise<void>;
-  fetchFieldSettings: (connectionId: number, projectKey: string, tabId?: number | null, issueTypeId?: string, projectId?: string, force?: boolean) => Promise<void>;
   saveFieldSettings: (params: {
     jiraConnectionId: number;
     projectKey: string;
@@ -42,8 +39,6 @@ export interface JiraContextType {
     tokenOverride?: string;
   }) => Promise<JiraBootstrapContext | null>;
   applyBootstrapContext: (data: JiraBootstrapContext, tabId?: number | null, hasProjectContext?: boolean) => void;
-  checkJiraStatus: (isInit?: boolean, signal?: AbortSignal, tokenOverride?: string, urlOverride?: string, tabId?: number | null) => Promise<boolean>;
-  isInitializing: boolean;
   cloudUrl: string;
   setCloudUrl: (v: string) => void;
   serverUrl: string;
