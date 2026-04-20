@@ -12,7 +12,7 @@ services:
       - key: PYTHON_VERSION
         value: 3.14.3
       - key: DATABASE_URL
-        sync: false
+        sync: true  # Changed from false to true
       - key: ENVIRONMENT
         value: production
       - key: LOG_LEVEL
@@ -20,17 +20,17 @@ services:
       - key: REDIS_URL
         value: redis://localhost:6379/0
       - key: SECRET_KEY
-        sync: false
+        sync: true  # Changed from false to true
       - key: ENCRYPTION_KEY
-        sync: false
+        sync: true  # Changed from false to true
       - key: OPENROUTER_API_KEY
-        sync: false
+        sync: true  # Changed from false to true
       - key: OPENROUTER_MODEL
-        sync: false
+        sync: true  # Changed from false to true
       - key: CORS_ORIGINS
-        sync: false
+        sync: true  # Changed from false to true
       - key: ALLOWED_HOSTS
-        sync: false
+        sync: true  # Changed from false to true
       - key: RATE_LIMITS_ENABLED
         value: "false"
       - key: ALLOW_PRIVATE_JIRA_HOSTS
@@ -38,6 +38,6 @@ services:
       - key: ALLOW_INSECURE_JIRA_SSL
         value: "false"
       - key: STRIPE_SECRET_KEY
-        sync: false
+        sync: true  # Changed from false to true
       - key: STRIPE_WEBHOOK_SECRET
-        sync: false
+        sync: true  # Changed from false to true

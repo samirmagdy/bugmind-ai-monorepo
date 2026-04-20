@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     JWT_ISSUER: str = "bugmind-api"
     JWT_AUDIENCE: str = "bugmind-clients"
-    DATABASE_URL: str = "sqlite:///./bugmind.db"
+    DATABASE_URL: str = ""
     REDIS_URL: str = "redis://localhost:6379/0"
     CORS_ORIGINS: str = ""
     ALLOWED_HOSTS: str = ""
@@ -47,6 +47,15 @@ class Settings(BaseSettings):
             if v.startswith("postgresql") and "sslmode" not in v:
                 separator = "&" if "?" in v else "?"
                 v = f"{v}{separator}sslmode=require"
+        
+        # Default to sqlite for local development if empty
+        if not v:
+            import os
+            env = os.getenv("ENVIRONMENT", "development")
+            if env.lower() == "development":
+                v = "sqlite:///./bugmind.db"
+            else:
+                raise ValueError("DATABASE_URL must be set in production")
         return v
 
     @property
