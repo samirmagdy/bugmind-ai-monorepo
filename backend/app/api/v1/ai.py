@@ -140,7 +140,7 @@ def _build_issue_fields(
     }
 
 
-def _resolve_payload(db: Session, user_id: int, project_key: str, project_id: Optional[str], issue_type_id: str, schema: list, payload_fields: dict) -> dict:
+def _resolve_payload(db: Session, user_id: int, project_key: str, project_id: Optional[str], issue_type_id: str, schema: list, payload_fields: dict, platform: str = "cloud") -> dict:
     mapping_record = db.query(JiraFieldMapping).filter(
         or_(
             JiraFieldMapping.project_key == project_key,
@@ -151,7 +151,7 @@ def _resolve_payload(db: Session, user_id: int, project_key: str, project_id: Op
     ).first()
     mapping_config = mapping_record.field_mappings if mapping_record else {}
 
-    resolver = JiraFieldResolver(mapping_config, schema)
+    resolver = JiraFieldResolver(mapping_config, schema, platform=platform)
     ai_raw = canonicalize_ai_payload({
         "summary": payload_fields.get("summary"),
         "description": payload_fields.get("description"),
@@ -163,12 +163,20 @@ def _resolve_payload(db: Session, user_id: int, project_key: str, project_id: Op
 
     clean_steps = []
     for step in ai_raw["steps"]:
-        cleaned = re.sub(r"^\d+\.\s*", "", step).strip()
+        cleaned = re.sub(r"^\d+\.\s*", "", str(step)).strip()
         if cleaned:
             clean_steps.append(cleaned)
     ai_raw["steps"] = clean_steps
 
-    return resolver.resolve(ai_raw)
+    resolved_payload = resolver.resolve(ai_raw)
+    explicit_fields = resolver.resolve_explicit_fields(payload_fields)
+    resolved_payload["fields"] = {
+        **resolved_payload.get("fields", {}),
+        **explicit_fields,
+        "project": payload_fields["project"],
+        "issuetype": {"id": issue_type_id},
+    }
+    return resolved_payload
 
 
 def _validate_payload(schema: list, payload_fields: dict) -> List[Dict]:
@@ -274,7 +282,8 @@ async def generate_bug_report(
     ).first()
     mapping_config = mapping_record.field_mappings if mapping_record else {}
     
-    resolver = JiraFieldResolver(mapping_config, schema)
+    platform = "server" if isinstance(adapter, JiraServerAdapter) else "cloud"
+    resolver = JiraFieldResolver(mapping_config, schema, platform=platform)
     jira_payload = resolver.resolve(ai_raw)
 
     # 5. Format Steps and Results
@@ -348,6 +357,7 @@ async def prepare_bug_preview(
             prefer_project_key=prefer_project_key
         )
     )
+    platform = "server" if prefer_project_key else "cloud"
     missing_fields = _validate_payload(schema, payload_fields)
     resolved_payload = _resolve_payload(
         db,
@@ -356,7 +366,8 @@ async def prepare_bug_preview(
         req.project_id,
         req.issue_type_id,
         schema,
-        payload_fields
+        payload_fields,
+        platform=platform
     )
 
     return PreviewPreparationResponse(
@@ -397,6 +408,7 @@ async def submit_bugs(
             names = ", ".join(field["name"] for field in missing_fields)
             raise HTTPException(status_code=400, detail=f"Cannot submit bug. Missing required Jira fields: {names}")
 
+        platform = "server" if prefer_project_key else "cloud"
         resolved_payload = _resolve_payload(
             db,
             current_user.id,
@@ -404,17 +416,11 @@ async def submit_bugs(
             req.project_id,
             req.issue_type_id,
             schema,
-            payload_fields
+            payload_fields,
+            platform=platform
         )
-        issue_data = {
-            "fields": {
-                **resolved_payload.get("fields", {}),
-                "project": payload_fields["project"],
-                "issuetype": {"id": req.issue_type_id},
-            }
-        }
 
-        issue_key = adapter.create_issue(issue_data)
+        issue_key = adapter.create_issue(resolved_payload)
         created_issues.append(XrayPublishedTest(id=issue_key, key=issue_key, self=""))
 
     return SubmitBugsResponse(created_issues=created_issues)

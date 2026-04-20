@@ -6,6 +6,8 @@ from app.services.jira.adapters.base import JiraAdapter
 from redis.exceptions import RedisError
 
 class JiraMetadataEngine:
+    FIELD_SCHEMA_CACHE_VERSION = "v2"
+
     def __init__(self, adapter: JiraAdapter):
         self.adapter = adapter
         self.redis = redis.Redis.from_url(settings.REDIS_URL, decode_responses=True)
@@ -40,7 +42,7 @@ class JiraMetadataEngine:
         return issue_types
 
     def get_field_schema(self, project_id: str, issue_type_id: str) -> List[Dict[str, Any]]:
-        cache_key = f"jira:fields:{self.adapter.host_url}:{project_id}:{issue_type_id}"
+        cache_key = f"jira:fields:{self.FIELD_SCHEMA_CACHE_VERSION}:{self.adapter.host_url}:{project_id}:{issue_type_id}"
         cached = self._get_cached_json(cache_key)
         if cached:
             return cached
@@ -49,17 +51,36 @@ class JiraMetadataEngine:
         
         processed_fields = []
         for field in fields:
+            # Multi-layer safety for required flag
             is_required = field.get("required", False)
+            
+            # Robust schema extraction
             schema = field.get("schema", {})
+            if not schema and "schema" in field:
+                # Handle cases where schema might be a list or something else unexpectedly
+                schema = field["schema"] if isinstance(field["schema"], dict) else {}
+
+            # Type mapping - default to string but check custom field types
+            f_type = schema.get("type", "string")
+            custom_type = schema.get("custom", "")
+            
+            # Refine type based on common custom field types if generic 'string' or 'array'
+            if "userpicker" in custom_type.lower():
+                f_type = "user" if f_type != "array" else "multi-user"
+            elif "multiselect" in custom_type.lower() or "multicheckboxes" in custom_type.lower():
+                f_type = "multi-select"
+            elif "labels" in custom_type.lower():
+                f_type = "labels"
+
             processed_fields.append({
-                "key": field.get("fieldId") or field.get("key"),
+                "key": field.get("fieldId") or field.get("key") or field.get("id"),
                 "name": field.get("name"),
                 "required": is_required,
-                "type": schema.get("type") if schema else "string",
-                "items": schema.get("items") if schema else None,
-                "system": schema.get("system") if schema else None,
-                "custom": schema.get("custom") if schema else None,
-                "allowed_values": field.get("allowedValues", [])
+                "type": f_type,
+                "items": schema.get("items"),
+                "system": schema.get("system"),
+                "custom": custom_type,
+                "allowed_values": field.get("allowedValues") or field.get("values") or []
             })
 
         if processed_fields:

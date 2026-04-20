@@ -25,7 +25,20 @@ class JiraCloudAdapter(JiraAdapter):
 
     def _request(self, method: str, path: str) -> httpx.Response:
         try:
-            return self.client.request(method, path)
+            response = self.client.request(method, path)
+            if response.status_code == 401:
+                print(f"[JiraCloud] Authentication failed (401) for {self.host_url}. Check email and API token.")
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Jira Cloud Authentication Failed: Verify your email and API token for {self.host_url}."
+                )
+            if response.status_code == 403:
+                print(f"[JiraCloud] Permission denied (403) for {self.host_url}. Check account permissions.")
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Jira Cloud Access Denied: Verify your account permissions for {self.host_url}."
+                )
+            return response
         except httpx.TimeoutException:
             raise HTTPException(
                 status_code=504,

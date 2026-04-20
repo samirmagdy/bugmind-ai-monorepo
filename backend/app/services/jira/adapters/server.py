@@ -1,4 +1,5 @@
 import httpx
+import base64
 from typing import Dict, Any, List
 from fastapi import HTTPException
 from app.services.jira.adapters.base import JiraAdapter
@@ -6,12 +7,22 @@ from app.services.jira.adapters.base import JiraAdapter
 class JiraServerAdapter(JiraAdapter):
     def __init__(self, host_url: str, username: str, token: str, verify_ssl: bool = True):
         super().__init__(host_url, username, token, verify_ssl)
-        # Server/DC uses Bearer Personal Access Tokens (PATs)
-        self.headers = {
+        
+        auth_string = f"{self.username}:{self.token}"
+        encoded_auth = base64.b64encode(auth_string.encode()).decode()
+        self._basic_headers = {
+            "Authorization": f"Basic {encoded_auth}",
+            "Accept": "application/json",
+            "Content-Type": "application/json"
+        }
+        self._bearer_headers = {
             "Authorization": f"Bearer {self.token}",
             "Accept": "application/json",
             "Content-Type": "application/json"
         }
+        # Prefer Bearer first because PAT-backed Server/DC installs often require it,
+        # but transparently retry once with Basic to preserve existing password/basic flows.
+        self.headers = self._bearer_headers
         self.client = httpx.Client(
             base_url=self.host_url,
             headers=self.headers,
@@ -20,9 +31,27 @@ class JiraServerAdapter(JiraAdapter):
             verify=self.verify_ssl,
         )
 
+    def _send_with_headers(self, method: str, path: str, headers: Dict[str, str]) -> httpx.Response:
+        return self.client.request(method, path, headers=headers)
+
     def _request(self, method: str, path: str) -> httpx.Response:
         try:
-            return self.client.request(method, path)
+            response = self._send_with_headers(method, path, self._bearer_headers)
+            if response.status_code == 401:
+                response = self._send_with_headers(method, path, self._basic_headers)
+            if response.status_code == 401:
+                print(f"[JiraServer] Authentication failed (401) for {self.host_url}. Check credentials.")
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Jira Server Authentication Failed: Verify your username and token/password at {self.host_url}."
+                )
+            if response.status_code == 403:
+                print(f"[JiraServer] Permission denied (403) for {self.host_url}. Check permissions or CAPTCHA.")
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Jira Server Access Denied: Your account might be locked or requires CAPTCHA. Try logging in via your browser first."
+                )
+            return response
         except httpx.TimeoutException:
             raise HTTPException(
                 status_code=504,
@@ -53,7 +82,17 @@ class JiraServerAdapter(JiraAdapter):
 
         if isinstance(fields_raw, list):
             print(f"[JiraServer] Found {len(fields_raw)} fields in list structure")
-            return [field if "fieldId" in field else {"fieldId": field.get("key"), **field} for field in fields_raw]
+            normalized = []
+            for field in fields_raw:
+                if "fieldId" in field:
+                    normalized.append(field)
+                elif "id" in field:
+                    normalized.append({"fieldId": field["id"], **field})
+                elif "key" in field:
+                    normalized.append({"fieldId": field["key"], **field})
+                else:
+                    normalized.append(field)
+            return normalized
 
         projects = data.get("projects")
         if isinstance(projects, list) and projects:
@@ -89,7 +128,7 @@ class JiraServerAdapter(JiraAdapter):
     def get_fields(self, project_id: str, issue_type_id: str) -> List[Dict[str, Any]]:
         # Try Jira Server 9.0+ specific endpoint first
         print(f"[JiraServer] Fetching fields for Project: {project_id}, IssueType: {issue_type_id}")
-        response = self._request("GET", f"/rest/api/2/issue/createmeta/{project_id}/issuetypes/{issue_type_id}")
+        response = self._request("GET", f"/rest/api/2/issue/createmeta/{project_id}/issuetypes/{issue_type_id}?expand=allowedValues")
         
         if response.status_code == 400 and "Issue Does Not Exist" in response.text:
             print(f"[JiraServer] Modern endpoint returned 400: {response.text}")

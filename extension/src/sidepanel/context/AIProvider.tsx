@@ -412,7 +412,7 @@ export const AIProvider: React.FC<{
       updateSession({ validationErrors: [] });
       return true;
     } catch (err) {
-      updateSession({ error: "Could not validate bug with Jira." });
+      updateSession({ error: translateError(err, 'jira-validate').description });
       return false;
     } finally {
       updateSession({ loading: false });
