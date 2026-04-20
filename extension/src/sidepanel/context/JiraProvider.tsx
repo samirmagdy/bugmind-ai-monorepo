@@ -1,6 +1,16 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { TabSession, JiraConnection, JiraProject, JiraBootstrapContext, XrayDefaultsResponse } from '../types';
 import { apiRequest, readJsonResponse } from '../services/api';
+import {
+  JiraBootstrapResponsePayload,
+  JiraBootstrapRequestPayload,
+  JiraConnectionsResponsePayload,
+  JiraConnectionCreateRequestPayload,
+  JiraConnectionMutationResponsePayload,
+  JiraProjectsResponsePayload,
+  XrayDefaultsResponsePayload,
+  JiraSettingsRequestPayload,
+} from '../services/contracts';
 import { translateError } from '../utils/ErrorTranslator';
 import { dbService } from '../services/db';
 import { JiraConnectionConfig, JiraContext } from './jira-context';
@@ -144,24 +154,25 @@ export const JiraProvider: React.FC<{
 
     const promise = (async () => {
       try {
+        const payload: JiraBootstrapRequestPayload = {
+          instance_url: normalizedUrl,
+          project_key: projectKey,
+          project_id: projectId,
+          issue_type_id: requestIssueTypeId
+        };
         const res = await apiRequest(`${apiBase}/jira/bootstrap-context`, {
           method: 'POST',
           token: activeToken,
           onUnauthorized: tokenOverride ? undefined : refreshAuthToken,
           onDebug: logDebug,
-          body: JSON.stringify({
-            instance_url: normalizedUrl,
-            project_key: projectKey,
-            project_id: projectId,
-            issue_type_id: requestIssueTypeId
-          })
+          body: JSON.stringify(payload)
         });
 
         if (!res.ok) {
           throw new Error(await res.text() || `Failed to bootstrap Jira context (${res.status})`);
         }
 
-        const data = await res.json() as JiraBootstrapContext;
+        const data = await readJsonResponse<JiraBootstrapResponsePayload>(res);
         applyBootstrapContext(data, tabId, !!projectKey || !!projectId);
 
         if (projectKey && metadataCacheKey) {
@@ -216,7 +227,7 @@ export const JiraProvider: React.FC<{
     try {
       const res = await apiRequest(`${apiBase}/jira/connections`, { token: authToken, onUnauthorized: refreshAuthToken });
       if (res.ok) {
-        const connections = await res.json() as JiraConnection[];
+        const connections = await readJsonResponse<JiraConnectionsResponsePayload>(res);
         updateSession({ connections });
         const resolved = resolveConnectionForUrl(connections, session.instanceUrl);
         const fallback = connections.find(c => c.is_active) || connections[0];
@@ -243,11 +254,6 @@ export const JiraProvider: React.FC<{
       logDebug('CONN-FETCH-ERR', String(err));
     }
   }, [apiBase, authToken, logDebug, refreshAuthToken, saveJiraConfig, session.instanceUrl, updateSession]);
-
-  useEffect(() => {
-    if (!authToken) return;
-    fetchConnections();
-  }, [authToken, fetchConnections]);
 
   const setVerifySsl = useCallback(async (value: boolean) => {
     setVerifySslState(value);
@@ -316,7 +322,7 @@ export const JiraProvider: React.FC<{
         onUnauthorized: refreshAuthToken
       });
       if (!res.ok) return [];
-      const data = await res.json() as Array<{ id?: string | number; key?: string; name?: string }>;
+      const data = await readJsonResponse<JiraProjectsResponsePayload>(res);
       return data.map(project => ({
         id: String(project.id ?? project.key ?? ''),
         key: project.key || String(project.id ?? ''),
@@ -340,7 +346,7 @@ export const JiraProvider: React.FC<{
       if (!res.ok) {
         throw new Error(await res.text() || `Failed to fetch Xray defaults (${res.status})`);
       }
-      return await readJsonResponse<XrayDefaultsResponse>(res);
+      return await readJsonResponse<XrayDefaultsResponsePayload>(res);
     } catch (err) {
       logDebug('XRAY-DEFAULTS-ERR', String(err));
       return null;
@@ -366,19 +372,20 @@ export const JiraProvider: React.FC<{
     try {
       const nextVisibleFields = visibleFields ?? session.visibleFields;
       const nextAiMapping = aiMapping ?? session.aiMapping;
+      const payload: JiraSettingsRequestPayload = {
+        jira_connection_id: jiraConnectionId,
+        project_key: projectKey,
+        project_id: projectId,
+        issue_type_id: issueTypeId,
+        visible_fields: nextVisibleFields,
+        ai_mapping: nextAiMapping
+      };
       const res = await apiRequest(`${apiBase}/settings/jira`, {
         method: 'POST',
         token: authToken,
         onUnauthorized: refreshAuthToken,
         onDebug: logDebug,
-        body: JSON.stringify({
-          jira_connection_id: jiraConnectionId,
-          project_key: projectKey,
-          project_id: projectId,
-          issue_type_id: issueTypeId,
-          visible_fields: nextVisibleFields,
-          ai_mapping: nextAiMapping
-        })
+        body: JSON.stringify(payload)
       });
       if (!res.ok) {
         throw new Error(await res.text() || `Failed to sync Jira field settings (${res.status})`);
@@ -414,20 +421,21 @@ export const JiraProvider: React.FC<{
     updateSession({ loading: true });
     logDebug('JIRA-CONN', `Creating new connection to ${config.base_url}...`);
     try {
+      const payload: JiraConnectionCreateRequestPayload = {
+        host_url: config.base_url.replace(/\/$/, ''),
+        username: config.username,
+        token: config.token,
+        auth_type: config.auth_type,
+        verify_ssl: config.verify_ssl
+      };
       const res = await apiRequest(`${apiBase}/jira/connections`, {
         method: 'POST',
         token: authToken,
         onUnauthorized: refreshAuthToken,
-        body: JSON.stringify({
-          host_url: config.base_url.replace(/\/$/, ''),
-          username: config.username,
-          token: config.token,
-          auth_type: config.auth_type,
-          verify_ssl: config.verify_ssl
-        })
+        body: JSON.stringify(payload)
       });
       if (res.ok) {
-        const conn = await res.json();
+        const conn = await readJsonResponse<JiraConnectionMutationResponsePayload>(res);
         logDebug('JIRA-OK', `Connection created with ID: ${conn.id}`);
         setVerifySslState(config.verify_ssl);
         saveJiraConfig({ verifySsl: config.verify_ssl });

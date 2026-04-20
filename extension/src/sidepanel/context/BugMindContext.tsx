@@ -4,9 +4,17 @@ import { useSession } from '../hooks/useSession';
 import { TIMEOUTS, LIMITS } from '../constants';
 import { translateError } from '../utils/ErrorTranslator';
 import { apiRequest, readJsonResponse } from '../services/api';
+import {
+  AISettingsUpdateRequestPayload,
+  AuthBootstrapRequestPayload,
+  AuthBootstrapResponsePayload,
+  AuthTokenResponsePayload,
+  RegisterRequestPayload,
+  buildProjectRequestParams,
+} from '../services/contracts';
 import { BugMindContext, BugMindContextType } from '../hooks/useBugMind';
 import { obfuscate } from '../utils/StorageObfuscator';
-import { AuthBootstrapResponse, DebugLog } from '../types';
+import { DebugLog } from '../types';
 
 // New Specialized Providers
 import { AuthProvider } from './AuthProvider';
@@ -106,17 +114,42 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
 
   const runAuthBootstrap = useCallback(async (tokenOverride: string): Promise<'main' | 'setup'> => {
     const currentContext = await fetchCurrentContext(true);
+    if (currentContext && !currentContext.error) {
+      updateSession({
+        instanceUrl: currentContext.instanceUrl ?? null,
+        error: currentContext.error ?? null
+      }, currentTabId || undefined);
+      hydratedTabRef.current = currentTabId;
+      lastContextMessageSignatureRef.current = JSON.stringify({
+        tabId: currentTabId || null,
+        instanceUrl: currentContext.instanceUrl || null,
+        issueKey: currentContext.issueData?.key || null,
+        projectId: currentContext.issueData?.projectId || null,
+        error: currentContext.error || null
+      });
+      lastBootstrapSignatureRef.current = JSON.stringify({
+        tabId: currentTabId || null,
+        instanceUrl: currentContext.instanceUrl || null,
+        projectKey: currentContext.issueData?.key?.split('-')[0] || null,
+        projectId: currentContext.issueData?.projectId || null,
+        issueTypeId: session.selectedIssueType?.id || null
+      });
+    }
+
+    const { project_key, project_id } = buildProjectRequestParams(currentContext?.issueData || null);
+    const payload: AuthBootstrapRequestPayload = {
+      instance_url: currentContext?.instanceUrl || undefined,
+      project_key,
+      project_id,
+      issue_type_id: session.selectedIssueType?.id || undefined
+    };
+
     const response = await withTimeout(
       apiRequest(`${auth.apiBase}/auth/bootstrap`, {
         method: 'POST',
         token: tokenOverride,
         onDebug: logDebug,
-        body: JSON.stringify({
-          instance_url: currentContext?.instanceUrl || undefined,
-          project_key: currentContext?.issueData?.key?.split('-')[0],
-          project_id: currentContext?.issueData?.projectId,
-          issue_type_id: session.selectedIssueType?.id || undefined
-        })
+        body: JSON.stringify(payload)
       }),
       8000,
       'Auth bootstrap'
@@ -126,7 +159,7 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
       throw new Error(await response.text() || `Auth bootstrap failed (${response.status})`);
     }
 
-    const data = await readJsonResponse<AuthBootstrapResponse>(response);
+    const data = await readJsonResponse<AuthBootstrapResponsePayload>(response);
     if (data.bootstrap_context) {
       jira.applyBootstrapContext(
         data.bootstrap_context,
@@ -139,7 +172,7 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
     }
 
     return data.view;
-  }, [auth.apiBase, currentTabId, fetchCurrentContext, jira, logDebug, session.selectedIssueType?.id, withTimeout]);
+  }, [auth.apiBase, currentTabId, fetchCurrentContext, jira, logDebug, session.selectedIssueType?.id, updateSession, withTimeout]);
 
   // 1. Initial Context Hydration (Phase 1)
   useEffect(() => {
@@ -148,17 +181,25 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
 
     hydratedTabRef.current = currentTabId;
     logDebug('SYS-INIT', `Hydrating context for tab ${currentTabId}...`);
-    chrome.runtime.sendMessage({
-      type: 'GET_CURRENT_CONTEXT',
-      tabId: currentTabId,
-      force: true
-    }, (response) => {
-      if (response && !response.error) {
-        logDebug('SYS-INIT-OK', 'Received initial context from background');
-        updateSession(response);
-        bootstrapCurrentContext(response, currentTabId);
-      }
-    });
+        chrome.runtime.sendMessage({
+          type: 'GET_CURRENT_CONTEXT',
+          tabId: currentTabId,
+          force: true
+        }, (response) => {
+          if (response) {
+            if (response.error) {
+              logDebug('SYS-INIT-ERR', `Initial context returned error: ${String(response.error)}`);
+            } else {
+              logDebug('SYS-INIT-OK', 'Received initial context from background');
+            }
+
+            updateSession(response);
+
+            if (!response.error) {
+              bootstrapCurrentContext(response, currentTabId);
+            }
+          }
+        });
   }, [bootstrapCurrentContext, currentTabId, logDebug, sessionHydrated, updateSession]);
 
   useEffect(() => {
@@ -305,7 +346,7 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
         timeoutMs: 10000,
         onDebug: logDebug
       });
-      const data = await readJsonResponse<{ access_token?: string; refresh_token?: string; detail?: string }>(response);
+      const data = await readJsonResponse<AuthTokenResponsePayload>(response);
       if (data.access_token) {
         auth.setAuthToken(data.access_token);
         if (data.refresh_token) auth.setRefreshToken(data.refresh_token);
@@ -367,9 +408,10 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
     handleRegister: async (e) => {
       e.preventDefault();
       try {
+        const payload: RegisterRequestPayload = { email: auth.email, password: auth.password };
         const res = await apiRequest(`${auth.apiBase}/auth/register`, {
           method: 'POST',
-          body: JSON.stringify({ email: auth.email, password: auth.password })
+          body: JSON.stringify(payload)
         });
         if (res.ok) {
           auth.setAuthMode('login');
@@ -380,9 +422,13 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
     handleSaveSettings: async (e) => {
       e.preventDefault();
       try {
+        const payload: AISettingsUpdateRequestPayload = {
+          custom_model: ai.customModel,
+          openrouter_key: ai.customKey
+        };
         const res = await apiRequest(`${auth.apiBase}/settings/ai`, {
           method: 'POST', token: auth.authToken, onUnauthorized: auth.refreshSession,
-          body: JSON.stringify({ custom_model: ai.customModel, openrouter_key: ai.customKey })
+          body: JSON.stringify(payload)
         });
         if (!res.ok) {
           throw new Error(await res.text() || `Request failed with status ${res.status}`);

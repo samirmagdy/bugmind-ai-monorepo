@@ -3,9 +3,27 @@ import { X, ChevronDown, Loader2, AlertCircle, RefreshCw, Pencil, FolderOpen, Sa
 import { useBugMind } from '../../hooks/useBugMind';
 import { IssueType, JiraField, JiraProject } from '../../types';
 
+const HIDDEN_SYSTEM_FIELD_KEYS = new Set([
+  'summary',
+  'description',
+  'project',
+  'issuetype'
+]);
+
+function isSystemManagedField(field: JiraField): boolean {
+  const normalizedKey = field.key.trim().toLowerCase().replace(/[_-]/g, '');
+  const normalizedSystem = (field.system || '').trim().toLowerCase();
+
+  return (
+    HIDDEN_SYSTEM_FIELD_KEYS.has(field.key.trim().toLowerCase()) ||
+    ['summary', 'description', 'project', 'issuetype'].includes(normalizedSystem) ||
+    ['projectid', 'issuetypeid', 'pid', 'typeid'].includes(normalizedKey)
+  );
+}
+
 const SettingsView: React.FC = () => {
   const { 
-    session, updateSession, handleSaveSettings, saveFieldSettings, auth: { setGlobalView },
+    session, updateSession, handleSaveSettings, saveFieldSettings,
     ai: { customKey, setCustomKey, hasCustomKeySaved, customModel, setCustomModel },
     jira, refreshIssue, currentTabId,
     auth: { apiBase, setApiBase },
@@ -14,6 +32,16 @@ const SettingsView: React.FC = () => {
   const [editingConnectionId, setEditingConnectionId] = useState<number | null>(null);
   const [connectionDrafts, setConnectionDrafts] = useState<Record<number, { auth_type: string; host_url: string; username: string; token: string; verify_ssl: boolean }>>({});
   const [projectsByConnection, setProjectsByConnection] = useState<Record<number, JiraProject[]>>({});
+  const [showAddConnection, setShowAddConnection] = useState(false);
+  const [newConnection, setNewConnection] = useState({
+    auth_type: 'cloud',
+    host_url: session.instanceUrl || '',
+    username: '',
+    token: '',
+    verify_ssl: jira.verifySsl
+  });
+  const [isCreatingConnection, setIsCreatingConnection] = useState(false);
+  const editableJiraFields = (session.jiraMetadata?.fields || []).filter((field: JiraField) => !isSystemManagedField(field));
 
   // Auto-refetch when entering Jira tab if empty
   useEffect(() => {
@@ -22,6 +50,21 @@ const SettingsView: React.FC = () => {
       refreshIssue(true);
     }
   }, [session.settingsTab, session.issueTypes.length, session.issueTypesFetched, session.error, session.instanceUrl, session.loading, refreshIssue, log]);
+
+  useEffect(() => {
+    if (session.settingsTab !== 'connections') return;
+    if (session.connections && session.connections.length > 0) return;
+    void jira.fetchConnections();
+  }, [jira, session.connections, session.settingsTab]);
+
+  useEffect(() => {
+    if (!showAddConnection) return;
+    setNewConnection((prev) => ({
+      ...prev,
+      host_url: prev.host_url || session.instanceUrl || '',
+      verify_ssl: jira.verifySsl
+    }));
+  }, [jira.verifySsl, session.instanceUrl, showAddConnection]);
 
   const bootstrapJiraConfig = async (issueTypeId?: string, options?: { force?: boolean; loading?: boolean; logTag?: string; errorMessage?: string }) => {
     const projectKey = session.issueData?.key.split('-')[0];
@@ -155,12 +198,109 @@ const SettingsView: React.FC = () => {
           <div className="flex items-center justify-between mb-2">
             <h3 className="text-xs font-black uppercase text-[var(--text-muted)] tracking-widest">Active Connections</h3>
             <button 
-              onClick={() => setGlobalView('setup')}
+              onClick={() => {
+                setShowAddConnection(prev => !prev);
+                setEditingConnectionId(null);
+              }}
               className="text-[10px] font-bold text-[var(--accent)] hover:underline"
             >
-              + Add Connection
+              {showAddConnection ? 'Close' : '+ Add New Connection'}
             </button>
           </div>
+
+          {showAddConnection && (
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                setIsCreatingConnection(true);
+                try {
+                  const connected = await jira.createConnection({
+                    auth_type: newConnection.auth_type as 'cloud' | 'server',
+                    base_url: newConnection.host_url.trim(),
+                    username: newConnection.username.trim(),
+                    token: newConnection.token,
+                    verify_ssl: newConnection.verify_ssl
+                  });
+
+                  if (connected) {
+                    updateSession({ success: 'Connection saved successfully.' });
+                    setShowAddConnection(false);
+                    setNewConnection({
+                      auth_type: 'cloud',
+                      host_url: session.instanceUrl || '',
+                      username: '',
+                      token: '',
+                      verify_ssl: jira.verifySsl
+                    });
+                  } else {
+                    updateSession({ error: 'Failed to save Jira connection.' });
+                  }
+                } finally {
+                  setIsCreatingConnection(false);
+                }
+              }}
+              className="bg-[var(--bg-card)] border border-[var(--border-main)] rounded-2xl p-4 space-y-3 shadow-[var(--shadow-sm)]"
+            >
+              <div className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Add New Connection</div>
+              <select
+                value={newConnection.auth_type}
+                onChange={(e) => setNewConnection(prev => ({ ...prev, auth_type: e.target.value }))}
+                className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-3 py-2 text-xs text-[var(--text-main)]"
+              >
+                <option value="cloud">Jira Cloud</option>
+                <option value="server">Server / DC</option>
+              </select>
+              <input
+                type="url"
+                value={newConnection.host_url}
+                onChange={(e) => setNewConnection(prev => ({ ...prev, host_url: e.target.value }))}
+                className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-3 py-2 text-xs text-[var(--text-main)]"
+                placeholder={newConnection.auth_type === 'cloud' ? 'https://company.atlassian.net' : 'http://jira.internal.com'}
+                required
+              />
+              <input
+                type="text"
+                value={newConnection.username}
+                onChange={(e) => setNewConnection(prev => ({ ...prev, username: e.target.value }))}
+                className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-3 py-2 text-xs text-[var(--text-main)]"
+                placeholder="Email / username"
+                required
+              />
+              <input
+                type="password"
+                value={newConnection.token}
+                onChange={(e) => setNewConnection(prev => ({ ...prev, token: e.target.value }))}
+                className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-3 py-2 text-xs text-[var(--text-main)]"
+                placeholder="API Token / PAT"
+                required
+              />
+              <label className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
+                <input
+                  type="checkbox"
+                  checked={newConnection.verify_ssl}
+                  onChange={(e) => setNewConnection(prev => ({ ...prev, verify_ssl: e.target.checked }))}
+                />
+                Verify SSL certificates
+              </label>
+              <div className="flex gap-2">
+                <button
+                  type="submit"
+                  disabled={isCreatingConnection}
+                  className="flex-1 bg-[var(--accent)] text-white font-bold py-2 rounded-xl text-xs flex items-center justify-center gap-2 disabled:opacity-60"
+                >
+                  <Save size={12} />
+                  {isCreatingConnection ? 'Saving...' : 'Add New Connection'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowAddConnection(false)}
+                  className="px-3 bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl text-xs"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          )}
 
           <div className="space-y-3">
             {(!session.connections || session.connections.length === 0) ? (
@@ -473,7 +613,7 @@ const SettingsView: React.FC = () => {
                           className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-3 py-2.5 outline-none focus:border-[var(--status-info)]/50 transition-all text-xs appearance-none cursor-pointer pr-10 text-[var(--text-main)] shadow-inner"
                         >
                           <option value="description">Description (Default)</option>
-                          {session.jiraMetadata?.fields.map((f: JiraField) => (
+                          {editableJiraFields.map((f: JiraField) => (
                             <option key={f.key} value={f.key}>{f.name} ({f.key})</option>
                           ))}
                         </select>
@@ -501,15 +641,15 @@ const SettingsView: React.FC = () => {
                         <RefreshCw size={12} className={session.loading ? 'animate-spin' : ''} />
                       </button>
                     </div>
-                    <span className="text-[10px] text-[var(--status-info)] font-bold bg-[var(--status-info)]/10 px-2 py-0.5 rounded-full shadow-sm">{session.jiraMetadata.fields.length} Found</span>
+                    <span className="text-[10px] text-[var(--status-info)] font-bold bg-[var(--status-info)]/10 px-2 py-0.5 rounded-full shadow-sm">{editableJiraFields.length} Found</span>
                   </div>
                   <div className="max-h-[250px] overflow-y-auto pr-2 custom-scrollbar space-y-2">
-                    {session.jiraMetadata.fields.length === 0 ? (
+                    {editableJiraFields.length === 0 ? (
                       <div className="py-8 text-center bg-[var(--bg-input)] rounded-xl border border-dashed border-[var(--border-main)] shadow-inner">
                         <p className="text-xs text-[var(--text-muted)] opacity-60">No extra fields found for this type.</p>
                       </div>
                     ) : (
-                      session.jiraMetadata.fields.map((field: JiraField) => (
+                      editableJiraFields.map((field: JiraField) => (
                         <label 
                           key={field.key}
                           className={`flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer ${
@@ -571,15 +711,6 @@ const SettingsView: React.FC = () => {
         </div>
       )}
 
-      <div className="pt-2">
-        <button 
-          type="button"
-          onClick={() => setGlobalView('setup')}
-          className="w-full bg-[var(--bg-card)] hover:bg-[var(--bg-app)] border border-[var(--border-main)] text-[var(--text-main)] font-bold py-4 rounded-2xl shadow-[var(--shadow-sm)] transition-all flex items-center justify-center gap-2"
-        >
-          Adjust Jira Connection
-        </button>
-      </div>
     </div>
   );
 };

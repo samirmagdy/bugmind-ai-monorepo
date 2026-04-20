@@ -26,20 +26,6 @@ class JiraConnectionResponse(JiraConnectionBase):
     class Config:
         from_attributes = True
 
-class JiraFieldMappingBase(BaseModel):
-    project_key: str
-    issue_type_id: str
-    field_mappings: Dict[str, Any]
-
-class JiraFieldMappingCreate(JiraFieldMappingBase):
-    pass
-
-class JiraFieldMappingResponse(JiraFieldMappingBase):
-    id: int
-
-    class Config:
-        from_attributes = True
-
 
 class JiraBootstrapContextRequest(BaseModel):
     instance_url: str
@@ -60,6 +46,7 @@ class JiraFieldResponse(BaseModel):
     name: str
     type: str
     required: bool
+    system: Optional[str] = None
     allowed_values: Optional[List[Dict[str, Any]]] = None
 
 

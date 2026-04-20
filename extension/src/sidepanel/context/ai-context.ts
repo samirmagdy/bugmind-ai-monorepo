@@ -21,7 +21,6 @@ export interface AIContextType {
   publishTestCasesToXray: () => Promise<void>;
   validateBug: (index: number) => Promise<boolean>;
   preparePreviewBug: (index: number) => void;
-  fetchResolvedPayload: (index: number) => Promise<void>;
 }
 
 export const AIContext = createContext<AIContextType | undefined>(undefined);

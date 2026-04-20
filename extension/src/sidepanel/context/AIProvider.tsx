@@ -1,6 +1,23 @@
 import React, { useState, useRef, useMemo, useCallback } from 'react';
-import { TabSession, BugReport, Usage, INITIAL_SESSION, TestCase, XrayPublishResult, MissingField, CreatedIssue, ResolvedPayload, IssueContextPayload } from '../types';
+import { TabSession, BugReport, Usage, INITIAL_SESSION, TestCase, MissingField, IssueContextPayload } from '../types';
 import { apiRequest, readJsonResponse } from '../services/api';
+import {
+  AIGenerationRequestPayload,
+  AIGenerationResponsePayload,
+  AIPreviewRequestPayload,
+  AIPreviewResponsePayload,
+  AISubmitRequestPayload,
+  AISubmitResponsePayload,
+  AISettingsResponsePayload,
+  AITestCasesResponsePayload,
+  JiraUserSearchRequestPayload,
+  JiraUsersSearchResponsePayload,
+  UsageResponsePayload,
+  XrayPublishRequestPayload,
+  XrayPublishResponsePayload,
+  buildIssueContextPayload,
+  buildProjectRequestParams,
+} from '../services/contracts';
 import { translateError } from '../utils/ErrorTranslator';
 import { AIContext } from './ai-context';
 
@@ -15,6 +32,17 @@ export const AIProvider: React.FC<{
   currentTabId: number | null,
   setTabSessions: React.Dispatch<React.SetStateAction<Record<number, TabSession>>>
 }> = ({ children, logDebug, apiBase, authToken, refreshAuthToken, session, updateSession, currentTabId, setTabSessions }) => {
+  const isSystemManagedMissingField = useCallback((field: MissingField) => {
+    const normalizedKey = field.key.trim().toLowerCase().replace(/[_-]/g, '');
+    const normalizedName = field.name.trim().toLowerCase();
+
+    return (
+      normalizedName === 'project' ||
+      normalizedName === 'issue type' ||
+      ['project', 'projectid', 'pid', 'issuetype', 'issuetypeid', 'typeid'].includes(normalizedKey)
+    );
+  }, []);
+
   const [usage, setUsage] = useState<Usage | null>(null);
   const [customModel, setCustomModel] = useState('');
   const [customKey, setCustomKey] = useState('');
@@ -37,12 +65,14 @@ export const AIProvider: React.FC<{
     return sanitized;
   }, []);
 
-  const buildIssueContext = useCallback((): IssueContextPayload => ({
-    issue_key: session.issueData?.key,
-    summary: session.issueData?.summary || '',
-    description: session.issueData?.description || '',
-    acceptance_criteria: session.issueData?.acceptanceCriteria || ''
-  }), [session.issueData]);
+  const buildIssueContext = useCallback((): IssueContextPayload => buildIssueContextPayload(session.issueData), [session.issueData]);
+  const getProjectRequestParams = useCallback(() => {
+    const { project_key, project_id } = buildProjectRequestParams(session.issueData);
+    return {
+      projectKey: project_key,
+      projectId: project_id
+    };
+  }, [session.issueData]);
 
   const fetchUsage = useCallback(async () => {
     if (!authToken) return;
@@ -54,7 +84,7 @@ export const AIProvider: React.FC<{
       if (!res.ok) {
         throw new Error(await res.text() || `Request failed with status ${res.status}`);
       }
-      const data = await readJsonResponse<Usage>(res);
+      const data = await readJsonResponse<UsageResponsePayload>(res);
       setUsage(data);
     } catch (err) {
       logDebug('USAGE-ERR', String(err));
@@ -74,7 +104,7 @@ export const AIProvider: React.FC<{
         throw new Error(await res.text() || `Request failed with status ${res.status}`);
       }
 
-      const data = await readJsonResponse<{ custom_model?: string; has_custom_key?: boolean }>(res);
+      const data = await readJsonResponse<AISettingsResponsePayload>(res);
       setCustomModel(data.custom_model || '');
       setHasCustomKeySaved(Boolean(data.has_custom_key));
     } catch (err) {
@@ -124,25 +154,27 @@ export const AIProvider: React.FC<{
     logDebug('AI-START', `Analyzing ${session.issueData.key}...`);
 
     try {
+      const { projectKey, projectId } = getProjectRequestParams();
+      const payload: AIGenerationRequestPayload = {
+        issue_context: buildIssueContext(),
+        jira_connection_id: session.jiraConnectionId,
+        instance_url: session.instanceUrl,
+        project_key: projectKey,
+        project_id: projectId,
+        issue_type_id: session.selectedIssueType.id
+      };
       const res = await apiRequest(`${apiBase}/ai/generate`, {
         method: 'POST',
         token: authToken,
         onUnauthorized: refreshAuthToken,
-        body: JSON.stringify({
-          issue_context: buildIssueContext(),
-          jira_connection_id: session.jiraConnectionId,
-          instance_url: session.instanceUrl,
-          project_key: session.issueData.key.split('-')[0],
-          project_id: session.issueData.projectId,
-          issue_type_id: session.selectedIssueType.id
-        })
+        body: JSON.stringify(payload)
       });
 
       if (!res.ok) {
         throw new Error(await res.text() || `Failed to generate analytical report (${res.status})`);
       }
 
-      const data = await res.json();
+      const data = await readJsonResponse<AIGenerationResponsePayload>(res);
       const bug: BugReport = {
         summary: data.summary,
         description: data.description,
@@ -162,7 +194,7 @@ export const AIProvider: React.FC<{
     } finally {
       updateSession({ loading: false }, currentTabId);
     }
-  }, [apiBase, authToken, buildIssueContext, currentTabId, logDebug, refreshAuthToken, sanitizeExtraFields, session.instanceUrl, session.issueData, session.jiraConnectionId, session.selectedIssueType, updateSession]);
+  }, [apiBase, authToken, buildIssueContext, currentTabId, getProjectRequestParams, logDebug, refreshAuthToken, sanitizeExtraFields, session.instanceUrl, session.issueData, session.jiraConnectionId, session.selectedIssueType, updateSession]);
 
   const generateTestCases = useCallback(async () => {
     if (!currentTabId || !session.issueData || !session.jiraConnectionId) return;
@@ -172,23 +204,25 @@ export const AIProvider: React.FC<{
     }
     updateSession({ loading: true, error: null, bugs: [], testCases: [] }, currentTabId);
     try {
+      const { projectKey, projectId } = getProjectRequestParams();
+      const payload: AIGenerationRequestPayload = {
+        issue_context: buildIssueContext(),
+        jira_connection_id: session.jiraConnectionId,
+        instance_url: session.instanceUrl,
+        project_key: projectKey,
+        project_id: projectId,
+        issue_type_id: session.selectedIssueType.id
+      };
       const res = await apiRequest(`${apiBase}/ai/test-cases`, {
         method: 'POST',
         token: authToken,
         onUnauthorized: refreshAuthToken,
-        body: JSON.stringify({
-          issue_context: buildIssueContext(),
-          jira_connection_id: session.jiraConnectionId,
-          instance_url: session.instanceUrl,
-          project_key: session.issueData.key.split('-')[0],
-          project_id: session.issueData.projectId,
-          issue_type_id: session.selectedIssueType.id
-        })
+        body: JSON.stringify(payload)
       });
       if (!res.ok) {
         throw new Error(await res.text() || `Failed to generate test cases (${res.status})`);
       }
-      const data = await readJsonResponse<{ test_cases: TestCase[]; coverage_score: number }>(res);
+      const data = await readJsonResponse<AITestCasesResponsePayload>(res);
       updateSession({
         bugs: [],
         testCases: data.test_cases || [],
@@ -203,7 +237,7 @@ export const AIProvider: React.FC<{
     } finally {
       updateSession({ loading: false }, currentTabId);
     }
-  }, [apiBase, authToken, buildIssueContext, currentTabId, fetchUsage, refreshAuthToken, session.instanceUrl, session.issueData, session.jiraConnectionId, session.selectedIssueType, updateSession]);
+  }, [apiBase, authToken, buildIssueContext, currentTabId, fetchUsage, getProjectRequestParams, refreshAuthToken, session.instanceUrl, session.issueData, session.jiraConnectionId, session.selectedIssueType, updateSession]);
 
   const publishTestCasesToXray = useCallback(async () => {
     if (!currentTabId || !session.issueData || !session.jiraConnectionId || !session.testCases.length) return;
@@ -215,28 +249,29 @@ export const AIProvider: React.FC<{
     updateSession({ loading: true, error: null, success: null }, currentTabId);
 
     try {
+      const payload: XrayPublishRequestPayload = {
+        jira_connection_id: session.jiraConnectionId,
+        story_issue_key: session.issueData.key,
+        xray_project_id: session.xrayTargetProjectId,
+        xray_project_key: session.xrayTargetProjectKey,
+        test_cases: session.testCases,
+        test_issue_type_name: session.xrayTestIssueTypeName || 'Test',
+        repository_path_field_id: session.xrayRepositoryPathFieldId || undefined,
+        folder_path: session.xrayFolderPath || session.issueData.key,
+        link_type: session.xrayLinkType || 'Tests'
+      };
       const res = await apiRequest(`${apiBase}/jira/connections/${session.jiraConnectionId}/xray/test-suite`, {
         method: 'POST',
         token: authToken,
         onUnauthorized: refreshAuthToken,
-        body: JSON.stringify({
-          jira_connection_id: session.jiraConnectionId,
-          story_issue_key: session.issueData.key,
-          xray_project_id: session.xrayTargetProjectId,
-          xray_project_key: session.xrayTargetProjectKey,
-          test_cases: session.testCases,
-          test_issue_type_name: session.xrayTestIssueTypeName || 'Test',
-          repository_path_field_id: session.xrayRepositoryPathFieldId || undefined,
-          folder_path: session.xrayFolderPath || session.issueData.key,
-          link_type: session.xrayLinkType || 'Tests'
-        })
+        body: JSON.stringify(payload)
       });
 
       if (!res.ok) {
         throw new Error(await res.text() || `Failed to publish test cases to Xray (${res.status})`);
       }
 
-      const data = await readJsonResponse<XrayPublishResult>(res);
+      const data = await readJsonResponse<XrayPublishResponsePayload>(res);
       updateSession({
         createdIssues: data.created_tests || [],
         xrayWarnings: data.warnings || [],
@@ -259,34 +294,29 @@ export const AIProvider: React.FC<{
     updateSession({ loading: true, error: null, testCases: [], coverageScore: null });
     logDebug('MANUAL-START', 'Structuring manual description...');
     try {
+      const { projectKey, projectId } = getProjectRequestParams();
+      const payload: AIGenerationRequestPayload = {
+        issue_context: session.issueData ? buildIssueContext() : undefined,
+        selected_text: session.issueData ? undefined : session.manualDesc,
+        jira_connection_id: session.jiraConnectionId,
+        instance_url: session.instanceUrl,
+        project_key: projectKey || 'MANUAL',
+        project_id: projectId,
+        issue_type_id: session.selectedIssueType.id,
+        user_description: session.manualDesc
+      };
       const res = await apiRequest(`${apiBase}/ai/generate`, {
         method: 'POST',
         token: authToken,
         onUnauthorized: refreshAuthToken,
-        body: JSON.stringify({
-          issue_context: session.issueData ? buildIssueContext() : undefined,
-          selected_text: session.issueData ? undefined : session.manualDesc,
-          jira_connection_id: session.jiraConnectionId,
-          instance_url: session.instanceUrl,
-          project_key: session.issueData?.key.split('-')[0] || 'MANUAL',
-          project_id: session.issueData?.projectId,
-          issue_type_id: session.selectedIssueType.id,
-          user_description: session.manualDesc
-        })
+        body: JSON.stringify(payload)
       });
 
       if (!res.ok) {
         throw new Error(await res.text() || `Manual processing failed (${res.status})`);
       }
 
-      const data = await res.json() as { 
-        summary: string; 
-        description: string; 
-        steps_to_reproduce: string;
-        expected_result: string;
-        actual_result: string;
-        fields?: Record<string, unknown> 
-      };
+      const data = await readJsonResponse<AIGenerationResponsePayload>(res);
       const newBug: BugReport = {
         summary: data.summary,
         description: data.description,
@@ -304,7 +334,7 @@ export const AIProvider: React.FC<{
     } finally {
       updateSession({ loading: false });
     }
-  }, [apiBase, authToken, buildIssueContext, fetchUsage, logDebug, refreshAuthToken, sanitizeExtraFields, session.bugs, session.instanceUrl, session.issueData, session.jiraConnectionId, session.manualDesc, session.selectedIssueType?.id, updateSession]);
+  }, [apiBase, authToken, buildIssueContext, fetchUsage, getProjectRequestParams, logDebug, refreshAuthToken, sanitizeExtraFields, session.bugs, session.instanceUrl, session.issueData, session.jiraConnectionId, session.manualDesc, session.selectedIssueType?.id, updateSession]);
 
   const validateBug = useCallback(async (index: number): Promise<boolean> => {
     const bug = session.bugs[index];
@@ -312,28 +342,30 @@ export const AIProvider: React.FC<{
 
     updateSession({ loading: true, error: null, validationErrors: [] });
     try {
-      const projectKey = session.issueData.key.split('-')[0];
+      const { projectKey, projectId } = getProjectRequestParams();
+      const payload: AIPreviewRequestPayload = {
+        jira_connection_id: session.jiraConnectionId,
+        instance_url: session.instanceUrl,
+        project_key: projectKey,
+        project_id: projectId,
+        issue_type_id: session.selectedIssueType.id,
+        bug
+      };
       const res = await apiRequest(`${apiBase}/ai/preview`, {
         method: 'POST',
         token: authToken,
         onUnauthorized: refreshAuthToken,
-        body: JSON.stringify({
-          jira_connection_id: session.jiraConnectionId,
-          instance_url: session.instanceUrl,
-          project_key: projectKey,
-          project_id: session.issueData.projectId,
-          issue_type_id: session.selectedIssueType.id,
-          bug
-        })
+        body: JSON.stringify(payload)
       });
 
       if (!res.ok) throw new Error(await res.text() || "Validation failed");
       
-      const data = await readJsonResponse<{ valid: boolean; missing_fields: MissingField[]; resolved_payload: ResolvedPayload }>(res);
+      const data = await readJsonResponse<AIPreviewResponsePayload>(res);
+      const actionableMissingFields = (data.missing_fields || []).filter((field) => !isSystemManagedMissingField(field));
       updateSession({ resolvedPayload: data.resolved_payload ?? null });
-      if (!data.valid) {
+      if (actionableMissingFields.length > 0) {
         updateSession({ 
-          validationErrors: data.missing_fields.map(f => `Field "${f.name}" is required.`) 
+          validationErrors: actionableMissingFields.map(f => `Field "${f.name}" is required.`) 
         });
         return false;
       }
@@ -345,43 +377,12 @@ export const AIProvider: React.FC<{
     } finally {
       updateSession({ loading: false });
     }
-  }, [apiBase, authToken, refreshAuthToken, session.bugs, session.instanceUrl, session.issueData, session.jiraConnectionId, session.selectedIssueType, updateSession]);
-
-  const fetchResolvedPayload = useCallback(async (index: number) => {
-    const bug = session.bugs[index];
-    if (!bug || !session.jiraConnectionId || !session.issueData || !session.selectedIssueType?.id) return;
-
-    try {
-      const projectKey = session.issueData.key.split('-')[0];
-      const res = await apiRequest(`${apiBase}/ai/preview`, {
-        method: 'POST',
-        token: authToken,
-        onUnauthorized: refreshAuthToken,
-        body: JSON.stringify({
-          jira_connection_id: session.jiraConnectionId,
-          instance_url: session.instanceUrl,
-          project_key: projectKey,
-          project_id: session.issueData.projectId,
-          issue_type_id: session.selectedIssueType.id,
-          bug
-        })
-      });
-
-      if (res.ok) {
-        const data = await readJsonResponse<{ resolved_payload: ResolvedPayload }>(res);
-        updateSession({ resolvedPayload: data.resolved_payload ?? null });
-      }
-    } catch (err) {
-      console.error('Failed to resolve bug payload', err);
-    }
-  }, [apiBase, authToken, refreshAuthToken, session.bugs, session.instanceUrl, session.issueData, session.jiraConnectionId, session.selectedIssueType, updateSession]);
+  }, [apiBase, authToken, getProjectRequestParams, isSystemManagedMissingField, refreshAuthToken, session.bugs, session.instanceUrl, session.issueData, session.jiraConnectionId, session.selectedIssueType, updateSession]);
 
   const preparePreviewBug = useCallback((index: number) => {
     updateSession({ view: 'preview', previewBugIndex: index, validationErrors: [], resolvedPayload: null });
-    // Auto-trigger validation and payload resolution
-    validateBug(index);
-    fetchResolvedPayload(index);
-  }, [updateSession, validateBug, fetchResolvedPayload]);
+    void validateBug(index);
+  }, [updateSession, validateBug]);
 
   const submitBugs = useCallback(async (index?: number) => {
     let bugs = session.bugs || [];
@@ -393,33 +394,34 @@ export const AIProvider: React.FC<{
     updateSession({ loading: true, error: null });
     
     try {
-      const projectKey = session.issueData.key.split('-')[0];
+      const { projectKey, projectId } = getProjectRequestParams();
+      const payload: AISubmitRequestPayload = {
+        jira_connection_id: session.jiraConnectionId,
+        instance_url: session.instanceUrl,
+        project_key: projectKey,
+        project_id: projectId,
+        issue_type_id: session.selectedIssueType.id,
+        bugs
+      };
       const res = await apiRequest(`${apiBase}/ai/submit`, {
         method: 'POST',
         token: authToken,
         onUnauthorized: refreshAuthToken,
-        body: JSON.stringify({
-          jira_connection_id: session.jiraConnectionId,
-          instance_url: session.instanceUrl,
-          project_key: projectKey,
-          project_id: session.issueData.projectId,
-          issue_type_id: session.selectedIssueType.id,
-          bugs
-        })
+        body: JSON.stringify(payload)
       });
 
       if (!res.ok) {
         throw new Error(await res.text() || 'Failed to submit bugs');
       }
 
-      const data = await readJsonResponse<{ created_issues: CreatedIssue[] }>(res);
+      const data = await readJsonResponse<AISubmitResponsePayload>(res);
       updateSession({ view: 'success', createdIssues: data.created_issues || [] });
     } catch (err: unknown) {
       updateSession({ error: translateError(err, 'jira-submit').description });
     } finally {
       updateSession({ loading: false });
     }
-  }, [authToken, apiBase, refreshAuthToken, session.bugs, session.instanceUrl, session.issueData, session.jiraConnectionId, session.selectedIssueType, updateSession]);
+  }, [authToken, apiBase, getProjectRequestParams, refreshAuthToken, session.bugs, session.instanceUrl, session.issueData, session.jiraConnectionId, session.selectedIssueType, updateSession]);
 
   const searchUsers = useCallback(async (query: string, bugIndex?: number) => {
     if (query.length < 2 || !session.jiraConnectionId) return;
@@ -428,25 +430,26 @@ export const AIProvider: React.FC<{
     searchControllerRef.current = new AbortController();
 
     try {
+      const payload: JiraUserSearchRequestPayload = {
+        jira_connection_id: session.jiraConnectionId,
+        query,
+        project_id: getProjectRequestParams().projectId,
+        project_key: getProjectRequestParams().projectKey
+      };
       const res = await apiRequest(`${apiBase}/jira/users/search`, {
         method: 'POST',
         token: authToken,
         onUnauthorized: refreshAuthToken,
         signal: searchControllerRef.current.signal,
-        body: JSON.stringify({
-          jira_connection_id: session.jiraConnectionId,
-          query,
-          project_id: session.issueData?.projectId,
-          project_key: session.issueData?.key.split('-')[0]
-        })
+        body: JSON.stringify(payload)
       });
       if (res.ok && bugIndex !== undefined) {
-        handleUpdateBug(bugIndex, { userSearchResults: await res.json(), isSearchingUsers: false });
+        handleUpdateBug(bugIndex, { userSearchResults: await readJsonResponse<JiraUsersSearchResponsePayload>(res), isSearchingUsers: false });
       }
     } catch (err) {
       if (bugIndex !== undefined) handleUpdateBug(bugIndex, { isSearchingUsers: false });
     }
-  }, [apiBase, authToken, refreshAuthToken, handleUpdateBug, session.issueData?.key, session.issueData?.projectId, session.jiraConnectionId]);
+  }, [apiBase, authToken, getProjectRequestParams, refreshAuthToken, handleUpdateBug, session.jiraConnectionId]);
 
   const value = useMemo(() => ({
     usage, fetchUsage,
@@ -463,9 +466,8 @@ export const AIProvider: React.FC<{
     handleUpdateTestCase,
     publishTestCasesToXray,
     validateBug,
-    preparePreviewBug,
-    fetchResolvedPayload
-  }), [usage, fetchUsage, customModel, customKey, hasCustomKeySaved, fetchAISettings, generateBugs, generateTestCases, handleManualGenerate, submitBugs, searchUsers, handleUpdateBug, handleUpdateTestCase, publishTestCasesToXray, validateBug, preparePreviewBug, fetchResolvedPayload]);
+    preparePreviewBug
+  }), [usage, fetchUsage, customModel, customKey, hasCustomKeySaved, fetchAISettings, generateBugs, generateTestCases, handleManualGenerate, submitBugs, searchUsers, handleUpdateBug, handleUpdateTestCase, publishTestCasesToXray, validateBug, preparePreviewBug]);
 
   return <AIContext.Provider value={value}>{children}</AIContext.Provider>;
 };

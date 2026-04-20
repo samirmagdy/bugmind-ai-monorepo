@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { deobfuscate, obfuscate } from '../utils/StorageObfuscator';
 import { apiRequest, readJsonResponse } from '../services/api';
+import { AuthRefreshRequestPayload, AuthTokenResponsePayload } from '../services/contracts';
 import { View } from '../types';
 import { AuthContext } from './auth-context';
 
@@ -113,16 +114,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode, logDebug: (tag:
   const refreshSession = useCallback(async (): Promise<string | null> => {
     if (!refreshToken) return null;
     try {
+      const payload: AuthRefreshRequestPayload = { refresh_token: refreshToken };
       const res = await apiRequest(`${apiBase}/auth/refresh`, {
         method: 'POST',
-        body: JSON.stringify({ refresh_token: refreshToken }),
+        body: JSON.stringify(payload),
         timeoutMs: 10000,
         onDebug: logDebug
       });
       if (!res.ok) {
         throw new Error(await res.text() || `Refresh failed (${res.status})`);
       }
-      const data = await readJsonResponse<{ access_token: string; refresh_token: string }>(res);
+      const data = await readJsonResponse<AuthTokenResponsePayload>(res);
       const secureAccessToken = obfuscate(data.access_token);
       const secureRefreshToken = obfuscate(data.refresh_token);
       setAuthToken(data.access_token);

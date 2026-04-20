@@ -1,5 +1,6 @@
 import httpx
 import base64
+import re
 from typing import Dict, Any, List
 from fastapi import HTTPException
 from app.services.jira.adapters.base import JiraAdapter
@@ -57,23 +58,116 @@ class JiraCloudAdapter(JiraAdapter):
 
         return []
 
+    def _make_text_node(self, text: str, bold: bool = False) -> Dict[str, Any]:
+        node: Dict[str, Any] = {"type": "text", "text": text}
+        if bold:
+            node["marks"] = [{"type": "strong"}]
+        return node
+
+    def _make_paragraph(self, text: str, bold: bool = False) -> Dict[str, Any]:
+        stripped = text.strip()
+        return {
+            "type": "paragraph",
+            "content": [self._make_text_node(stripped, bold=bold)] if stripped else []
+        }
+
+    def _make_ordered_list(self, items: List[str]) -> Dict[str, Any]:
+        return {
+            "type": "orderedList",
+            "attrs": {"order": 1},
+            "content": [
+                {
+                    "type": "listItem",
+                    "content": [self._make_paragraph(item)]
+                }
+                for item in items if item.strip()
+            ]
+        }
+
+    def _extract_sections(self, text: str) -> Dict[str, Any]:
+        normalized = text.replace("\r\n", "\n").strip()
+        heading_pattern = re.compile(r"^\*(.+?)\*:?$", re.MULTILINE)
+        matches = list(heading_pattern.finditer(normalized))
+
+        if not matches:
+            return {"summary": normalized, "sections": {}}
+
+        summary = normalized[:matches[0].start()].strip()
+        sections: Dict[str, str] = {}
+        for idx, match in enumerate(matches):
+            heading = match.group(1).strip().lower()
+            body_start = match.end()
+            body_end = matches[idx + 1].start() if idx + 1 < len(matches) else len(normalized)
+            sections[heading] = normalized[body_start:body_end].strip()
+
+        return {"summary": summary, "sections": sections}
+
+    def _parse_step_lines(self, value: str) -> List[str]:
+        steps: List[str] = []
+        for raw_line in value.split("\n"):
+            line = raw_line.strip()
+            if not line:
+                continue
+            cleaned = re.sub(r"^(?:#|\d+\.)\s*", "", line).strip()
+            if cleaned:
+                steps.append(cleaned)
+        return steps
+
     def _to_adf(self, text: str) -> Dict[str, Any]:
         """
-        Converts plain text to Atlassian Document Format (ADF) for Jira Cloud v3.
+        Converts structured description text to Atlassian Document Format (ADF)
+        for Jira Cloud v3, preserving section titles and ordered steps.
         """
         if not isinstance(text, str) or not text:
             return text
-            
-        lines = text.split('\n')
-        return {
-            "version": 1,
-            "type": "doc",
-            "content": [
+
+        parsed = self._extract_sections(text)
+        content: List[Dict[str, Any]] = []
+
+        summary = parsed["summary"]
+        sections = parsed["sections"]
+
+        if summary:
+            content.append(self._make_paragraph("Summary", bold=True))
+            content.append(self._make_paragraph(summary))
+            content.append(self._make_paragraph(""))
+
+        heading_order = [
+            ("steps to reproduce", "Steps to Reproduce:", True),
+            ("expected result", "Expected Result:", False),
+            ("actual result", "Actual Result:", False),
+        ]
+
+        for key, title, is_list in heading_order:
+            value = sections.get(key, "").strip()
+            if not value:
+                continue
+
+            content.append(self._make_paragraph(title, bold=True))
+            if is_list:
+                steps = self._parse_step_lines(value)
+                if steps:
+                    content.append(self._make_ordered_list(steps))
+            else:
+                content.append(self._make_paragraph(value))
+            content.append(self._make_paragraph(""))
+
+        if not content:
+            lines = text.split('\n')
+            content = [
                 {
                     "type": "paragraph",
                     "content": [{"type": "text", "text": line}] if line.strip() else []
                 } for line in lines
             ]
+
+        if content and content[-1].get("type") == "paragraph" and not content[-1].get("content"):
+            content.pop()
+
+        return {
+            "version": 1,
+            "type": "doc",
+            "content": content
         }
 
     def get_projects(self) -> List[Dict[str, Any]]:

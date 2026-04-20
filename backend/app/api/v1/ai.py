@@ -22,6 +22,12 @@ from app.services.ai.bug_generator import BugGenerator
 from app.services.subscription.limit_checker import LimitChecker
 from app.services.jira.metadata_engine import JiraMetadataEngine
 from app.services.jira.field_resolver import JiraFieldResolver
+from app.services.jira.contract_aliases import (
+    canonicalize_ai_payload,
+    get_payload_value_for_field,
+    inject_standard_field_aliases,
+    is_system_managed_standard_field,
+)
 from app.api.v1.jira import get_adapter, _normalize_instance_url
 from app.core.security import decrypt_credential
 import re
@@ -79,14 +85,32 @@ def _assert_connection_matches_instance(connection: JiraConnection, instance_url
         )
 
 
+def _normalize_project_value(raw_project: object, fallback_project_key: str, fallback_project_id: Optional[str]) -> dict:
+    if isinstance(raw_project, dict):
+        project_id = raw_project.get("id")
+        project_key = raw_project.get("key")
+        if project_id:
+            return {"id": str(project_id)}
+        if project_key:
+            return {"key": str(project_key)}
+
+    if isinstance(raw_project, str):
+        cleaned = raw_project.strip()
+        if cleaned:
+            return {"id": cleaned} if cleaned.isdigit() else {"key": cleaned}
+
+    return {"id": project_id} if (project_id := fallback_project_id) else {"key": fallback_project_key}
+
+
 def _build_issue_fields(bug: dict, issue_type_id: str, project_key: str, project_id: Optional[str]) -> dict:
+    raw_project = (bug.get("extra_fields") or {}).get("project")
     extra_fields = {
         key: value
         for key, value in (bug.get("extra_fields") or {}).items()
         if key not in STANDARD_ISSUE_FIELDS
     }
 
-    project_value = {"id": project_id} if project_id else {"key": project_key}
+    project_value = _normalize_project_value(raw_project, project_key, project_id)
     return {
         "summary": bug.get("summary"),
         "description": bug.get("description"),
@@ -111,14 +135,14 @@ def _resolve_payload(db: Session, user_id: int, project_key: str, project_id: Op
     mapping_config = mapping_record.field_mappings if mapping_record else {}
 
     resolver = JiraFieldResolver(mapping_config, schema)
-    ai_raw = {
+    ai_raw = canonicalize_ai_payload({
         "summary": payload_fields.get("summary"),
         "description": payload_fields.get("description"),
         "steps": payload_fields.get("steps_to_reproduce", "").split("\n"),
         "expected": payload_fields.get("expected_result"),
         "actual": payload_fields.get("actual_result"),
         **payload_fields
-    }
+    })
 
     clean_steps = []
     for step in ai_raw["steps"]:
@@ -133,18 +157,25 @@ def _resolve_payload(db: Session, user_id: int, project_key: str, project_id: Op
 def _validate_payload(schema: list, payload_fields: dict) -> List[Dict]:
     missing_fields = []
     for field in schema:
-        if field.get("required") and field["key"] not in payload_fields:
+        if not field.get("required"):
+            continue
+
+        if is_system_managed_standard_field(field):
+            continue
+
+        value = get_payload_value_for_field(field, payload_fields)
+        if value is None:
             missing_fields.append({
                 "key": field["key"],
                 "name": field["name"]
             })
-        elif field.get("required") and field["key"] in payload_fields:
-            value = payload_fields[field["key"]]
-            if value is None or value == "" or (isinstance(value, list) and not value):
-                missing_fields.append({
-                    "key": field["key"],
-                    "name": field["name"]
-                })
+            continue
+
+        if value == "" or (isinstance(value, list) and not value):
+            missing_fields.append({
+                "key": field["key"],
+                "name": field["name"]
+            })
     return missing_fields
 
 @router.get("/usage")
@@ -289,7 +320,10 @@ async def prepare_bug_preview(
     schema_project_id = req.project_id or req.project_key
     schema = engine.get_field_schema(schema_project_id, req.issue_type_id)
 
-    payload_fields = _build_issue_fields(req.bug.model_dump(), req.issue_type_id, req.project_key, req.project_id)
+    payload_fields = inject_standard_field_aliases(
+        schema,
+        _build_issue_fields(req.bug.model_dump(), req.issue_type_id, req.project_key, req.project_id)
+    )
     missing_fields = _validate_payload(schema, payload_fields)
     resolved_payload = _resolve_payload(
         db,
@@ -323,11 +357,14 @@ async def submit_bugs(
     created_issues: List[XrayPublishedTest] = []
 
     for bug in req.bugs:
-        payload_fields = _build_issue_fields(
-            bug.model_dump(),
-            req.issue_type_id,
-            req.project_key,
-            req.project_id
+        payload_fields = inject_standard_field_aliases(
+            schema,
+            _build_issue_fields(
+                bug.model_dump(),
+                req.issue_type_id,
+                req.project_key,
+                req.project_id
+            )
         )
         missing_fields = _validate_payload(schema, payload_fields)
         if missing_fields:
@@ -346,7 +383,7 @@ async def submit_bugs(
         issue_data = {
             "fields": {
                 **resolved_payload.get("fields", {}),
-                "project": {"id": req.project_id} if req.project_id else {"key": req.project_key},
+                "project": payload_fields["project"],
                 "issuetype": {"id": req.issue_type_id},
             }
         }

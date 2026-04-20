@@ -32,6 +32,11 @@ const SetupView: React.FC = () => {
     setVerifySsl(jira.verifySsl);
   }, [jira.verifySsl]);
 
+  useEffect(() => {
+    if (session.connections && session.connections.length > 0) return;
+    void jira.fetchConnections();
+  }, [jira, session.connections]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);

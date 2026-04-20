@@ -141,6 +141,7 @@ export interface JiraField {
   name: string;
   type: string;
   required: boolean;
+  system?: string | null;
   allowed_values?: JiraFieldOption[];
 }
 
@@ -161,12 +162,6 @@ export interface JiraBootstrapContext {
   visible_fields: string[];
   ai_mapping: Record<string, string>;
   jira_metadata: JiraMetadata | null;
-}
-
-export interface AuthBootstrapResponse {
-  view: 'main' | 'setup';
-  has_connections: boolean;
-  bootstrap_context: JiraBootstrapContext | null;
 }
 
 export interface XrayDefaultsResponse {

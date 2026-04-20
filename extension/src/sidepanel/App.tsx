@@ -30,13 +30,14 @@ export default function App() {
   useEffect(() => {
     if (!auth.storageLoaded) return;
     if (auth.globalView !== 'auth') return;
+    if (session.loading) return;
 
     const authCheckKey = `${auth.storageLoaded}:${auth.authToken ? 'token' : 'guest'}:${auth.globalView}`;
     if (lastAuthCheckKey.current === authCheckKey) return;
 
     lastAuthCheckKey.current = authCheckKey;
     checkAuth();
-  }, [auth.globalView, auth.storageLoaded, auth.authToken, checkAuth]);
+  }, [auth.globalView, auth.storageLoaded, auth.authToken, checkAuth, session.loading]);
 
   // Logic to determine which view to show
   const activeView = (auth.globalView === 'auth' || auth.globalView === 'setup') 

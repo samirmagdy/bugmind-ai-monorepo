@@ -1,4 +1,5 @@
 from typing import Dict, Any, List
+from app.services.jira.contract_aliases import canonicalize_ai_payload, normalize_ai_field_key
 
 class JiraFieldResolver:
     def __init__(self, mapping_config: Dict[str, Any], schema: List[Dict[str, Any]]):
@@ -10,6 +11,7 @@ class JiraFieldResolver:
         Takes purely semantic AI output and transforms it to exact Jira payload
         using configured mappings and fallback logic.
         """
+        ai_output = canonicalize_ai_payload(ai_output)
         jira_payload = {
             "fields": {}
         }
@@ -20,9 +22,10 @@ class JiraFieldResolver:
         
         # Apply custom field mappings
         for ai_key, jira_field_id in self.mapping_config.items():
-            if ai_key in ai_output and jira_field_id in self.schema:
+            normalized_ai_key = normalize_ai_field_key(ai_key)
+            if normalized_ai_key in ai_output and jira_field_id in self.schema:
                 field_meta = self.schema[jira_field_id]
-                structured_val = self._structure_value(ai_output[ai_key], field_meta)
+                structured_val = self._structure_value(ai_output[normalized_ai_key], field_meta)
                 jira_payload["fields"][jira_field_id] = structured_val
 
         return jira_payload
@@ -50,20 +53,20 @@ class JiraFieldResolver:
             parts.append(base_desc)
             
         # 2. Steps (if not mapped elsewhere)
-        if "steps" not in self.mapping_config:
+        if not any(normalize_ai_field_key(key) == "steps" for key in self.mapping_config):
             steps_list = ai_output.get("steps", [])
             if steps_list:
                 formatted_steps = "\n".join([f" # {step}" for step in steps_list])
                 parts.append(f"*Steps to Reproduce:*\n{formatted_steps}")
                 
         # 3. Expected (if not mapped elsewhere)
-        if "expected" not in self.mapping_config:
+        if not any(normalize_ai_field_key(key) == "expected" for key in self.mapping_config):
             expected = ai_output.get("expected")
             if expected:
                 parts.append(f"*Expected Result:*\n{expected}")
                 
         # 4. Actual (if not mapped elsewhere)
-        if "actual" not in self.mapping_config:
+        if not any(normalize_ai_field_key(key) == "actual" for key in self.mapping_config):
             actual = ai_output.get("actual")
             if actual:
                 parts.append(f"*Actual Result:*\n{actual}")

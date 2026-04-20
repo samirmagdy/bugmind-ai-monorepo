@@ -50,8 +50,9 @@ export function useSession(log?: (tag: string, msg: string) => void) {
     });
 
     // Listen for tab updates and activation
-    const handleTabUpdate = (tabId: number, changeInfo: chrome.tabs.TabChangeInfo) => {
+    const handleTabUpdate = (tabId: number, changeInfo: chrome.tabs.TabChangeInfo, tab: chrome.tabs.Tab) => {
       if (changeInfo.status === 'complete') {
+        if (!tab.active || !tab.highlighted) return;
         setCurrentTabId(tabId);
         // Clear errors on page load/refresh
         setTabSessions(prev => {
@@ -134,6 +135,12 @@ export function useSession(log?: (tag: string, msg: string) => void) {
     return { key: `bugmind_tab_${currentTabId}`, tabId: currentTabId, session: strippedSession, bugs: bugsToSave };
   }, [currentTabId, tabSessions]);
 
+  const shouldFlushSessionImmediately = useMemo(() => {
+    if (!currentTabId || !tabSessions[currentTabId]) return false;
+    const currentSession = tabSessions[currentTabId];
+    return currentSession.view === 'success' || currentSession.view === 'preview';
+  }, [currentTabId, tabSessions]);
+
   // Sync tab session to storage with debounce (Hybrid sync)
   useEffect(() => {
     if (!serializeTarget) return;
@@ -151,10 +158,10 @@ export function useSession(log?: (tag: string, msg: string) => void) {
         log?.('DB-ERR', `Failed to save bugs: ${errMsg}`);
         console.error('Failed to save bugs to IndexedDB', err);
       }
-    }, TIMEOUTS.STORAGE_SYNC_DEBOUNCE); 
+    }, shouldFlushSessionImmediately ? 0 : TIMEOUTS.STORAGE_SYNC_DEBOUNCE); 
     
     return () => clearTimeout(timeout);
-  }, [serializeTarget, log]);
+  }, [serializeTarget, log, shouldFlushSessionImmediately]);
 
   return useMemo(() => ({
     tabSessions,

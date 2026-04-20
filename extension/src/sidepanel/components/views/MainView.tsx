@@ -9,6 +9,24 @@ import { BugReport, JiraField, JiraUser, JiraFieldOption, TestCase } from '../..
 import AutoResizeTextarea from '../common/AutoResizeTextarea';
 import { TIMEOUTS } from '../../constants';
 
+const HIDDEN_SYSTEM_FIELD_KEYS = new Set([
+  'summary',
+  'description',
+  'project',
+  'issuetype'
+]);
+
+function isSystemManagedField(field: JiraField): boolean {
+  const normalizedKey = field.key.trim().toLowerCase().replace(/[_-]/g, '');
+  const normalizedSystem = (field.system || '').trim().toLowerCase();
+
+  return (
+    HIDDEN_SYSTEM_FIELD_KEYS.has(field.key.trim().toLowerCase()) ||
+    ['summary', 'description', 'project', 'issuetype'].includes(normalizedSystem) ||
+    ['projectid', 'issuetypeid', 'pid', 'typeid'].includes(normalizedKey)
+  );
+}
+
 const MainView: React.FC = () => {
   const { 
     session, updateSession, refreshIssue, debug, handleTabReload,
@@ -553,7 +571,7 @@ const MainView: React.FC = () => {
 
                        {/* Dynamic Jira Fields */}
                        {(() => {
-                         const metadataFields = session.jiraMetadata?.fields || [];
+                         const metadataFields = (session.jiraMetadata?.fields || []).filter((field: JiraField) => !isSystemManagedField(field));
                          const visibleKeys = session.visibleFields || [];
                          const requiredKeys = metadataFields.filter(f => f.required).map(f => f.key);
                          const allVisibleKeys = Array.from(new Set([...visibleKeys, ...requiredKeys]));
