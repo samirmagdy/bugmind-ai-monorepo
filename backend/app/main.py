@@ -90,6 +90,7 @@ async def add_security_headers(request: Request, call_next):
     return response
 
 @app.get("/health", tags=["System"])
+@app.get("/health ", tags=["System"], include_in_schema=False)
 def health_check():
     try:
         with engine.connect() as connection:
