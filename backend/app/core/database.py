@@ -12,14 +12,24 @@ logger = logging.getLogger("bugmind.http")
 # Try to create engine, but don't fail if database is unavailable
 engine = None
 SessionLocal = None
+
+def get_database_engine(dsn: str):
+    """Create appropriate engine based on database type."""
+    if dsn.startswith("sqlite"):
+        # SQLite doesn't support connect_timeout or connection pooling
+        return create_engine(dsn)
+    else:
+        # PostgreSQL supports these parameters
+        return create_engine(
+            dsn,
+            pool_pre_ping=True,
+            connect_args={"connect_timeout": 10},
+            pool_size=5,
+            max_overflow=10
+        )
+
 try:
-    engine = create_engine(
-        settings.DATABASE_URL, 
-        pool_pre_ping=True,
-        connect_args={"connect_timeout": 10},
-        pool_size=5,
-        max_overflow=10
-    )
+    engine = get_database_engine(settings.DATABASE_URL)
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     logger.info(f"Database connected: {settings.DATABASE_URL.split('@')[0] if '@' in settings.DATABASE_URL else 'unknown'}")
 except Exception as e:
