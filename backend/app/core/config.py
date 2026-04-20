@@ -39,9 +39,14 @@ class Settings(BaseSettings):
     def normalize_db_url(cls, v: Any) -> Any:
         if isinstance(v, str):
             if v.startswith("postgres://"):
-                return v.replace("postgres://", "postgresql+psycopg://", 1)
+                v = v.replace("postgres://", "postgresql+psycopg://", 1)
             elif v.startswith("postgresql://") and "+psycopg" not in v:
-                return v.replace("postgresql://", "postgresql+psycopg://", 1)
+                v = v.replace("postgresql://", "postgresql+psycopg://", 1)
+            
+            # Ensure SSL mode for production postgres connections
+            if v.startswith("postgresql") and "sslmode" not in v:
+                separator = "&" if "?" in v else "?"
+                v = f"{v}{separator}sslmode=require"
         return v
 
     @property

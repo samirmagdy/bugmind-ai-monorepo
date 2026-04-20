@@ -124,7 +124,7 @@ async def startup_event():
     except Exception as e:
         logger.error("Startup database check failed: %s", str(e))
 
-@app.get("/", include_in_schema=False)
+@app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
 def root_redirect():
     return RedirectResponse(url="/docs")
 
