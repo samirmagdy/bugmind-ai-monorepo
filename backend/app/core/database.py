@@ -5,21 +5,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from app.core.config import settings
 from pathlib import Path
 
-def _normalize_database_url(database_url: str) -> str:
-    if database_url.startswith("sqlite:///./"):
-        backend_root = Path(__file__).resolve().parents[2]
-        sqlite_path = backend_root / database_url.removeprefix("sqlite:///./")
-        return f"sqlite:///{sqlite_path}"
-    
-    # Ensure modern psycopg driver is used for PostgreSQL
-    if database_url.startswith("postgres://"):
-        database_url = database_url.replace("postgres://", "postgresql+psycopg://", 1)
-    elif database_url.startswith("postgresql://") and "+psycopg" not in database_url:
-        database_url = database_url.replace("postgresql://", "postgresql+psycopg://", 1)
-        
-    return database_url
-
-engine = create_engine(_normalize_database_url(settings.DATABASE_URL), pool_pre_ping=True)
+engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()

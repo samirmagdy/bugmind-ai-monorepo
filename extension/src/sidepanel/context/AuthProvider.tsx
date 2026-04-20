@@ -5,7 +5,7 @@ import { AuthRefreshRequestPayload, AuthTokenResponsePayload } from '../services
 import { View } from '../types';
 import { AuthContext } from './auth-context';
 
-const DEFAULT_API_BASE = 'http://localhost:8000/api/v1';
+const DEFAULT_API_BASE = 'https://bugmind-ai-monorepo.onrender.com/api/v1';
 
 function normalizeApiBase(url: string): string {
   const trimmed = url.trim().replace(/\/+$/, '');

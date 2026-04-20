@@ -1,6 +1,7 @@
 from pydantic_settings import BaseSettings
-from typing import Optional
+from typing import Optional, Any
 from pathlib import Path
+from pydantic import field_validator
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "BugMind AI API"
@@ -32,6 +33,16 @@ class Settings(BaseSettings):
     OPENROUTER_MAX_TOKENS: int = 1800
     STRIPE_SECRET_KEY: Optional[str] = None
     STRIPE_WEBHOOK_SECRET: Optional[str] = None
+
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def normalize_db_url(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            if v.startswith("postgres://"):
+                return v.replace("postgres://", "postgresql+psycopg://", 1)
+            elif v.startswith("postgresql://") and "+psycopg" not in v:
+                return v.replace("postgresql://", "postgresql+psycopg://", 1)
+        return v
 
     @property
     def is_production(self) -> bool:

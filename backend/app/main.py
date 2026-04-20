@@ -3,7 +3,7 @@ import time
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import Response, JSONResponse
+from fastapi.responses import Response, JSONResponse, RedirectResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -88,6 +88,10 @@ async def add_security_headers(request: Request, call_next):
     if settings.is_production:
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     return response
+
+@app.get("/", include_in_schema=False)
+def root_redirect():
+    return RedirectResponse(url="/docs")
 
 @app.get("/health", tags=["System"])
 @app.get("/health ", tags=["System"], include_in_schema=False)

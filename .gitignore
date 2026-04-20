@@ -32,7 +32,24 @@ ENV/
 .DS_Store
 Thumbs.db
 
-# Extension specific
-extension/dist/
-extension/node_modules/
-extension/lint_results.txt
+# AI Assistant
+.gemini/
+
+# Scratch & Backups
+scratch/
+*.bak
+*.tmp
+*.temp
+
+# Logs
+*.log
+logs/
+
+# Build & Tooling
+.eslintcache
+*.tsbuildinfo
+
+# Browser Extension artifacts
+*.pem
+*.crx
+*.xpi
