@@ -25,6 +25,20 @@ try:
 except Exception as e:
     logger.warning(f"Database connection failed: {e}")
     logger.warning("App will run in standalone mode (database unavailable)")
+    # If we can't connect to database, SQLite fallback should be used
+    # but if we got here, DATABASE_URL might be set to PostgreSQL
+    # Check if it's SQLite and create a backup
+    if not settings.DATABASE_URL.startswith("sqlite"):
+        logger.info("Attempting SQLite fallback...")
+        sqlite_url = "sqlite:///./bugmind.db"
+        try:
+            engine = create_engine(sqlite_url)
+            SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+            logger.info("Successfully fell back to SQLite database")
+        except Exception as sqlite_error:
+            logger.error(f"SQLite fallback also failed: {sqlite_error}")
+    else:
+        logger.info("Using SQLite database")
 
 Base = declarative_base()
 
@@ -34,7 +48,7 @@ def get_db() -> Generator:
             db = SessionLocal()
             yield db
         else:
-            logger.warning("Database not available, skipping session")
+            logger.warning("No database connection available")
             yield None
     finally:
         if 'db' in locals() and db:

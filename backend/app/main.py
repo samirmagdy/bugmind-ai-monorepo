@@ -111,6 +111,11 @@ async def startup_event():
     logger.info("ENVIRONMENT: %s", settings.ENVIRONMENT)
     logger.info("DATABASE_URL: %s", settings.DATABASE_URL.split("@")[-1] if "@" in settings.DATABASE_URL else "masked")
     
+    if settings.DATABASE_URL.startswith("sqlite"):
+        logger.info("Using SQLite database - skipping table check")
+        return
+    
+    # For PostgreSQL, try to connect but don't crash if it fails
     try:
         from app.core.database import engine
         inspector = inspect(engine)
@@ -122,13 +127,9 @@ async def startup_event():
         if missing_tables:
             logger.warning("CRITICAL: Missing core tables: %s. Did migrations run?", ", ".join(missing_tables))
     except Exception as e:
-        # Log the error but don't crash the app - it might be a SQLite fallback
-        # or database connection issue that can be resolved later
-        logger.warning("Startup database check skipped: %s (non-critical)", str(e))
-        # Only raise exception if not using SQLite (production should have proper DB)
-        if not settings.DATABASE_URL.startswith("sqlite"):
-            logger.error("CRITICAL: Database connection failed in production!")
-            logger.error("Check DATABASE_URL configuration and ensure database is accessible from Render")
+        logger.warning("Database connection check failed (non-critical): %s", str(e))
+        logger.warning("The app will continue running but database features will be unavailable.")
+        logger.warning("Check DATABASE_URL configuration and ensure database is accessible from Render.")
 
 @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
 def root_redirect():
