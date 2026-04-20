@@ -10,7 +10,7 @@ services:
     autoDeployTrigger: commit
     envVars:
       - key: PYTHON_VERSION
-        value: 3.9.19
+        value: 3.14.3
       - key: DATABASE_URL
         sync: false
       - key: ENVIRONMENT
