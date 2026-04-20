@@ -23,12 +23,51 @@ BugMind AI is a production-grade SaaS system that analyzes Jira User Stories and
 ### 1. Backend Setup (Docker)
 1. Copy `.env.example` to `.env` and fill in your keys:
    - `OPENROUTER_API_KEY`
-   - `STRIPE_API_KEY`
+   - `OPENROUTER_MODEL` if you want to override the default model
+   - `STRIPE_SECRET_KEY`
+   - `ENCRYPTION_KEY`
 2. Run the stack:
    ```bash
    docker-compose up --build
    ```
 The API will be available at `http://localhost:8000`.
+
+### 1.1 Backend Deploy on Render
+This repo now includes a Render Blueprint at [render.yaml](/Users/samirmagdy/JBG%203/render.yaml) for the backend.
+
+What it provisions:
+- one Python web service for FastAPI
+- one managed Key Value instance for Redis-compatible caching/rate limiting/idempotency
+
+How to deploy:
+1. Push the repo to GitHub/GitLab.
+2. In Render, choose `New > Blueprint`.
+3. Select this repository.
+4. Render will detect `render.yaml` and propose:
+   - `bugmind-backend`
+   - `bugmind-redis`
+5. Fill in the prompted secret env vars:
+   - `DATABASE_URL`
+   - `SECRET_KEY`
+   - `ENCRYPTION_KEY`
+   - `OPENROUTER_API_KEY`
+   - `OPENROUTER_MODEL` if you want a non-default model
+   - `STRIPE_SECRET_KEY`
+   - `STRIPE_WEBHOOK_SECRET`
+6. Deploy the Blueprint.
+
+Deployment behavior:
+- Render runs the service from `backend/`
+- migrations run through Alembic before startup
+- the app binds to Render’s `PORT` environment variable
+- health checks use `/health`
+
+Important:
+- Alembic is now configured to use `DATABASE_URL` from the environment, which is required for Render Postgres.
+- The current deployment blueprint expects an external Postgres database URL, such as Supabase Postgres.
+- For Supabase Postgres, use `?sslmode=require` in `DATABASE_URL`.
+- The current `/health` endpoint is lightweight and does not verify database connectivity.
+- If you do not use Stripe yet, you can leave the Stripe secrets unset until you enable billing flows.
 
 ### 2. Extension Setup
 1. Navigate to the `extension` folder.

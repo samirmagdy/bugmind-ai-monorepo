@@ -20,7 +20,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     op.add_column('jira_connections', sa.Column('verify_ssl', sa.Boolean(), nullable=True))
-    op.execute("UPDATE jira_connections SET verify_ssl = 1 WHERE verify_ssl IS NULL")
+    op.execute("UPDATE jira_connections SET verify_ssl = true WHERE verify_ssl IS NULL")
     with op.batch_alter_table('jira_connections') as batch_op:
         batch_op.alter_column('verify_ssl', existing_type=sa.Boolean(), nullable=False)
 

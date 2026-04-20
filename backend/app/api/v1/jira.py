@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from typing import Optional
@@ -24,6 +24,9 @@ from app.services.jira.adapters.cloud import JiraCloudAdapter
 from app.services.jira.adapters.server import JiraServerAdapter
 from app.services.jira.metadata_engine import JiraMetadataEngine
 from urllib.parse import urlparse
+from app.core.audit import log_audit
+from app.core.idempotency import idempotency_store
+from app.core.rate_limit import rate_limiter
 
 router = APIRouter()
 
@@ -404,10 +407,22 @@ def search_jira_users(
 @router.post("/connections/{conn_id}/xray/test-suite", response_model=XrayTestSuitePublishResponse)
 def publish_xray_test_suite(
     conn_id: int,
+    request: Request,
     req: XrayTestSuitePublishRequest,
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
+    rate_limiter.check("jira.xray_publish", str(current_user.id), limit=5, window_seconds=60)
+    idem_key = request.headers.get("Idempotency-Key")
+    cached_response = idempotency_store.replay_or_reserve(
+        "jira.xray_publish",
+        str(current_user.id),
+        idem_key,
+        req.model_dump(),
+    )
+    if cached_response is not None:
+        return XrayTestSuitePublishResponse(**cached_response)
+
     if conn_id != req.jira_connection_id:
         raise HTTPException(status_code=400, detail="Connection mismatch for Xray publish request")
     if not req.test_cases:
@@ -470,10 +485,27 @@ def publish_xray_test_suite(
     if not repository_path_field_id:
         warnings.append("Created tests without setting an Xray repository path because no repository path field was detected")
 
-    return XrayTestSuitePublishResponse(
+    response = XrayTestSuitePublishResponse(
         created_tests=created_tests,
         folder_path=folder_path,
         repository_path_field_id=repository_path_field_id,
         link_type_used=link_type_used,
         warnings=warnings,
     )
+    idempotency_store.store_response(
+        "jira.xray_publish",
+        str(current_user.id),
+        idem_key,
+        req.model_dump(),
+        response.model_dump(),
+    )
+    log_audit(
+        "jira.xray_publish",
+        current_user.id,
+        jira_connection_id=req.jira_connection_id,
+        project_id=req.xray_project_id,
+        request_path=str(request.url.path),
+        created_test_keys=[test.key for test in created_tests],
+        warnings=warnings,
+    )
+    return response

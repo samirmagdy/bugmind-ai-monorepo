@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from datetime import datetime
@@ -31,6 +31,9 @@ from app.services.jira.contract_aliases import (
 )
 from app.api.v1.jira import get_adapter, _normalize_instance_url
 from app.core.security import decrypt_credential
+from app.core.audit import log_audit
+from app.core.idempotency import idempotency_store
+from app.core.rate_limit import rate_limiter
 import re
 
 router = APIRouter()
@@ -235,10 +238,12 @@ def get_usage(
 
 @router.post("/generate", response_model=BugGenerationResponse)
 async def generate_bug_report(
+    request: Request,
     req: BugGenerationRequest,
     db: Session = Depends(deps.get_db), 
     current_user: User = Depends(deps.get_current_user)
 ):
+    rate_limiter.check("ai.generate", str(current_user.id), limit=10, window_seconds=60)
     # 1. Enforce Subscription Limits
     LimitChecker.check_and_increment(db, current_user.id, "/generate", 0)
 
@@ -298,7 +303,7 @@ async def generate_bug_report(
     else:
         steps_text = str(steps_list)
 
-    return BugGenerationResponse(
+    response = BugGenerationResponse(
         summary=ai_raw.get("summary", ""),
         description=ai_raw.get("description", ""),
         steps_to_reproduce=steps_text,
@@ -307,9 +312,19 @@ async def generate_bug_report(
         fields=jira_payload["fields"],
         ac_coverage=ai_raw.get("ac_coverage", 0.0)
     )
+    log_audit(
+        "ai.generate",
+        current_user.id,
+        jira_connection_id=req.jira_connection_id,
+        project_key=req.project_key,
+        issue_type_id=req.issue_type_id,
+        request_path=str(request.url.path),
+    )
+    return response
 
 @router.post("/test-cases", response_model=TestSuiteResponse)
 async def generate_test_suite(
+    request: Request,
     req: BugGenerationRequest,
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user)
@@ -317,6 +332,7 @@ async def generate_test_suite(
     """
     Analyzes story context and generates a suite of test cases.
     """
+    rate_limiter.check("ai.test_cases", str(current_user.id), limit=5, window_seconds=60)
     LimitChecker.check_and_increment(db, current_user.id, "/test-cases", 0)
 
     custom_api_key = None
@@ -330,7 +346,17 @@ async def generate_test_suite(
         model=req.model or current_user.custom_ai_model,
         custom_instructions=req.custom_instructions
     )
-    return TestSuiteResponse(**suite)
+    response = TestSuiteResponse(**suite)
+    log_audit(
+        "ai.test_cases",
+        current_user.id,
+        jira_connection_id=req.jira_connection_id,
+        project_key=req.project_key,
+        issue_type_id=req.issue_type_id,
+        request_path=str(request.url.path),
+        generated_count=len(response.test_cases),
+    )
+    return response
 
 
 @router.post("/preview", response_model=PreviewPreparationResponse)
@@ -379,10 +405,22 @@ async def prepare_bug_preview(
 
 @router.post("/submit", response_model=SubmitBugsResponse)
 async def submit_bugs(
+    request: Request,
     req: SubmitBugsRequest,
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
+    rate_limiter.check("ai.submit", str(current_user.id), limit=10, window_seconds=60)
+    idem_key = request.headers.get("Idempotency-Key")
+    cached_response = idempotency_store.replay_or_reserve(
+        "ai.submit",
+        str(current_user.id),
+        idem_key,
+        req.model_dump(),
+    )
+    if cached_response is not None:
+        return SubmitBugsResponse(**cached_response)
+
     conn = _get_owned_connection(db, current_user.id, req.jira_connection_id)
     _assert_connection_matches_instance(conn, req.instance_url)
     adapter = get_adapter(conn)
@@ -423,4 +461,21 @@ async def submit_bugs(
         issue_key = adapter.create_issue(resolved_payload)
         created_issues.append(XrayPublishedTest(id=issue_key, key=issue_key, self=""))
 
-    return SubmitBugsResponse(created_issues=created_issues)
+    response = SubmitBugsResponse(created_issues=created_issues)
+    idempotency_store.store_response(
+        "ai.submit",
+        str(current_user.id),
+        idem_key,
+        req.model_dump(),
+        response.model_dump(),
+    )
+    log_audit(
+        "ai.submit",
+        current_user.id,
+        jira_connection_id=req.jira_connection_id,
+        project_key=req.project_key,
+        issue_type_id=req.issue_type_id,
+        request_path=str(request.url.path),
+        created_issue_keys=[issue.key for issue in created_issues],
+    )
+    return response

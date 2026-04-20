@@ -39,15 +39,24 @@ Notes:
 
 ### Error format
 
-Most failures return:
+Failures now return a structured error envelope while preserving the legacy top-level `detail` field for compatibility with the current extension code.
 
 ```json
 {
-  "detail": "Human-readable error message"
+  "detail": "Missing required Jira fields",
+  "error": {
+    "code": "JIRA_VALIDATION_FAILED",
+    "message": "Missing required Jira fields",
+    "details": ["Testing Stage", "The Environment"]
+  }
 }
 ```
 
-Some Jira-originated failures may embed Jira's raw error body inside `detail`.
+Notes:
+
+- `detail` remains present as a plain string for backward compatibility.
+- `error.code` is the stable machine-readable field to key frontend behavior off in future work.
+- Validation errors use `error.details` for per-field details.
 
 ### Jira identity fields
 
@@ -594,6 +603,7 @@ Response:
 
 Notes:
 
+- Supports optional `Idempotency-Key` request header to prevent duplicate publishes.
 - Validates that `conn_id` matches `jira_connection_id` in the body.
 - Auto-detects test issue type if not supplied.
 - Attempts to detect the repository path field if not supplied.
@@ -694,6 +704,7 @@ Response:
 
 Notes:
 
+- Rate limited to `10 requests / 60 seconds / user`.
 - Increments usage counters.
 - Builds Jira field schema before prompting the model.
 - Applies saved AI field mapping after generation.
@@ -721,6 +732,10 @@ Response:
   "coverage_score": 0.88
 }
 ```
+
+Notes:
+
+- Rate limited to `5 requests / 60 seconds / user`.
 
 ### `POST /ai/preview`
 
@@ -836,6 +851,11 @@ Failure behavior:
 
 - If Jira itself rejects the payload, `detail` may contain the upstream Jira error payload.
 
+Notes:
+
+- Supports optional `Idempotency-Key` request header to prevent duplicate Jira issue creation on retries or double-clicks.
+- Rate limited to `10 requests / 60 seconds / user`.
+
 ## Stripe API
 
 Base prefix: `/api/v1/stripe`
@@ -950,6 +970,7 @@ This is the main frontend integration flow used by the Chrome extension.
 
 - CORS is currently open to all origins for extension development.
 - Redis is used for Jira field metadata caching.
+- Redis is also used for best-effort rate limiting and idempotency caching.
 - Field schema cache keys are versioned in the metadata engine.
 - Jira Server/DC authentication uses a Bearer-first, Basic-on-401 fallback strategy.
 - The API is source-of-truth compatible with the extension contract centralization in `extension/src/sidepanel/services/contracts.ts`.
