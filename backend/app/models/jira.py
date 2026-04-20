@@ -31,5 +31,6 @@ class JiraFieldMapping(Base):
     issue_type_id = Column(String, nullable=False)
     visible_fields = Column(JSON, nullable=False, default=list)
     field_mappings = Column(JSON, nullable=False, default=dict) # Stores the custom structure {"Severity": "customfield_10001", ...}
+    field_defaults = Column(JSON, nullable=False, default=dict)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

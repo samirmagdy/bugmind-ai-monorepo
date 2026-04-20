@@ -66,6 +66,7 @@ class JiraBootstrapContextResponse(BaseModel):
     selected_issue_type: Optional[JiraIssueTypeResponse] = None
     visible_fields: List[str] = []
     ai_mapping: Dict[str, Any] = {}
+    field_defaults: Dict[str, Any] = {}
     jira_metadata: Optional[JiraMetadataResponse] = None
 
 

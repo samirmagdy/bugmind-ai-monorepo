@@ -1,8 +1,8 @@
-"""Add deny-all RLS policies for Supabase-exposed tables
+"""enable rls for new supabase tables
 
-Revision ID: c2d4e8f1a9bb
-Revises: b6f9b7d2c1aa
-Create Date: 2026-04-20 15:10:00.000000
+Revision ID: e5f6a7b8c9d0
+Revises: d4e5f6a7b8c9
+Create Date: 2026-04-20 20:45:00.000000
 
 """
 from typing import Sequence, Union
@@ -11,20 +11,15 @@ from alembic import op
 
 
 # revision identifiers, used by Alembic.
-revision: str = "c2d4e8f1a9bb"
-down_revision: Union[str, None] = "b6f9b7d2c1aa"
+revision: str = "e5f6a7b8c9d0"
+down_revision: Union[str, None] = "d4e5f6a7b8c9"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
 TABLES = (
-    "alembic_version",
-    "subscriptions",
-    "usage_logs",
-    "bug_generations",
-    "users",
-    "jira_connections",
-    "jira_field_mappings",
+    "refresh_sessions",
+    "audit_logs",
 )
 
 ROLES = ("anon", "authenticated")
@@ -38,6 +33,10 @@ def upgrade() -> None:
     bind = op.get_bind()
     if bind.dialect.name != "postgresql":
         return
+
+    for table_name in TABLES:
+        op.execute(f'ALTER TABLE "{table_name}" ENABLE ROW LEVEL SECURITY')
+
     for table_name in TABLES:
         for role_name in ROLES:
             policy_name = _policy_name(table_name, role_name)
@@ -58,7 +57,11 @@ def downgrade() -> None:
     bind = op.get_bind()
     if bind.dialect.name != "postgresql":
         return
+
     for table_name in TABLES:
         for role_name in ROLES:
             policy_name = _policy_name(table_name, role_name)
             op.execute(f'DROP POLICY IF EXISTS "{policy_name}" ON "{table_name}"')
+
+    for table_name in TABLES:
+        op.execute(f'ALTER TABLE "{table_name}" DISABLE ROW LEVEL SECURITY')

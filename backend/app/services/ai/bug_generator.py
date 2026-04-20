@@ -1,8 +1,14 @@
 import json
+import logging
 import re
 from typing import Dict, Any, Optional
+
 from app.services.ai.openrouter_client import OpenRouterClient
 from fastapi import HTTPException
+
+
+logger = logging.getLogger(__name__)
+
 
 class BugGenerator:
     def __init__(self, api_key: Optional[str] = None):
@@ -90,19 +96,45 @@ class BugGenerator:
 
     def _clean_schema_for_ai(self, schema: list) -> list:
         """
-        Strips massive allowed_values from the schema to save tokens.
-        AI only needs to know the field exists and its type.
+        Aggressively filters and minifies the Jira schema to prevent AI prompt bloat.
+        Prioritizes required fields and common smart-inference fields.
         """
-        cleaned = []
+        SMART_FIELDS = {
+            "priority", "severity", "component", "components", "version", "versions", 
+            "fixversion", "fixversions", "environment", "labels", "epic"
+        }
+        
+        # 1. Filter: Keep Required OR Smart Fields
+        filtered = []
         for field in schema:
-            f = field.copy()
-            if "allowed_values" in f:
-                # Truncate to first 5 items to give the AI some context of the format
-                # without blowing up the token count.
-                av = f["allowed_values"]
-                if isinstance(av, list) and len(av) > 5:
-                    f["allowed_values"] = av[:5] + [{"id": "...", "name": f"... (and {len(av)-5} more)"}]
+            name_lower = str(field.get("name", "")).lower()
+            is_smart = any(keyword in name_lower for keyword in SMART_FIELDS)
+            if field.get("required") or is_smart:
+                filtered.append(field)
+                
+        # 2. Minify and Sort
+        cleaned = []
+        # Sort so required fields are processed first (and kept if we hit the cap)
+        filtered.sort(key=lambda x: x.get("required", False), reverse=True)
+        
+        for field in filtered[:40]: # Hard cap at 40 fields
+            f = {
+                "key": field.get("key"),
+                "name": field.get("name"),
+                "type": field.get("type"),
+                "required": field.get("required")
+            }
+            
+            if "allowed_values" in field:
+                av = field["allowed_values"]
+                if isinstance(av, list):
+                    # Truncate to first 3 items (minified)
+                    f["allowed_values"] = av[:3]
+                    if len(av) > 3:
+                        f["allowed_values"].append({"id": "...", "name": "..."})
+            
             cleaned.append(f)
+            
         return cleaned
 
     def _truncate_context(self, text: str, max_chars: int = 15000) -> str:
@@ -117,6 +149,16 @@ class BugGenerator:
         """
         AI-assisted bug drafting. If user_description is provided, it maps that to the context.
         """
+        # 1. Optimize Schema FIRST to prevent prompt bloat
+        optimized_schema = self._clean_schema_for_ai(current_fields_schema)
+        schema_json = json.dumps(optimized_schema)
+        
+        logger.info(
+            "Optimized Jira schema for AI prompt original_chars=%s optimized_chars=%s",
+            len(json.dumps(current_fields_schema)),
+            len(schema_json),
+        )
+
         mode_instruction = ""
         if user_description:
             mode_instruction = f"""
@@ -151,7 +193,7 @@ class BugGenerator:
         NEVER return null or empty strings for these core fields.
 
         The current Jira project expects these fields:
-        {json.dumps(current_fields_schema)}
+        {schema_json}
         
         OUTPUT FORMAT (JSON ONLY):
         {{
@@ -166,11 +208,6 @@ class BugGenerator:
         """
 
         try:
-            optimized_schema = self._clean_schema_for_ai(current_fields_schema)
-            print(f"[BugMind-AI] Optimized Schema Size: {len(json.dumps(optimized_schema))} chars (Original: {len(json.dumps(current_fields_schema))})")
-            
-            system_prompt = system_prompt.replace(json.dumps(current_fields_schema), json.dumps(optimized_schema))
-            
             truncated_context = self._truncate_context(context_text)
             user_prompt = f"Story Context:\n{truncated_context}"
             if user_description:
@@ -179,9 +216,7 @@ class BugGenerator:
         except HTTPException:
             raise
         except Exception as e:
-            import traceback
-            print(f"[BugMind-AI] Generation Error Traceback:")
-            print(traceback.format_exc())
+            logger.exception("AI bug generation failed")
             raise HTTPException(status_code=500, detail=f"AI Bug Generation Failed: {str(e)}")
 
     async def generate_test_cases(self, context_text: str, model: str = None, custom_instructions: str = None) -> Dict[str, Any]:

@@ -1,11 +1,21 @@
-from fastapi import FastAPI, HTTPException
+import logging
+import time
+from uuid import uuid4
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import Response, JSONResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from app.core.config import settings
 from app.core.api_errors import http_exception_handler, validation_exception_handler
 from app.core.database import engine
+from app.core.logging import configure_logging
+
+configure_logging()
+logger = logging.getLogger("bugmind.http")
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -19,11 +29,65 @@ app.add_exception_handler(RequestValidationError, validation_exception_handler)
 # Standard CORS behavior for Chrome Extension
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # In production, lock this down to the extension ID
-    allow_credentials=True,
+    allow_origins=settings.cors_origins_list or (["*"] if not settings.is_production else []),
+    allow_credentials=bool(settings.cors_origins_list) or not settings.is_production,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+if settings.allowed_hosts_list:
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts_list)
+
+
+@app.middleware("http")
+async def limit_request_size(request: Request, call_next):
+    # Limit body size to 5MB (5 * 1024 * 1024 bytes)
+    MAX_SIZE = 5 * 1024 * 1024
+    
+    content_length = request.headers.get("Content-Length")
+    if content_length and int(content_length) > MAX_SIZE:
+        raise HTTPException(status_code=413, detail="Request payload too large (max 5MB)")
+    
+    return await call_next(request)
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    request_id = request.headers.get("X-Request-ID") or str(uuid4())
+    
+    # Strict Origin Validation in Production
+    if settings.is_production and request.method != "GET":
+        allowed_extension_prefix = "chrome-extension://"
+        origin = request.headers.get("Origin") or request.headers.get("Referer")
+        
+        # If origin is provided, it must be from an extension
+        if origin and not origin.startswith(allowed_extension_prefix):
+             # Highly sensitive: we might want to log this attempt
+             logger.warning("security_alert unauthorized_origin_attempt origin=%s request_id=%s", origin, request_id)
+             return JSONResponse(
+                 status_code=403, 
+                 content={"detail": "Unauthorized request origin"}
+             )
+
+    started_at = time.perf_counter()
+    response: Response = await call_next(request)
+    duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
+    logger.info(
+        "request_complete request_id=%s method=%s path=%s status=%s duration_ms=%s client_ip=%s",
+        request_id,
+        request.method,
+        request.url.path,
+        response.status_code,
+        duration_ms,
+        request.client.host if request.client else "unknown",
+    )
+    response.headers["X-Request-ID"] = request_id
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+    if settings.is_production:
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
 
 @app.get("/health", tags=["System"])
 def health_check():

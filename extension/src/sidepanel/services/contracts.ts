@@ -87,6 +87,7 @@ export interface JiraSettingsRequestPayload extends ProjectRequestParams {
   issue_type_id: string;
   visible_fields: string[];
   ai_mapping: Record<string, string>;
+  field_defaults: Record<string, unknown>;
 }
 
 export interface XrayPublishRequestPayload {

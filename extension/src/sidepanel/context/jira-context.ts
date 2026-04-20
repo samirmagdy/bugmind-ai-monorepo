@@ -26,6 +26,7 @@ export interface JiraContextType {
     issueTypeId: string;
     visibleFields?: string[];
     aiMapping?: Record<string, string>;
+    fieldDefaults?: Record<string, unknown>;
   }) => Promise<boolean>;
   bootstrapContext: (params: {
     instanceUrl: string;

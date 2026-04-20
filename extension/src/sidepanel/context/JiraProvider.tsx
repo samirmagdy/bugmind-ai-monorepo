@@ -102,6 +102,7 @@ export const JiraProvider: React.FC<{
       selectedIssueType: data.selected_issue_type || null,
       visibleFields: data.visible_fields || [],
       aiMapping: data.ai_mapping || {},
+      fieldDefaults: data.field_defaults || {},
       jiraMetadata: data.jira_metadata || null,
       error: null
     }, tabId);
@@ -359,7 +360,8 @@ export const JiraProvider: React.FC<{
     projectId,
     issueTypeId,
     visibleFields,
-    aiMapping
+    aiMapping,
+    fieldDefaults
   }: {
     jiraConnectionId: number;
     projectKey: string;
@@ -367,18 +369,21 @@ export const JiraProvider: React.FC<{
     issueTypeId: string;
     visibleFields?: string[];
     aiMapping?: Record<string, string>;
+    fieldDefaults?: Record<string, unknown>;
   }) => {
     if (!authToken) return false;
     try {
       const nextVisibleFields = visibleFields ?? session.visibleFields;
       const nextAiMapping = aiMapping ?? session.aiMapping;
+      const nextFieldDefaults = fieldDefaults ?? session.fieldDefaults;
       const payload: JiraSettingsRequestPayload = {
         jira_connection_id: jiraConnectionId,
         project_key: projectKey,
         project_id: projectId,
         issue_type_id: issueTypeId,
         visible_fields: nextVisibleFields,
-        ai_mapping: nextAiMapping
+        ai_mapping: nextAiMapping,
+        field_defaults: nextFieldDefaults
       };
       const res = await apiRequest(`${apiBase}/settings/jira`, {
         method: 'POST',
@@ -390,13 +395,13 @@ export const JiraProvider: React.FC<{
       if (!res.ok) {
         throw new Error(await res.text() || `Failed to sync Jira field settings (${res.status})`);
       }
-      updateSession({ visibleFields: nextVisibleFields, aiMapping: nextAiMapping });
+      updateSession({ visibleFields: nextVisibleFields, aiMapping: nextAiMapping, fieldDefaults: nextFieldDefaults });
       return true;
     } catch (err) {
       logDebug('FIELD-SETTINGS-ERR', String(err));
       return false;
     }
-  }, [apiBase, authToken, logDebug, refreshAuthToken, session.aiMapping, session.visibleFields, updateSession]);
+  }, [apiBase, authToken, logDebug, refreshAuthToken, session.aiMapping, session.fieldDefaults, session.visibleFields, updateSession]);
 
   const deleteConnection = useCallback(async (id: number) => {
     if (!authToken) return;

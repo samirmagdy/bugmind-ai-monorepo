@@ -54,6 +54,9 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
   const hydratedTabRef = useRef<number | null>(null);
   const lastBootstrapSignatureRef = useRef<string>('');
   const lastContextMessageSignatureRef = useRef<string>('');
+  const loginInFlightRef = useRef(false);
+  const registerInFlightRef = useRef(false);
+  const saveSettingsInFlightRef = useRef(false);
 
   useEffect(() => {
     selectedIssueTypeIdRef.current = session.selectedIssueType?.id || undefined;
@@ -332,6 +335,8 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
 
   const handleLogin = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
+    if (loginInFlightRef.current) return;
+    loginInFlightRef.current = true;
     logDebug('LOGIN-START', `Attempting login for ${auth.email}`);
     updateSession({ error: null, loading: true });
     try {
@@ -379,6 +384,7 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
     } catch (err) {
       updateSession({ error: translateError(err, 'login').description });
     } finally {
+      loginInFlightRef.current = false;
       updateSession({ loading: false });
     }
   }, [ai, auth, logDebug, runAuthBootstrap, updateSession]);
@@ -407,20 +413,40 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
     handleLogin,
     handleRegister: async (e) => {
       e.preventDefault();
+      if (registerInFlightRef.current) return;
+      registerInFlightRef.current = true;
+      sessionData.updateSession({ loading: true, error: null, success: null });
       try {
+        if (auth.password !== auth.confirmPassword) {
+          throw new Error('Passwords do not match');
+        }
+
         const payload: RegisterRequestPayload = { email: auth.email, password: auth.password };
         const res = await apiRequest(`${auth.apiBase}/auth/register`, {
           method: 'POST',
           body: JSON.stringify(payload)
         });
-        if (res.ok) {
-          auth.setAuthMode('login');
-          sessionData.updateSession({ success: 'Account created! Please sign in.' });
+
+        if (!res.ok) {
+          throw new Error(await res.text() || `Registration failed (${res.status})`);
         }
-      } catch (err) { sessionData.updateSession({ error: translateError(err, 'register').description }); }
+
+        auth.setAuthMode('login');
+        auth.setPassword('');
+        auth.setConfirmPassword('');
+        sessionData.updateSession({ success: 'Account created! Please sign in.' });
+      } catch (err) {
+        sessionData.updateSession({ error: translateError(err, 'register').description });
+      } finally {
+        registerInFlightRef.current = false;
+        sessionData.updateSession({ loading: false });
+      }
     },
     handleSaveSettings: async (e) => {
       e.preventDefault();
+      if (saveSettingsInFlightRef.current) return;
+      saveSettingsInFlightRef.current = true;
+      sessionData.updateSession({ loading: true, error: null, success: null });
       try {
         const payload: AISettingsUpdateRequestPayload = {
           custom_model: ai.customModel,
@@ -438,9 +464,14 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
           ai.setCustomKey('');
           sessionData.updateSession({ success: 'Saved' });
         }
-      } catch (err) { sessionData.updateSession({ error: translateError(err, 'settings').description }); }
+      } catch (err) {
+        sessionData.updateSession({ error: translateError(err, 'settings').description });
+      } finally {
+        saveSettingsInFlightRef.current = false;
+        sessionData.updateSession({ loading: false });
+      }
     },
-    saveFieldSettings: async (nf, nm) => {
+    saveFieldSettings: async (nf, nm, nd) => {
       try {
         const pKey = sessionData.session.issueData?.key.split('-')[0];
         if (!sessionData.session.jiraConnectionId || !pKey || !sessionData.session.selectedIssueType?.id) {
@@ -452,7 +483,8 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
           projectId: sessionData.session.issueData?.projectId,
           issueTypeId: sessionData.session.selectedIssueType.id,
           visibleFields: nf || sessionData.session.visibleFields,
-          aiMapping: nm || sessionData.session.aiMapping
+          aiMapping: nm || sessionData.session.aiMapping,
+          fieldDefaults: nd || sessionData.session.fieldDefaults
         });
         if (!synced) {
           throw new Error('Sync failed');

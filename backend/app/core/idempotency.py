@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any
+from typing import Any, Dict, Optional
 
 from fastapi import HTTPException
 import redis
@@ -23,7 +23,7 @@ class IdempotencyStore:
         raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
-    def replay_or_reserve(self, scope: str, subject: str, idem_key: str | None, payload: Any) -> dict[str, Any] | None:
+    def replay_or_reserve(self, scope: str, subject: str, idem_key: Optional[str], payload: Any) -> Optional[Dict[str, Any]]:
         if not idem_key:
             return None
 
@@ -54,7 +54,7 @@ class IdempotencyStore:
 
         return cached_payload.get("response")
 
-    def store_response(self, scope: str, subject: str, idem_key: str | None, payload: Any, response_body: Any) -> None:
+    def store_response(self, scope: str, subject: str, idem_key: Optional[str], payload: Any, response_body: Any) -> None:
         if not idem_key:
             return
 

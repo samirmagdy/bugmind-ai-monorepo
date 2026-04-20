@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.api import deps
 from app.core.config import settings
 from app.core import stripe_service
+from app.core.audit import log_audit
 
 router = APIRouter()
 
@@ -31,4 +32,11 @@ async def stripe_webhook(request: Request, db: Session = Depends(deps.get_db)):
         subscription = event['data']['object']
         stripe_service.handle_subscription_deleted(subscription['id'], db)
 
+    log_audit(
+        "stripe.webhook_event",
+        user_id=None,
+        db=db,
+        event_type=event['type'],
+        event_id=event.get('id'),
+    )
     return {"status": "success"}

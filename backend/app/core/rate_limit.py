@@ -12,6 +12,9 @@ class RateLimiter:
         self.redis = redis.Redis.from_url(settings.REDIS_URL, decode_responses=True)
 
     def check(self, scope: str, subject: str, limit: int, window_seconds: int) -> None:
+        if not settings.should_enforce_rate_limits:
+            return
+
         cache_key = f"ratelimit:{scope}:{subject}"
         try:
             current = self.redis.incr(cache_key)

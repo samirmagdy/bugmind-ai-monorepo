@@ -88,6 +88,11 @@ export const AIProvider: React.FC<{
   const [customKey, setCustomKey] = useState('');
   const [hasCustomKeySaved, setHasCustomKeySaved] = useState(false);
   const searchControllerRef = useRef<AbortController | null>(null);
+  const generateBugsInFlightRef = useRef(false);
+  const generateTestsInFlightRef = useRef(false);
+  const manualGenerateInFlightRef = useRef(false);
+  const submitBugsInFlightRef = useRef(false);
+  const publishXrayInFlightRef = useRef(false);
 
   const activeFetches = useRef<Set<string>>(new Set());
   const isFetching = (key: string) => activeFetches.current.has(key);
@@ -104,6 +109,10 @@ export const AIProvider: React.FC<{
     delete sanitized.project;
     return sanitized;
   }, []);
+
+  const buildDefaultExtraFields = useCallback(() => {
+    return sanitizeExtraFields((session.fieldDefaults || {}) as BugReport['extra_fields']);
+  }, [sanitizeExtraFields, session.fieldDefaults]);
 
   const buildIssueContext = useCallback((): IssueContextPayload => buildIssueContextPayload(session.issueData), [session.issueData]);
   const getProjectRequestParams = useCallback(() => {
@@ -181,6 +190,7 @@ export const AIProvider: React.FC<{
 
   // Phase 5: Streaming Implementation
   const generateBugs = useCallback(async () => {
+    if (generateBugsInFlightRef.current) return;
     if (!currentTabId || !session.issueData || !session.jiraConnectionId) {
       logDebug('AI-ABORT', 'Missing session data or Jira connection ID');
       return;
@@ -190,6 +200,7 @@ export const AIProvider: React.FC<{
       logDebug('AI-ABORT', 'Missing Jira issue type selection');
       return;
     }
+    generateBugsInFlightRef.current = true;
     updateSession({ loading: true, error: null, bugs: [], testCases: [], coverageScore: null });
     logDebug('AI-START', `Analyzing ${session.issueData.key}...`);
 
@@ -222,7 +233,10 @@ export const AIProvider: React.FC<{
         expected_result: data.expected_result || "",
         actual_result: data.actual_result || "",
         severity: "Medium",
-        extra_fields: sanitizeExtraFields((data.fields || {}) as BugReport['extra_fields'])
+        extra_fields: {
+          ...buildDefaultExtraFields(),
+          ...sanitizeExtraFields((data.fields || {}) as BugReport['extra_fields'])
+        }
       };
 
       updateSession({ bugs: [bug], testCases: [], coverageScore: null }, currentTabId);
@@ -232,16 +246,19 @@ export const AIProvider: React.FC<{
       logDebug('AI-ERR', String(err));
       updateSession({ error: translateError(err, 'ai-analysis').description }, currentTabId);
     } finally {
+      generateBugsInFlightRef.current = false;
       updateSession({ loading: false }, currentTabId);
     }
-  }, [apiBase, authToken, buildIssueContext, currentTabId, getProjectRequestParams, logDebug, refreshAuthToken, sanitizeExtraFields, session.instanceUrl, session.issueData, session.jiraConnectionId, session.selectedIssueType, updateSession]);
+  }, [apiBase, authToken, buildDefaultExtraFields, buildIssueContext, currentTabId, getProjectRequestParams, logDebug, refreshAuthToken, sanitizeExtraFields, session.instanceUrl, session.issueData, session.jiraConnectionId, session.selectedIssueType, updateSession]);
 
   const generateTestCases = useCallback(async () => {
+    if (generateTestsInFlightRef.current) return;
     if (!currentTabId || !session.issueData || !session.jiraConnectionId) return;
     if (!session.selectedIssueType?.id) {
       updateSession({ error: 'MISSING_ISSUE_TYPE' }, currentTabId);
       return;
     }
+    generateTestsInFlightRef.current = true;
     updateSession({ loading: true, error: null, bugs: [], testCases: [] }, currentTabId);
     try {
       const { projectKey, projectId } = getProjectRequestParams();
@@ -275,17 +292,20 @@ export const AIProvider: React.FC<{
     } catch (err) {
       updateSession({ error: translateError(err, 'ai-analysis').description }, currentTabId);
     } finally {
+      generateTestsInFlightRef.current = false;
       updateSession({ loading: false }, currentTabId);
     }
   }, [apiBase, authToken, buildIssueContext, currentTabId, fetchUsage, getProjectRequestParams, refreshAuthToken, session.instanceUrl, session.issueData, session.jiraConnectionId, session.selectedIssueType, updateSession]);
 
   const publishTestCasesToXray = useCallback(async () => {
+    if (publishXrayInFlightRef.current) return;
     if (!currentTabId || !session.issueData || !session.jiraConnectionId || !session.testCases.length) return;
     if (!session.xrayTargetProjectId) {
       updateSession({ error: 'Please choose an Xray target project before publishing.' }, currentTabId);
       return;
     }
 
+    publishXrayInFlightRef.current = true;
     updateSession({ loading: true, error: null, success: null }, currentTabId);
 
     try {
@@ -320,17 +340,20 @@ export const AIProvider: React.FC<{
     } catch (err) {
       updateSession({ error: translateError(err, 'jira-submit').description }, currentTabId);
     } finally {
+      publishXrayInFlightRef.current = false;
       updateSession({ loading: false }, currentTabId);
     }
   }, [apiBase, authToken, currentTabId, refreshAuthToken, session.issueData, session.jiraConnectionId, session.testCases, session.xrayFolderPath, session.xrayLinkType, session.xrayRepositoryPathFieldId, session.xrayTargetProjectId, session.xrayTargetProjectKey, session.xrayTestIssueTypeName, updateSession]);
 
   const handleManualGenerate = useCallback(async () => {
+    if (manualGenerateInFlightRef.current) return;
     if (!session.manualDesc.trim() || !session.jiraConnectionId) return;
     if (!session.selectedIssueType?.id) {
       updateSession({ error: 'MISSING_ISSUE_TYPE' });
       logDebug('MANUAL-ABORT', 'Missing Jira issue type selection');
       return;
     }
+    manualGenerateInFlightRef.current = true;
     updateSession({ loading: true, error: null, testCases: [], coverageScore: null });
     logDebug('MANUAL-START', 'Structuring manual description...');
     try {
@@ -364,7 +387,10 @@ export const AIProvider: React.FC<{
         expected_result: data.expected_result || '',
         actual_result: data.actual_result || '',
         severity: 'Medium',
-        extra_fields: sanitizeExtraFields((data.fields || {}) as BugReport['extra_fields'])
+        extra_fields: {
+          ...buildDefaultExtraFields(),
+          ...sanitizeExtraFields((data.fields || {}) as BugReport['extra_fields'])
+        }
       };
       const existing = session.bugs || [];
       updateSession({ bugs: [...existing, newBug], testCases: [], coverageScore: null, manualDesc: '', showManualInput: false, expandedBug: existing.length });
@@ -372,9 +398,10 @@ export const AIProvider: React.FC<{
     } catch (err: unknown) {
       updateSession({ error: translateError(err, 'ai-manual').description });
     } finally {
+      manualGenerateInFlightRef.current = false;
       updateSession({ loading: false });
     }
-  }, [apiBase, authToken, buildIssueContext, fetchUsage, getProjectRequestParams, logDebug, refreshAuthToken, sanitizeExtraFields, session.bugs, session.instanceUrl, session.issueData, session.jiraConnectionId, session.manualDesc, session.selectedIssueType?.id, updateSession]);
+  }, [apiBase, authToken, buildDefaultExtraFields, buildIssueContext, fetchUsage, getProjectRequestParams, logDebug, refreshAuthToken, sanitizeExtraFields, session.bugs, session.instanceUrl, session.issueData, session.jiraConnectionId, session.manualDesc, session.selectedIssueType?.id, updateSession]);
 
   const validateBug = useCallback(async (index: number): Promise<boolean> => {
     const bug = session.bugs[index];
@@ -425,12 +452,14 @@ export const AIProvider: React.FC<{
   }, [updateSession, validateBug]);
 
   const submitBugs = useCallback(async (index?: number) => {
+    if (submitBugsInFlightRef.current) return;
     let bugs = session.bugs || [];
     if (index !== undefined) {
       bugs = [bugs[index]];
     }
     
     if (!session.issueData || !bugs.length || !session.jiraConnectionId || !session.selectedIssueType?.id) return;
+    submitBugsInFlightRef.current = true;
     updateSession({ loading: true, error: null });
     
     try {
@@ -476,6 +505,7 @@ export const AIProvider: React.FC<{
 
       updateSession({ error: translateError(err, 'jira-submit').description });
     } finally {
+      submitBugsInFlightRef.current = false;
       updateSession({ loading: false });
     }
   }, [authToken, apiBase, getProjectRequestParams, parseJiraRequiredFieldErrors, refreshAuthToken, session.bugs, session.instanceUrl, session.issueData, session.jiraConnectionId, session.previewBugIndex, session.selectedIssueType, session.visibleFields, updateSession]);

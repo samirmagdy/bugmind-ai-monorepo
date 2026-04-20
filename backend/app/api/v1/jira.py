@@ -27,12 +27,15 @@ from urllib.parse import urlparse
 from app.core.audit import log_audit
 from app.core.idempotency import idempotency_store
 from app.core.rate_limit import rate_limiter
+from app.core.request_security import enforce_secure_jira_ssl, validate_connection_host
 
 router = APIRouter()
 
 from cryptography.fernet import InvalidToken
 
 def get_adapter(connection: JiraConnection):
+    enforce_secure_jira_ssl(connection.verify_ssl)
+    safe_host_url = validate_connection_host(connection.host_url, connection.auth_type.value)
     try:
         token = security.decrypt_credential(connection.encrypted_token)
     except InvalidToken:
@@ -41,8 +44,8 @@ def get_adapter(connection: JiraConnection):
             detail="Jira Connection Stale: Encryption keys have changed. Please delete and re-add this connection."
         )
     if connection.auth_type == JiraAuthType.CLOUD:
-        return JiraCloudAdapter(connection.host_url, connection.username, token, verify_ssl=connection.verify_ssl)
-    return JiraServerAdapter(connection.host_url, connection.username, token, verify_ssl=connection.verify_ssl)
+        return JiraCloudAdapter(safe_host_url, connection.username, token, verify_ssl=connection.verify_ssl)
+    return JiraServerAdapter(safe_host_url, connection.username, token, verify_ssl=connection.verify_ssl)
 
 
 def _normalize_instance_url(url: Optional[str]) -> str:
@@ -161,7 +164,8 @@ def _format_test_issue_description(story_issue_key: str, test_case: dict) -> str
 def resolve_jira_bootstrap_context(
     req: JiraBootstrapContextRequest,
     db: Session,
-    current_user: User
+    current_user: User,
+    request: Request
 ) -> JiraBootstrapContextResponse:
     connections = db.query(JiraConnection).filter(
         JiraConnection.user_id == current_user.id
@@ -194,6 +198,7 @@ def resolve_jira_bootstrap_context(
     selected_issue_type_raw: Optional[dict] = None
     visible_fields: list[str] = []
     ai_mapping: dict = {}
+    field_defaults: dict = {}
     metadata_response: Optional[JiraMetadataResponse] = None
 
     if resolved_project_id:
@@ -212,6 +217,7 @@ def resolve_jira_bootstrap_context(
             ).first()
             visible_fields = mapping.visible_fields if mapping else []
             ai_mapping = mapping.field_mappings if mapping else {}
+            field_defaults = mapping.field_defaults if mapping else {}
 
             metadata_fields = engine.get_field_schema(resolved_project_id, selected_issue_type_id)
             metadata_response = JiraMetadataResponse(
@@ -221,7 +227,7 @@ def resolve_jira_bootstrap_context(
                 fields=[JiraFieldResponse(**field) for field in metadata_fields]
             )
 
-    return JiraBootstrapContextResponse(
+    response = JiraBootstrapContextResponse(
         connection_id=conn.id,
         instance_url=_normalize_instance_url(conn.host_url),
         platform=conn.auth_type,
@@ -230,8 +236,19 @@ def resolve_jira_bootstrap_context(
         selected_issue_type=_serialize_issue_type(selected_issue_type_raw) if selected_issue_type_raw else None,
         visible_fields=visible_fields,
         ai_mapping=ai_mapping,
+        field_defaults=field_defaults,
         jira_metadata=metadata_response
     )
+    log_audit(
+        "jira.bootstrap_context",
+        current_user.id,
+        db=db,
+        jira_connection_id=conn.id,
+        instance_url=response.instance_url,
+        project_key=req.project_key,
+        request_path=str(request.url.path),
+    )
+    return response
 
 @router.get("/connections", response_model=list[JiraConnectionResponse])
 def list_connections(
@@ -244,10 +261,11 @@ def list_connections(
 @router.post("/bootstrap-context", response_model=JiraBootstrapContextResponse)
 def bootstrap_jira_context(
     req: JiraBootstrapContextRequest,
+    request: Request,
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
-    return resolve_jira_bootstrap_context(req, db, current_user)
+    return resolve_jira_bootstrap_context(req, db, current_user, request)
 
 @router.post("/connections", response_model=JiraConnectionResponse)
 def create_connection(
@@ -257,6 +275,8 @@ def create_connection(
 ):
     if not conn_in.token or not conn_in.token.strip():
         raise HTTPException(status_code=400, detail="API Token cannot be empty")
+    enforce_secure_jira_ssl(conn_in.verify_ssl)
+    safe_host_url = validate_connection_host(conn_in.host_url, conn_in.auth_type.value)
 
     encrypted = security.encrypt_credential(conn_in.token)
     db.query(JiraConnection).filter(JiraConnection.user_id == current_user.id).update(
@@ -267,7 +287,7 @@ def create_connection(
     conn = JiraConnection(
         user_id=current_user.id,
         auth_type=conn_in.auth_type,
-        host_url=conn_in.host_url,
+        host_url=safe_host_url,
         username=conn_in.username,
         encrypted_token=encrypted,
         verify_ssl=conn_in.verify_ssl,
@@ -276,6 +296,7 @@ def create_connection(
     db.add(conn)
     db.commit()
     db.refresh(conn)
+    log_audit("jira.connection_create", current_user.id, db=db, connection_id=conn.id, host_url=conn.host_url)
     return conn
 
 @router.patch("/connections/{conn_id}", response_model=JiraConnectionResponse)
@@ -290,6 +311,11 @@ def update_connection(
         raise HTTPException(status_code=404, detail="Connection not found")
     
     update_data = conn_in.model_dump(exclude_unset=True)
+    effective_auth_type = update_data.get("auth_type", conn.auth_type)
+    if "verify_ssl" in update_data and update_data["verify_ssl"] is not None:
+        enforce_secure_jira_ssl(update_data["verify_ssl"])
+    if "host_url" in update_data and update_data["host_url"]:
+        update_data["host_url"] = validate_connection_host(update_data["host_url"], effective_auth_type.value)
     if "token" in update_data:
         token_val = update_data.pop("token")
         if token_val and token_val.strip():
@@ -307,6 +333,7 @@ def update_connection(
     db.add(conn)
     db.commit()
     db.refresh(conn)
+    log_audit("jira.connection_update", current_user.id, db=db, connection_id=conn_id)
     return conn
 
 @router.delete("/connections/{conn_id}", status_code=204)
@@ -321,6 +348,7 @@ def delete_connection(
     
     db.delete(conn)
     db.commit()
+    log_audit("jira.connection_delete", current_user.id, db=db, connection_id=conn_id)
 
     if conn.is_active:
         replacement = db.query(JiraConnection).filter(JiraConnection.user_id == current_user.id).order_by(JiraConnection.id.asc()).first()
@@ -402,7 +430,16 @@ def search_jira_users(
         raise HTTPException(status_code=404, detail="Connection not found")
 
     adapter = get_adapter(conn)
-    return adapter.search_users(query)
+    results = adapter.search_users(query)
+    log_audit(
+        "jira.user_search",
+        current_user.id,
+        db=db,
+        jira_connection_id=conn.id,
+        query_length=len(query),
+        result_count=len(results),
+    )
+    return results
 
 @router.post("/connections/{conn_id}/xray/test-suite", response_model=XrayTestSuitePublishResponse)
 def publish_xray_test_suite(
@@ -502,6 +539,7 @@ def publish_xray_test_suite(
     log_audit(
         "jira.xray_publish",
         current_user.id,
+        db=db,
         jira_connection_id=req.jira_connection_id,
         project_id=req.xray_project_id,
         request_path=str(request.url.path),

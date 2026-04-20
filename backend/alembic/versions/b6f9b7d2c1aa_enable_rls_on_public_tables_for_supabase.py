@@ -29,10 +29,16 @@ TABLES = (
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    if bind.dialect.name != "postgresql":
+        return
     for table_name in TABLES:
         op.execute(f'ALTER TABLE "{table_name}" ENABLE ROW LEVEL SECURITY')
 
 
 def downgrade() -> None:
+    bind = op.get_bind()
+    if bind.dialect.name != "postgresql":
+        return
     for table_name in TABLES:
         op.execute(f'ALTER TABLE "{table_name}" DISABLE ROW LEVEL SECURITY')

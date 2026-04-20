@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { X, ChevronDown, Loader2, AlertCircle, RefreshCw, Pencil, FolderOpen, Save } from 'lucide-react';
 import { useBugMind } from '../../hooks/useBugMind';
-import { IssueType, JiraField, JiraProject } from '../../types';
+import { IssueType, JiraField, JiraFieldOption, JiraProject } from '../../types';
 
 const HIDDEN_SYSTEM_FIELD_KEYS = new Set([
   'summary',
@@ -19,6 +19,36 @@ function isSystemManagedField(field: JiraField): boolean {
     ['summary', 'description', 'project', 'issuetype'].includes(normalizedSystem) ||
     ['projectid', 'issuetypeid', 'pid', 'typeid'].includes(normalizedKey)
   );
+}
+
+function getFieldOptionLabel(option: JiraFieldOption): string {
+  return option.value || option.name || option.label || option.id;
+}
+
+function isMultiValueField(field: JiraField): boolean {
+  return field.type === 'multi-select' || field.type === 'labels' || field.type === 'array';
+}
+
+function normalizeSavedFieldValue(field: JiraField, rawValue: unknown): unknown {
+  if (field.type === 'option' || field.type === 'priority') {
+    return typeof rawValue === 'object' && rawValue !== null ? rawValue : null;
+  }
+  if (field.type === 'multi-select') {
+    return Array.isArray(rawValue) ? rawValue : [];
+  }
+  if (field.type === 'labels' || field.type === 'array') {
+    if (Array.isArray(rawValue)) {
+      return rawValue.map((item) => String(item)).filter(Boolean);
+    }
+    return [];
+  }
+  if (field.type === 'number') {
+    return rawValue == null ? '' : String(rawValue);
+  }
+  if (field.type === 'boolean') {
+    return Boolean(rawValue);
+  }
+  return rawValue == null ? '' : String(rawValue);
 }
 
 const SettingsView: React.FC = () => {
@@ -42,6 +72,22 @@ const SettingsView: React.FC = () => {
   });
   const [isCreatingConnection, setIsCreatingConnection] = useState(false);
   const editableJiraFields = (session.jiraMetadata?.fields || []).filter((field: JiraField) => !isSystemManagedField(field));
+
+  const updateFieldDefault = (field: JiraField, nextValue: unknown) => {
+    const nextDefaults = { ...(session.fieldDefaults || {}) };
+    const isEmptyValue =
+      nextValue == null ||
+      nextValue === '' ||
+      (Array.isArray(nextValue) && nextValue.length === 0);
+
+    if (isEmptyValue) {
+      delete nextDefaults[field.key];
+    } else {
+      nextDefaults[field.key] = nextValue;
+    }
+
+    saveFieldSettings(undefined, undefined, nextDefaults);
+  };
 
   // Auto-refetch when entering Jira tab if empty
   useEffect(() => {
@@ -187,8 +233,15 @@ const SettingsView: React.FC = () => {
             </div>
 
             <div className="pt-4 space-y-3">
-              <button type="submit" className="w-full bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-bold py-4 rounded-2xl transition-all shadow-lg shadow-[var(--accent)]/20">
-                Apply Custom Settings
+              <button
+                type="submit"
+                disabled={session.loading}
+                className="w-full bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:bg-[var(--border-main)] disabled:text-[var(--text-muted)] disabled:shadow-none disabled:cursor-not-allowed text-white font-bold py-4 rounded-2xl transition-all shadow-lg shadow-[var(--accent)]/20"
+              >
+                <span className="inline-flex items-center justify-center gap-2">
+                  {session.loading ? <Loader2 size={16} className="animate-spin" /> : null}
+                  {session.loading ? 'Applying Settings...' : 'Apply Custom Settings'}
+                </span>
               </button>
             </div>
           </form>
@@ -649,21 +702,97 @@ const SettingsView: React.FC = () => {
                         <p className="text-xs text-[var(--text-muted)] opacity-60">No extra fields found for this type.</p>
                       </div>
                     ) : (
-                      editableJiraFields.map((field: JiraField) => (
-                        <label 
+                      editableJiraFields.map((field: JiraField) => {
+                        const savedDefault = normalizeSavedFieldValue(field, session.fieldDefaults?.[field.key]);
+                        return (
+                        <div 
                           key={field.key}
                           className={`flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer ${
                             session.visibleFields.includes(field.key) || field.required
                               ? 'bg-[var(--status-info)]/10 border-[var(--status-info)]/30' 
                               : 'bg-[var(--bg-card)] border-[var(--border-main)] hover:border-[var(--status-info)]/30 shadow-[var(--shadow-sm)]'
-                          } ${field.required ? 'opacity-80 cursor-not-allowed' : ''}`}
+                          } ${field.required ? 'opacity-80' : ''}`}
                         >
-                          <div className="flex flex-col">
+                          <div className="flex flex-col gap-2 flex-1 min-w-0">
                             <div className="flex items-center gap-2">
                               <span className="text-xs font-bold text-[var(--text-main)]">{field.name}</span>
                               {field.required && <span className="text-[10px] font-black text-[var(--status-info)] bg-[var(--status-info)]/20 px-1.5 py-0.5 rounded uppercase tracking-tighter">Locked</span>}
                             </div>
                             <span className="text-[9px] text-[var(--text-muted)] opacity-70 uppercase tracking-tighter">{field.type} {field.required && '• REQUIRED'}</span>
+                            <div className="space-y-1">
+                              <span className="text-[9px] text-[var(--text-muted)] opacity-70 uppercase tracking-tighter">Saved Default Value</span>
+                              {field.allowed_values && field.allowed_values.length > 0 ? (
+                                field.type === 'multi-select' ? (
+                                  <select
+                                    multiple
+                                    value={Array.isArray(savedDefault) ? (savedDefault as JiraFieldOption[]).map((item) => item.id) : []}
+                                    onChange={(e) => {
+                                      const selectedIds = Array.from(e.target.selectedOptions).map((option) => option.value);
+                                      const nextValue = (field.allowed_values || []).filter((option) => selectedIds.includes(option.id));
+                                      updateFieldDefault(field, nextValue);
+                                    }}
+                                    className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-3 py-2 outline-none focus:border-[var(--status-info)]/50 transition-all text-xs text-[var(--text-main)] min-h-[88px]"
+                                  >
+                                    {(field.allowed_values || []).map((option) => (
+                                      <option key={option.id} value={option.id}>
+                                        {getFieldOptionLabel(option)}
+                                      </option>
+                                    ))}
+                                  </select>
+                                ) : (
+                                  <div className="relative">
+                                    <select
+                                      value={!Array.isArray(savedDefault) && typeof savedDefault === 'object' && savedDefault !== null ? String((savedDefault as JiraFieldOption).id || '') : ''}
+                                      onChange={(e) => {
+                                        const nextOption = (field.allowed_values || []).find((option) => option.id === e.target.value) || null;
+                                        updateFieldDefault(field, nextOption);
+                                      }}
+                                      className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-3 py-2 outline-none focus:border-[var(--status-info)]/50 transition-all text-xs appearance-none cursor-pointer pr-10 text-[var(--text-main)]"
+                                    >
+                                      <option value="">No saved default</option>
+                                      {(field.allowed_values || []).map((option) => (
+                                        <option key={option.id} value={option.id}>
+                                          {getFieldOptionLabel(option)}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none opacity-60" size={14} />
+                                  </div>
+                                )
+                              ) : field.type === 'boolean' ? (
+                                <label className="flex items-center gap-2 text-xs text-[var(--text-main)]">
+                                  <input
+                                    type="checkbox"
+                                    checked={Boolean(savedDefault)}
+                                    onChange={(e) => updateFieldDefault(field, e.target.checked ? true : null)}
+                                    className="w-4 h-4 rounded border-[var(--border-main)] bg-[var(--bg-input)] text-[var(--status-info)] focus:ring-[var(--status-info)]/50"
+                                  />
+                                  <span>Enabled</span>
+                                </label>
+                              ) : isMultiValueField(field) ? (
+                                <input
+                                  type="text"
+                                  value={Array.isArray(savedDefault) ? (savedDefault as string[]).join(', ') : ''}
+                                  onChange={(e) => {
+                                    const nextValue = e.target.value
+                                      .split(',')
+                                      .map((item) => item.trim())
+                                      .filter(Boolean);
+                                    updateFieldDefault(field, nextValue);
+                                  }}
+                                  className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-3 py-2 outline-none focus:border-[var(--status-info)]/50 transition-all text-xs text-[var(--text-main)]"
+                                  placeholder="Comma-separated values"
+                                />
+                              ) : (
+                                <input
+                                  type={field.type === 'number' ? 'number' : 'text'}
+                                  value={typeof savedDefault === 'string' || typeof savedDefault === 'number' ? String(savedDefault) : ''}
+                                  onChange={(e) => updateFieldDefault(field, field.type === 'number' ? (e.target.value === '' ? null : Number(e.target.value)) : e.target.value)}
+                                  className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-3 py-2 outline-none focus:border-[var(--status-info)]/50 transition-all text-xs text-[var(--text-main)]"
+                                  placeholder="No saved default"
+                                />
+                              )}
+                            </div>
                           </div>
                           <input 
                             type="checkbox"
@@ -678,8 +807,8 @@ const SettingsView: React.FC = () => {
                             }}
                             className="w-4 h-4 rounded border-[var(--border-main)] bg-[var(--bg-input)] text-[var(--status-info)] focus:ring-[var(--status-info)]/50 disabled:opacity-50"
                           />
-                        </label>
-                      ))
+                        </div>
+                      )})
                     )}
                   </div>
                 </div>

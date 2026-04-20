@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Dict, Any
 
 class AISettingsResponse(BaseModel):
     custom_model: Optional[str] = None
@@ -16,3 +16,4 @@ class JiraSettingsUpdate(BaseModel):
     issue_type_id: str
     visible_fields: Optional[list] = None
     ai_mapping: Optional[dict] = None
+    field_defaults: Optional[Dict[str, Any]] = None

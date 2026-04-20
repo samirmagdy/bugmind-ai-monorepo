@@ -13,6 +13,8 @@ class RefreshTokenRequest(BaseModel):
 
 class TokenPayload(BaseModel):
     sub: str = None
+    type: Optional[str] = None
+    jti: Optional[str] = None
 
 
 class AuthBootstrapRequest(BaseModel):

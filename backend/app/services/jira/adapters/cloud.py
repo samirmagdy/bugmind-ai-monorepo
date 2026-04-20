@@ -1,9 +1,12 @@
 import httpx
 import base64
 import re
+import logging
 from typing import Dict, Any, List
 from fastapi import HTTPException
 from app.services.jira.adapters.base import JiraAdapter
+
+logger = logging.getLogger(__name__)
 
 class JiraCloudAdapter(JiraAdapter):
     def __init__(self, host_url: str, username: str, token: str, verify_ssl: bool = True):
@@ -27,16 +30,14 @@ class JiraCloudAdapter(JiraAdapter):
         try:
             response = self.client.request(method, path)
             if response.status_code == 401:
-                print(f"[JiraCloud] Authentication failed (401) for {self.host_url}. Check email and API token.")
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Jira Cloud Authentication Failed: Verify your email and API token for {self.host_url}."
+                    detail="Jira Cloud authentication failed. Verify the email and API token."
                 )
             if response.status_code == 403:
-                print(f"[JiraCloud] Permission denied (403) for {self.host_url}. Check account permissions.")
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Jira Cloud Access Denied: Verify your account permissions for {self.host_url}."
+                    detail="Jira Cloud access denied. Verify the account permissions."
                 )
             return response
         except httpx.TimeoutException:
@@ -45,10 +46,25 @@ class JiraCloudAdapter(JiraAdapter):
                 detail=f"Timed out connecting to Jira at {self.host_url}. Verify the Jira URL, network access, and credentials."
             )
         except httpx.HTTPError as exc:
+            logger.warning("jira_cloud_request_failed", extra={"host": self.host_url, "path": path, "method": method, "error": str(exc)})
             raise HTTPException(
                 status_code=502,
-                detail=f"Failed to reach Jira at {self.host_url}: {str(exc)}"
+                detail="Failed to reach Jira Cloud"
             )
+
+    def _extract_error_message(self, response: httpx.Response, fallback: str) -> str:
+        try:
+            data = response.json()
+        except ValueError:
+            return fallback
+        messages = []
+        error_messages = data.get("errorMessages")
+        if isinstance(error_messages, list):
+            messages.extend(str(item) for item in error_messages if item)
+        errors = data.get("errors")
+        if isinstance(errors, dict):
+            messages.extend(f"{key}: {value}" for key, value in errors.items() if value)
+        return "; ".join(messages) if messages else fallback
 
     def _normalize_fields_payload(self, data: Dict[str, Any]) -> List[Dict[str, Any]]:
         fields_raw = data.get("fields")
@@ -186,15 +202,15 @@ class JiraCloudAdapter(JiraAdapter):
     def get_projects(self) -> List[Dict[str, Any]]:
         response = self._request("GET", "/rest/api/3/project")
         if response.status_code != 200:
-            print(f"[JiraCloud] Project Fetch Error: {response.text}")
-            raise HTTPException(status_code=400, detail=f"Failed to fetch projects: {response.text}")
+            logger.warning("jira_cloud_get_projects_failed", extra={"host": self.host_url, "status_code": response.status_code})
+            raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to fetch Jira projects"))
         return response.json()
 
     def get_issue_types(self, project_id: str) -> List[Dict[str, Any]]:
         # Use project metadata endpoint instead of deprecated createmeta
         response = self._request("GET", f"/rest/api/3/project/{project_id}")
         if response.status_code != 200:
-            raise HTTPException(status_code=400, detail=f"Failed to fetch project issue types: {response.text}")
+            raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to fetch Jira issue types"))
         
         data = response.json()
         issue_types = data.get("issueTypes", [])
@@ -206,7 +222,7 @@ class JiraCloudAdapter(JiraAdapter):
         # Use the replacement for the deprecated createmeta endpoint
         response = self._request("GET", f"/rest/api/3/issue/createmeta/{project_id}/issuetypes/{issue_type_id}")
         if response.status_code != 200:
-            raise HTTPException(status_code=400, detail=f"Failed to fetch field metadata: {response.text}")
+            raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to fetch Jira field metadata"))
 
         data = response.json()
         return self._normalize_fields_payload(data)
@@ -222,10 +238,10 @@ class JiraCloudAdapter(JiraAdapter):
         except httpx.TimeoutException:
             raise HTTPException(status_code=504, detail=f"Timed out connecting to Jira at {self.host_url}.")
         except httpx.HTTPError as exc:
+            logger.warning("jira_cloud_create_issue_failed", extra={"host": self.host_url, "error": str(exc)})
             raise HTTPException(status_code=502, detail=f"Failed to reach Jira at {self.host_url}: {str(exc)}")
         if response.status_code not in [200, 201]:
-            print(f"[JiraCloud] Issue Creation Error: {response.text}")
-            raise HTTPException(status_code=400, detail=f"Failed to create issue: {response.text}")
+            raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to create Jira issue"))
         return response.json().get("key")
 
     def link_issues(self, inpatient_key: str, link_type: str, outward_issue_key: str):
@@ -254,7 +270,7 @@ class JiraCloudAdapter(JiraAdapter):
     def get_issue_link_types(self) -> List[str]:
         response = self._request("GET", "/rest/api/3/issueLinkType")
         if response.status_code != 200:
-            raise HTTPException(status_code=400, detail=f"Failed to fetch issue link types: {response.text}")
+            raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to fetch Jira issue link types"))
 
         data = response.json()
         types = data.get("issueLinkTypes", [])

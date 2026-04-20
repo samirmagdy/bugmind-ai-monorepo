@@ -5,7 +5,8 @@ from app.api import deps
 from app.models.user import User
 from app.models.jira import JiraFieldMapping
 from app.schemas.settings import AISettingsResponse, AISettingsUpdate, JiraSettingsUpdate
-from app.core.security import encrypt_credential
+from app.core.security import decrypt_credential, encrypt_credential
+from app.core.audit import log_audit
 
 router = APIRouter()
 
@@ -24,13 +25,31 @@ def update_ai_settings(
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
+    changed = False
+
     if settings.custom_model is not None:
-        current_user.custom_ai_model = settings.custom_model
+        normalized_model = settings.custom_model.strip() or None
+        if current_user.custom_ai_model != normalized_model:
+            current_user.custom_ai_model = normalized_model
+            changed = True
     
     if settings.openrouter_key:
-        current_user.encrypted_ai_api_key = encrypt_credential(settings.openrouter_key)
-    
-    db.commit()
+        incoming_key = settings.openrouter_key.strip()
+        existing_key = None
+        if current_user.encrypted_ai_api_key:
+            try:
+                existing_key = decrypt_credential(current_user.encrypted_ai_api_key)
+            except Exception:
+                existing_key = None
+
+        if existing_key != incoming_key:
+            current_user.encrypted_ai_api_key = encrypt_credential(incoming_key)
+            changed = True
+
+    if changed:
+        db.commit()
+        log_audit("settings.ai_update", current_user.id, db=db, custom_model=current_user.custom_ai_model)
+
     return {"status": "ok"}
 
 @router.post("/jira")
@@ -55,7 +74,8 @@ def update_jira_settings(
             project_id=settings.project_id,
             issue_type_id=settings.issue_type_id,
             visible_fields=settings.visible_fields or [],
-            field_mappings=settings.ai_mapping or {}
+            field_mappings=settings.ai_mapping or {},
+            field_defaults=settings.field_defaults or {},
         )
         db.add(mapping)
     else:
@@ -65,6 +85,9 @@ def update_jira_settings(
             mapping.visible_fields = settings.visible_fields
         if settings.ai_mapping is not None:
             mapping.field_mappings = settings.ai_mapping
+        if settings.field_defaults is not None:
+            mapping.field_defaults = settings.field_defaults
 
     db.commit()
+    log_audit("settings.jira_mapping_update", current_user.id, db=db, project_key=settings.project_key)
     return {"status": "ok"}

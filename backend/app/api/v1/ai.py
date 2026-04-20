@@ -41,6 +41,23 @@ router = APIRouter()
 STANDARD_ISSUE_FIELDS = {"summary", "description", "issuetype", "project"}
 
 
+def _get_field_mapping_record(
+    db: Session,
+    user_id: int,
+    project_key: str,
+    project_id: Optional[str],
+    issue_type_id: str,
+) -> Optional[JiraFieldMapping]:
+    return db.query(JiraFieldMapping).filter(
+        or_(
+            JiraFieldMapping.project_key == project_key,
+            JiraFieldMapping.project_id == project_id
+        ),
+        JiraFieldMapping.issue_type_id == issue_type_id,
+        JiraFieldMapping.user_id == user_id
+    ).first()
+
+
 def _compose_story_context(selected_text: Optional[str], issue_context) -> str:
     if issue_context:
         sections = []
@@ -143,15 +160,21 @@ def _build_issue_fields(
     }
 
 
+def _merge_saved_field_defaults(
+    payload_fields: dict,
+    mapping_record: Optional[JiraFieldMapping]
+) -> dict:
+    merged_fields = dict(payload_fields)
+    saved_defaults = (mapping_record.field_defaults if mapping_record else None) or {}
+    for field_key, default_value in saved_defaults.items():
+        existing = merged_fields.get(field_key)
+        if existing is None or existing == "" or existing == []:
+            merged_fields[field_key] = default_value
+    return merged_fields
+
+
 def _resolve_payload(db: Session, user_id: int, project_key: str, project_id: Optional[str], issue_type_id: str, schema: list, payload_fields: dict, platform: str = "cloud") -> dict:
-    mapping_record = db.query(JiraFieldMapping).filter(
-        or_(
-            JiraFieldMapping.project_key == project_key,
-            JiraFieldMapping.project_id == project_id
-        ),
-        JiraFieldMapping.issue_type_id == issue_type_id,
-        JiraFieldMapping.user_id == user_id
-    ).first()
+    mapping_record = _get_field_mapping_record(db, user_id, project_key, project_id, issue_type_id)
     mapping_config = mapping_record.field_mappings if mapping_record else {}
 
     resolver = JiraFieldResolver(mapping_config, schema, platform=platform)
@@ -277,19 +300,13 @@ async def generate_bug_report(
     )
 
     # 4. Resolve Fields (Mapping)
-    mapping_record = db.query(JiraFieldMapping).filter(
-        or_(
-            JiraFieldMapping.project_key == req.project_key,
-            JiraFieldMapping.project_id == req.project_id
-        ),
-        JiraFieldMapping.issue_type_id == req.issue_type_id,
-        JiraFieldMapping.user_id == current_user.id
-    ).first()
+    mapping_record = _get_field_mapping_record(db, current_user.id, req.project_key, req.project_id, req.issue_type_id)
     mapping_config = mapping_record.field_mappings if mapping_record else {}
     
     platform = "server" if isinstance(adapter, JiraServerAdapter) else "cloud"
     resolver = JiraFieldResolver(mapping_config, schema, platform=platform)
     jira_payload = resolver.resolve(ai_raw)
+    jira_payload["fields"] = _merge_saved_field_defaults(jira_payload["fields"], mapping_record)
 
     # 5. Format Steps and Results
     steps_list = ai_raw.get("steps", [])
@@ -315,6 +332,7 @@ async def generate_bug_report(
     log_audit(
         "ai.generate",
         current_user.id,
+        db=db,
         jira_connection_id=req.jira_connection_id,
         project_key=req.project_key,
         issue_type_id=req.issue_type_id,
@@ -350,6 +368,7 @@ async def generate_test_suite(
     log_audit(
         "ai.test_cases",
         current_user.id,
+        db=db,
         jira_connection_id=req.jira_connection_id,
         project_key=req.project_key,
         issue_type_id=req.issue_type_id,
@@ -373,6 +392,7 @@ async def prepare_bug_preview(
     schema_project_id = req.project_id or req.project_key
     schema = engine.get_field_schema(schema_project_id, req.issue_type_id)
 
+    mapping_record = _get_field_mapping_record(db, current_user.id, req.project_key, req.project_id, req.issue_type_id)
     payload_fields = inject_standard_field_aliases(
         schema,
         _build_issue_fields(
@@ -383,6 +403,7 @@ async def prepare_bug_preview(
             prefer_project_key=prefer_project_key
         )
     )
+    payload_fields = _merge_saved_field_defaults(payload_fields, mapping_record)
     platform = "server" if prefer_project_key else "cloud"
     missing_fields = _validate_payload(schema, payload_fields)
     resolved_payload = _resolve_payload(
@@ -431,6 +452,7 @@ async def submit_bugs(
     created_issues: List[XrayPublishedTest] = []
 
     for bug in req.bugs:
+        mapping_record = _get_field_mapping_record(db, current_user.id, req.project_key, req.project_id, req.issue_type_id)
         payload_fields = inject_standard_field_aliases(
             schema,
             _build_issue_fields(
@@ -441,6 +463,7 @@ async def submit_bugs(
                 prefer_project_key=prefer_project_key
             )
         )
+        payload_fields = _merge_saved_field_defaults(payload_fields, mapping_record)
         missing_fields = _validate_payload(schema, payload_fields)
         if missing_fields:
             names = ", ".join(field["name"] for field in missing_fields)
@@ -472,6 +495,7 @@ async def submit_bugs(
     log_audit(
         "ai.submit",
         current_user.id,
+        db=db,
         jira_connection_id=req.jira_connection_id,
         project_key=req.project_key,
         issue_type_id=req.issue_type_id,

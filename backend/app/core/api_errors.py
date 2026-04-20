@@ -20,6 +20,16 @@ DEFAULT_ERROR_CODES = {
 }
 
 
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _json_safe(inner) for key, inner in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
 def _normalize_error_parts(detail: Any, status_code: int) -> tuple[str, list[Any], str]:
     if isinstance(detail, dict):
         error = detail.get("error")
@@ -28,15 +38,16 @@ def _normalize_error_parts(detail: Any, status_code: int) -> tuple[str, list[Any
             details = error.get("details")
             if not isinstance(details, list):
                 details = [details] if details is not None else []
+            details = _json_safe(details)
             code = str(error.get("code") or DEFAULT_ERROR_CODES.get(status_code, "REQUEST_FAILED"))
             return message, details, code
 
         message = str(detail.get("message") or detail.get("detail") or "Request failed")
-        return message, [detail], DEFAULT_ERROR_CODES.get(status_code, "REQUEST_FAILED")
+        return message, [_json_safe(detail)], DEFAULT_ERROR_CODES.get(status_code, "REQUEST_FAILED")
 
     if isinstance(detail, list):
         message = "Validation failed" if status_code == 422 else "Request failed"
-        return message, detail, DEFAULT_ERROR_CODES.get(status_code, "REQUEST_FAILED")
+        return message, _json_safe(detail), DEFAULT_ERROR_CODES.get(status_code, "REQUEST_FAILED")
 
     if isinstance(detail, str):
         return detail, [], DEFAULT_ERROR_CODES.get(status_code, "REQUEST_FAILED")

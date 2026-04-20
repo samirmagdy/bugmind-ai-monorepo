@@ -48,10 +48,14 @@ How to deploy:
    - `bugmind-redis`
 5. Fill in the prompted secret env vars:
    - `DATABASE_URL`
+   - `ENVIRONMENT`
+   - `LOG_LEVEL`
    - `SECRET_KEY`
    - `ENCRYPTION_KEY`
    - `OPENROUTER_API_KEY`
    - `OPENROUTER_MODEL` if you want a non-default model
+   - `CORS_ORIGINS`
+   - `ALLOWED_HOSTS`
    - `STRIPE_SECRET_KEY`
    - `STRIPE_WEBHOOK_SECRET`
 6. Deploy the Blueprint.
@@ -66,7 +70,8 @@ Important:
 - Alembic is now configured to use `DATABASE_URL` from the environment, which is required for Render Postgres.
 - The current deployment blueprint expects an external Postgres database URL, such as Supabase Postgres.
 - For Supabase Postgres, use `?sslmode=require` in `DATABASE_URL`.
-- The current `/health` endpoint is lightweight and does not verify database connectivity.
+- `/health` verifies database connectivity and is suitable for Render health checks.
+- In production, set `CORS_ORIGINS` to your real extension/web origins and `ALLOWED_HOSTS` to your Render hostname(s).
 - If you do not use Stripe yet, you can leave the Stripe secrets unset until you enable billing flows.
 
 ### 2. Extension Setup

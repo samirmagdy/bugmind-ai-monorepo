@@ -104,6 +104,7 @@ export interface TabSession {
   selectedIssueType: IssueType | null;
   visibleFields: string[];
   aiMapping: Record<string, string>;
+  fieldDefaults: Record<string, unknown>;
   settingsTab: 'ai' | 'jira' | 'connections';
   createdIssues: CreatedIssue[];
   theme: 'light' | 'dark';
@@ -161,6 +162,7 @@ export interface JiraBootstrapContext {
   selected_issue_type: IssueType | null;
   visible_fields: string[];
   ai_mapping: Record<string, string>;
+  field_defaults: Record<string, unknown>;
   jira_metadata: JiraMetadata | null;
 }
 
@@ -212,6 +214,7 @@ export const INITIAL_SESSION: TabSession = {
   selectedIssueType: null,
   visibleFields: [],
   aiMapping: {},
+  fieldDefaults: {},
   settingsTab: 'ai',
   createdIssues: [],
   theme: 'dark',
