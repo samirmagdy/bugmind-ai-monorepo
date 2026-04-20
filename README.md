@@ -37,7 +37,6 @@ This repo now includes a Render Blueprint at [render.yaml](/Users/samirmagdy/JBG
 
 What it provisions:
 - one Python web service for FastAPI
-- one managed Key Value instance for Redis-compatible caching/rate limiting/idempotency
 
 How to deploy:
 1. Push the repo to GitHub/GitLab.
@@ -45,7 +44,6 @@ How to deploy:
 3. Select this repository.
 4. Render will detect `render.yaml` and propose:
    - `bugmind-backend`
-   - `bugmind-redis`
 5. Fill in the prompted secret env vars:
    - `DATABASE_URL`
    - `ENVIRONMENT`
@@ -60,11 +58,15 @@ How to deploy:
    - `STRIPE_WEBHOOK_SECRET`
 6. Deploy the Blueprint.
 
+Recommended Render setting:
+- turn off Render's repository auto-deploy if you plan to deploy only through GitHub Actions, otherwise every push to `main` can trigger a second duplicate deploy.
+
 Deployment behavior:
 - Render runs the service from `backend/`
 - migrations run through Alembic before startup
 - the app binds to Render’s `PORT` environment variable
 - health checks use `/health`
+- the free-tier setup does not provision Redis; Redis-backed rate limiting, idempotency replay, and metadata caching degrade gracefully
 
 Important:
 - Alembic is now configured to use `DATABASE_URL` from the environment, which is required for Render Postgres.
@@ -72,7 +74,34 @@ Important:
 - For Supabase Postgres, use `?sslmode=require` in `DATABASE_URL`.
 - `/health` verifies database connectivity and is suitable for Render health checks.
 - In production, set `CORS_ORIGINS` to your real extension/web origins and `ALLOWED_HOSTS` to your Render hostname(s).
+- The free Render blueprint sets `REDIS_URL=redis://localhost:6379/0` and `RATE_LIMITS_ENABLED=false` so the app can run without a paid Redis service.
 - If you do not use Stripe yet, you can leave the Stripe secrets unset until you enable billing flows.
+
+### 1.2 GitHub Actions -> Render
+The repo now includes a deployment workflow at `.github/workflows/render-deploy.yml`.
+
+What it does:
+- waits for the main `CI` workflow to pass on `main`
+- triggers Render through a deploy hook
+- also supports manual deploys through `workflow_dispatch`
+
+Required GitHub repository secret:
+- `RENDER_DEPLOY_HOOK_URL`
+
+How to get it:
+1. Open your Render web service
+2. Go to `Settings > Deploy Hook`
+3. Create a deploy hook for the backend service
+4. Add that URL to GitHub as the `RENDER_DEPLOY_HOOK_URL` repository secret
+
+Recommended deployment flow:
+1. Push to a branch
+2. Open a PR
+3. Let `CI` pass
+4. Merge to `main`
+5. GitHub Actions triggers the Render deploy hook
+
+If you keep Render's own repo auto-deploy enabled, GitHub Actions will still work, but you may get duplicate deployments.
 
 ### 2. Extension Setup
 1. Navigate to the `extension` folder.
@@ -103,7 +132,7 @@ Important:
   - Patch: `npm run release`
   - Minor: `npm run release:minor`
   - Major: `npm run release:major`
-- **CI/CD**: GitHub Actions validate every PR and automate releases on tag pushes.
+- **CI/CD**: GitHub Actions validate every PR, trigger Render deployments for `main`, and automate releases on tag pushes.
 
 ## 📄 License
 

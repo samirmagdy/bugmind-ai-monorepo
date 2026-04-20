@@ -35,15 +35,33 @@ jobs:
 
   backend-check:
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: sqlite:///./ci.db
+      REDIS_URL: redis://localhost:6379/0
+      SECRET_KEY: ci-secret-key-not-for-production
+      ENCRYPTION_KEY: 1kNnoTdphl0WgkQ6aD4uSe0C5Bs8WvP6DKxFQ4N8fMY=
+      ENVIRONMENT: development
+      RATE_LIMITS_ENABLED: "false"
     steps:
       - uses: actions/checkout@v5
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: '3.11'
+          python-version: '3.9'
           cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
+      - name: Compile backend
+        run: python -m compileall backend/app
+
+      - name: Run migrations
+        working-directory: backend
+        run: alembic upgrade head
+
+      - name: Import app
+        working-directory: backend
+        run: python -c "from app.main import app; print(app.title)"

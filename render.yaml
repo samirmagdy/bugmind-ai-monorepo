@@ -18,26 +18,26 @@ services:
       - key: LOG_LEVEL
         value: INFO
       - key: REDIS_URL
-        fromService:
-          type: keyvalue
-          name: bugmind-redis
-          property: connectionString
+        value: redis://localhost:6379/0
       - key: SECRET_KEY
         sync: false
       - key: ENCRYPTION_KEY
         sync: false
       - key: OPENROUTER_API_KEY
         sync: false
+      - key: OPENROUTER_MODEL
+        sync: false
       - key: CORS_ORIGINS
         sync: false
       - key: ALLOWED_HOSTS
         sync: false
+      - key: RATE_LIMITS_ENABLED
+        value: "false"
+      - key: ALLOW_PRIVATE_JIRA_HOSTS
+        value: "false"
+      - key: ALLOW_INSECURE_JIRA_SSL
+        value: "false"
       - key: STRIPE_SECRET_KEY
         sync: false
       - key: STRIPE_WEBHOOK_SECRET
         sync: false
-
-  - type: keyvalue
-    name: bugmind-redis
-    maxmemoryPolicy: allkeys-lru
-    ipAllowList: []
