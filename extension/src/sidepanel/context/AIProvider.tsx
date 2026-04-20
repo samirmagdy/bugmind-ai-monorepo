@@ -32,6 +32,46 @@ export const AIProvider: React.FC<{
   currentTabId: number | null,
   setTabSessions: React.Dispatch<React.SetStateAction<Record<number, TabSession>>>
 }> = ({ children, logDebug, apiBase, authToken, refreshAuthToken, session, updateSession, currentTabId, setTabSessions }) => {
+  const parseJiraRequiredFieldErrors = useCallback((err: unknown) => {
+    const rawMessage = err instanceof Error ? err.message : String(err || '');
+    const parseFieldMap = (value: unknown): Array<{ key: string; name: string }> => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+      return Object.entries(value as Record<string, unknown>)
+        .filter(([, message]) => typeof message === 'string' && /required/i.test(message))
+        .map(([key]) => {
+          const field = session.jiraMetadata?.fields.find((item) => item.key === key);
+          return {
+            key,
+            name: field?.name || key
+          };
+        });
+    };
+
+    try {
+      const topLevel = JSON.parse(rawMessage) as { detail?: unknown };
+      if (topLevel?.detail && typeof topLevel.detail === 'string') {
+        const nestedMatch = topLevel.detail.match(/Failed to create issue:\s*(\{.*\})$/);
+        if (nestedMatch) {
+          const nested = JSON.parse(nestedMatch[1]) as { errors?: unknown };
+          const parsed = parseFieldMap(nested.errors);
+          if (parsed.length > 0) return parsed;
+        }
+      }
+    } catch {
+      // Fall through to regex-free path below.
+    }
+
+    const fallbackMatch = rawMessage.match(/Failed to create issue:\s*(\{.*\})$/);
+    if (!fallbackMatch) return [];
+
+    try {
+      const nested = JSON.parse(fallbackMatch[1]) as { errors?: unknown };
+      return parseFieldMap(nested.errors);
+    } catch {
+      return [];
+    }
+  }, [session.jiraMetadata?.fields]);
+
   const isSystemManagedMissingField = useCallback((field: MissingField) => {
     const normalizedKey = field.key.trim().toLowerCase().replace(/[_-]/g, '');
     const normalizedName = field.name.trim().toLowerCase();
@@ -417,11 +457,28 @@ export const AIProvider: React.FC<{
       const data = await readJsonResponse<AISubmitResponsePayload>(res);
       updateSession({ view: 'success', createdIssues: data.created_issues || [] });
     } catch (err: unknown) {
+      const jiraRequiredFields = parseJiraRequiredFieldErrors(err);
+      if (jiraRequiredFields.length > 0) {
+        const visibleKeys = Array.from(new Set([
+          ...(session.visibleFields || []),
+          ...jiraRequiredFields.map((field) => field.key)
+        ]));
+
+        updateSession({
+          error: null,
+          view: 'preview',
+          previewBugIndex: index ?? session.previewBugIndex ?? 0,
+          visibleFields: visibleKeys,
+          validationErrors: jiraRequiredFields.map((field) => `Field "${field.name}" is required.`)
+        });
+        return;
+      }
+
       updateSession({ error: translateError(err, 'jira-submit').description });
     } finally {
       updateSession({ loading: false });
     }
-  }, [authToken, apiBase, getProjectRequestParams, refreshAuthToken, session.bugs, session.instanceUrl, session.issueData, session.jiraConnectionId, session.selectedIssueType, updateSession]);
+  }, [authToken, apiBase, getProjectRequestParams, parseJiraRequiredFieldErrors, refreshAuthToken, session.bugs, session.instanceUrl, session.issueData, session.jiraConnectionId, session.previewBugIndex, session.selectedIssueType, session.visibleFields, updateSession]);
 
   const searchUsers = useCallback(async (query: string, bugIndex?: number) => {
     if (query.length < 2 || !session.jiraConnectionId) return;

@@ -22,6 +22,7 @@ from app.services.ai.bug_generator import BugGenerator
 from app.services.subscription.limit_checker import LimitChecker
 from app.services.jira.metadata_engine import JiraMetadataEngine
 from app.services.jira.field_resolver import JiraFieldResolver
+from app.services.jira.adapters.server import JiraServerAdapter
 from app.services.jira.contract_aliases import (
     canonicalize_ai_payload,
     get_payload_value_for_field,
@@ -85,10 +86,17 @@ def _assert_connection_matches_instance(connection: JiraConnection, instance_url
         )
 
 
-def _normalize_project_value(raw_project: object, fallback_project_key: str, fallback_project_id: Optional[str]) -> dict:
+def _normalize_project_value(
+    raw_project: object,
+    fallback_project_key: str,
+    fallback_project_id: Optional[str],
+    prefer_key: bool = False
+) -> dict:
     if isinstance(raw_project, dict):
         project_id = raw_project.get("id")
         project_key = raw_project.get("key")
+        if prefer_key and project_key:
+            return {"key": str(project_key)}
         if project_id:
             return {"id": str(project_id)}
         if project_key:
@@ -99,10 +107,19 @@ def _normalize_project_value(raw_project: object, fallback_project_key: str, fal
         if cleaned:
             return {"id": cleaned} if cleaned.isdigit() else {"key": cleaned}
 
+    if prefer_key and fallback_project_key:
+        return {"key": fallback_project_key}
+
     return {"id": project_id} if (project_id := fallback_project_id) else {"key": fallback_project_key}
 
 
-def _build_issue_fields(bug: dict, issue_type_id: str, project_key: str, project_id: Optional[str]) -> dict:
+def _build_issue_fields(
+    bug: dict,
+    issue_type_id: str,
+    project_key: str,
+    project_id: Optional[str],
+    prefer_project_key: bool = False
+) -> dict:
     raw_project = (bug.get("extra_fields") or {}).get("project")
     extra_fields = {
         key: value
@@ -110,7 +127,7 @@ def _build_issue_fields(bug: dict, issue_type_id: str, project_key: str, project
         if key not in STANDARD_ISSUE_FIELDS
     }
 
-    project_value = _normalize_project_value(raw_project, project_key, project_id)
+    project_value = _normalize_project_value(raw_project, project_key, project_id, prefer_key=prefer_project_key)
     return {
         "summary": bug.get("summary"),
         "description": bug.get("description"),
@@ -316,13 +333,20 @@ async def prepare_bug_preview(
     conn = _get_owned_connection(db, current_user.id, req.jira_connection_id)
     _assert_connection_matches_instance(conn, req.instance_url)
     adapter = get_adapter(conn)
+    prefer_project_key = isinstance(adapter, JiraServerAdapter)
     engine = JiraMetadataEngine(adapter)
     schema_project_id = req.project_id or req.project_key
     schema = engine.get_field_schema(schema_project_id, req.issue_type_id)
 
     payload_fields = inject_standard_field_aliases(
         schema,
-        _build_issue_fields(req.bug.model_dump(), req.issue_type_id, req.project_key, req.project_id)
+        _build_issue_fields(
+            req.bug.model_dump(),
+            req.issue_type_id,
+            req.project_key,
+            req.project_id,
+            prefer_project_key=prefer_project_key
+        )
     )
     missing_fields = _validate_payload(schema, payload_fields)
     resolved_payload = _resolve_payload(
@@ -351,6 +375,7 @@ async def submit_bugs(
     conn = _get_owned_connection(db, current_user.id, req.jira_connection_id)
     _assert_connection_matches_instance(conn, req.instance_url)
     adapter = get_adapter(conn)
+    prefer_project_key = isinstance(adapter, JiraServerAdapter)
     schema_project_id = req.project_id or req.project_key
     engine = JiraMetadataEngine(adapter)
     schema = engine.get_field_schema(schema_project_id, req.issue_type_id)
@@ -363,7 +388,8 @@ async def submit_bugs(
                 bug.model_dump(),
                 req.issue_type_id,
                 req.project_key,
-                req.project_id
+                req.project_id,
+                prefer_project_key=prefer_project_key
             )
         )
         missing_fields = _validate_payload(schema, payload_fields)
