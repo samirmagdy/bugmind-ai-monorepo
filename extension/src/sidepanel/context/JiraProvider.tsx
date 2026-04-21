@@ -114,7 +114,7 @@ export const JiraProvider: React.FC<{
       issueData: nextIssueData,
       error: null
     }, tabId);
-  }, [saveJiraConfig, updateSession]);
+  }, [saveJiraConfig, updateSession, session.issueData]);
 
   const bootstrapContext = useCallback(async ({
     instanceUrl,

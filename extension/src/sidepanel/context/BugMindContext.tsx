@@ -116,7 +116,10 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
       tabId: tabId || currentTabId || undefined,
       tokenOverride
     });
-  }, [auth.authToken, currentTabId, jira, logDebug]);
+  }, [
+    auth.authToken, currentTabId, jira, logDebug, 
+    session.instanceUrl, session.jiraMetadata, session.selectedIssueType?.id
+  ]);
 
   const fetchCurrentContext = useCallback(async (force: boolean = false) => {
     if (!currentTabId) return null;
