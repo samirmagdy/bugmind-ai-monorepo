@@ -201,9 +201,32 @@ class JiraCloudAdapter(JiraAdapter):
             raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to fetch Jira projects"))
         return response.json()
 
+    def _resolve_project_ref(self, project_ref: str) -> Optional[str]:
+        normalized_ref = str(project_ref).strip()
+        if not normalized_ref:
+            return None
+
+        try:
+            projects = self.get_projects()
+        except HTTPException:
+            return None
+
+        normalized_lower = normalized_ref.lower()
+        for project in projects:
+            candidate_id = str(project.get("id", "")).strip()
+            candidate_key = str(project.get("key", "")).strip()
+            if normalized_ref == candidate_id or normalized_lower == candidate_key.lower():
+                return candidate_id or candidate_key or None
+        return None
+
     def get_issue_types(self, project_id: str) -> List[Dict[str, Any]]:
         # Use project metadata endpoint instead of deprecated createmeta
         response = self._request("GET", f"/rest/api/3/project/{project_id}")
+        if response.status_code == 404:
+            resolved_project_ref = self._resolve_project_ref(project_id)
+            if resolved_project_ref and str(resolved_project_ref) != str(project_id):
+                response = self._request("GET", f"/rest/api/3/project/{resolved_project_ref}")
+
         if response.status_code != 200:
             raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to fetch Jira issue types"))
         
