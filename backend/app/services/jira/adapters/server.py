@@ -181,33 +181,34 @@ class JiraServerAdapter(JiraAdapter):
 
     def search_users(self, query: str, project_id: Optional[str] = None, project_key: Optional[str] = None) -> List[Dict[str, Any]]:
         # Use httpx params to ensure safe URL encoding for spaces/special chars
-        # For Jira Server/DC, 'username' or 'query' is used. 'username' is traditional v2.
+        # For Jira Server/DC, 'username' is the traditional search parameter.
         params: Dict[str, Any] = {"username": query, "maxResults": 20}
         
-        # Scope search by project if IDs/Keys are available
-        if project_id:
-            params["project"] = project_id
-        elif project_key:
-            params["project"] = project_key
+        # Determine endpoint and parameters based on project context
+        endpoint = "/rest/api/2/user/search"
+        if project_id or project_key:
+            endpoint = "/rest/api/2/user/assignable/search"
+            params["project"] = project_id or project_key
 
         try:
-            response = self.client.get("/rest/api/2/user/search", params=params)
+            response = self.client.get(endpoint, params=params)
             
             # Fallback for newer Server/DC versions that might prefer 'query' parameter
             if response.status_code == 400 and "username" in response.text:
                 params["query"] = params.pop("username")
-                response = self.client.get("/rest/api/2/user/search", params=params)
+                response = self.client.get(endpoint, params=params)
 
             if response.status_code != 200:
-                logger.warning("jira_server_search_users_failed", extra={"status": response.status_code, "query": query, "msg": response.text[:100]})
+                logger.warning("jira_server_search_users_failed", extra={"status": response.status_code, "endpoint": endpoint, "query": query, "msg": response.text[:100]})
                 raise HTTPException(status_code=400, detail="Failed to search users")
             
             users = response.json()
             # Jira Server returns 'name' (username) and 'key', Cloud returns 'accountId'
             return [{"id": u.get("name") or u.get("key"), "name": u.get("displayName"), "email": u.get("emailAddress")} for u in users]
         except httpx.HTTPError as exc:
-            logger.error("jira_server_search_users_exception", extra={"error": str(exc), "query": query})
+            logger.error("jira_server_search_users_exception", extra={"error": str(exc), "endpoint": endpoint, "query": query})
             raise HTTPException(status_code=502, detail="Failed to reach Jira Server for user search")
+
 
 
     def get_issue_link_types(self) -> List[str]:

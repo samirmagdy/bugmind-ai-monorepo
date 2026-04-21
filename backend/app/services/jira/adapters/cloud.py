@@ -284,24 +284,27 @@ class JiraCloudAdapter(JiraAdapter):
 
     def search_users(self, query: str, project_id: Optional[str] = None, project_key: Optional[str] = None) -> List[Dict[str, Any]]:
         # Use httpx params to ensure safe URL encoding for spaces/special chars
-        params = {"query": query}
-        if project_id:
-            params["projectId"] = project_id
-        elif project_key:
-            params["projectKeys"] = project_key
+        params: Dict[str, Any] = {"query": query}
+        
+        # Determine the best endpoint based on project context
+        # Official docs: /user/assignable/search handles project scoping, /user/search is global.
+        endpoint = "/rest/api/3/user/search"
+        if project_id or project_key:
+            endpoint = "/rest/api/3/user/assignable/search"
+            params["project"] = project_id or project_key
 
         try:
-            # We use client.get directly to pass params dictionary for safe encoding
-            response = self.client.get("/rest/api/3/user/search", params=params)
+            response = self.client.get(endpoint, params=params)
             if response.status_code != 200:
-                logger.warning("jira_cloud_search_users_failed", extra={"status": response.status_code, "query": query})
+                logger.warning("jira_cloud_search_users_failed", extra={"status": response.status_code, "endpoint": endpoint, "query": query})
                 raise HTTPException(status_code=400, detail="Failed to search users")
             
             users = response.json()
             return [{"id": u.get("accountId"), "name": u.get("displayName"), "email": u.get("emailAddress")} for u in users]
         except httpx.HTTPError as exc:
-            logger.error("jira_cloud_search_users_exception", extra={"error": str(exc), "query": query})
+            logger.error("jira_cloud_search_users_exception", extra={"error": str(exc), "endpoint": endpoint, "query": query})
             raise HTTPException(status_code=502, detail="Failed to reach Jira Cloud for user search")
+
 
     def get_issue_link_types(self) -> List[str]:
         response = self._request("GET", "/rest/api/3/issueLinkType")
