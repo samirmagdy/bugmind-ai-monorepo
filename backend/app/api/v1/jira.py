@@ -77,6 +77,14 @@ def _serialize_issue_type(issue_type: dict) -> JiraIssueTypeResponse:
     )
 
 
+def _project_key_from_issue_key(issue_key: Optional[str]) -> Optional[str]:
+    raw = (issue_key or "").strip()
+    if "-" not in raw:
+        return None
+    candidate = raw.split("-", 1)[0].strip()
+    return candidate or None
+
+
 def _select_issue_type(issue_types: list[dict], issue_type_id: Optional[str]) -> Optional[dict]:
     if issue_type_id:
         exact = next((item for item in issue_types if str(item.get("id")) == str(issue_type_id)), None)
@@ -196,18 +204,23 @@ def resolve_jira_bootstrap_context(
 
     adapter = get_adapter(conn)
     engine = JiraMetadataEngine(adapter)
+
+    canonical_project_id = req.project_id
+    canonical_project_key = req.project_key or _project_key_from_issue_key(req.issue_key)
+    canonical_issue_type_id = req.issue_type_id
+
     issue_context: dict = {}
-    if req.issue_key:
+    needs_issue_lookup = bool(req.issue_key and not (canonical_project_id and canonical_project_key and canonical_issue_type_id))
+    if needs_issue_lookup:
         try:
             issue_context = adapter.get_issue_context(req.issue_key)
         except HTTPException as exc:
             if exc.status_code not in (400, 404):
                 raise
             issue_context = {}
-
-    canonical_project_id = issue_context.get("project_id") or req.project_id
-    canonical_project_key = issue_context.get("project_key") or req.project_key
-    canonical_issue_type_id = req.issue_type_id or issue_context.get("issue_type_id")
+    canonical_project_id = issue_context.get("project_id") or canonical_project_id
+    canonical_project_key = issue_context.get("project_key") or canonical_project_key
+    canonical_issue_type_id = canonical_issue_type_id or issue_context.get("issue_type_id")
 
     if not (canonical_project_id or canonical_project_key):
         raise HTTPException(status_code=400, detail="Could not resolve Jira project context from the current page")
