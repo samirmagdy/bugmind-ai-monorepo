@@ -1,7 +1,7 @@
 import httpx
 import base64
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from fastapi import HTTPException
 from app.services.jira.adapters.base import JiraAdapter
 
@@ -179,13 +179,22 @@ class JiraServerAdapter(JiraAdapter):
         if response.status_code not in [200, 201]:
             raise HTTPException(status_code=400, detail="Failed to link issues")
 
-    def search_users(self, query: str) -> List[Dict[str, Any]]:
-        response = self._request("GET", f"/rest/api/2/user/search?username={query}")
-        if response.status_code != 200:
-            raise HTTPException(status_code=400, detail="Failed to search users")
+    def search_users(self, query: str, project_id: Optional[str] = None, project_key: Optional[str] = None) -> List[Dict[str, Any]]:
+        # Use httpx params to ensure safe URL encoding for spaces/special chars
+        # For Jira Server/DC, 'username' is the traditional search parameter.
+        params = {"username": query}
         
-        users = response.json()
-        return [{"id": u.get("name"), "name": u.get("displayName"), "email": u.get("emailAddress")} for u in users]
+        try:
+            response = self.client.get("/rest/api/2/user/search", params=params)
+            if response.status_code != 200:
+                logger.warning("jira_server_search_users_failed", extra={"status": response.status_code, "query": query})
+                raise HTTPException(status_code=400, detail="Failed to search users")
+            
+            users = response.json()
+            return [{"id": u.get("name"), "name": u.get("displayName"), "email": u.get("emailAddress")} for u in users]
+        except httpx.HTTPError as exc:
+            logger.error("jira_server_search_users_exception", extra={"error": str(exc), "query": query})
+            raise HTTPException(status_code=502, detail="Failed to reach Jira Server for user search")
 
     def get_issue_link_types(self) -> List[str]:
         response = self._request("GET", "/rest/api/2/issueLinkType")
