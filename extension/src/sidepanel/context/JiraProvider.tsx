@@ -175,7 +175,9 @@ export const JiraProvider: React.FC<{
 
         if (!res.ok) {
           const errorText = await res.text();
-          throw new Error(errorText || `Failed to bootstrap Jira context (${res.status})`);
+          const error = new Error(errorText || `Failed to bootstrap Jira context (${res.status})`) as Error & { status?: number };
+          error.status = res.status;
+          throw error;
         }
 
         const data = await readJsonResponse<JiraBootstrapResponsePayload>(res);
@@ -188,7 +190,9 @@ export const JiraProvider: React.FC<{
         logDebug('JIRA-BOOT-OK', `Resolved connection ${data.connection_id}`);
         return data;
       } catch (err: unknown) {
-        if (retryCount < 2) {
+        const status = typeof err === 'object' && err !== null && 'status' in err ? Number((err as { status?: number }).status) : undefined;
+        const shouldRetry = retryCount < 2 && (!status || status >= 500 || status === 429);
+        if (shouldRetry) {
           logDebug('JIRA-BOOT-RETRY', `Retrying bootstrap (${retryCount + 1}/2) due to: ${String(err)}`);
           return performFetch(retryCount + 1);
         }

@@ -198,7 +198,12 @@ def resolve_jira_bootstrap_context(
     engine = JiraMetadataEngine(adapter)
     issue_context: dict = {}
     if req.issue_key:
-        issue_context = adapter.get_issue_context(req.issue_key)
+        try:
+            issue_context = adapter.get_issue_context(req.issue_key)
+        except HTTPException as exc:
+            if exc.status_code not in (400, 404):
+                raise
+            issue_context = {}
 
     canonical_project_id = issue_context.get("project_id") or req.project_id
     canonical_project_key = issue_context.get("project_key") or req.project_key
