@@ -18,6 +18,14 @@ const HIDDEN_SYSTEM_FIELD_KEYS = new Set([
   'issuetype'
 ]);
 
+type SelectDisplayValue = {
+  id?: string | number;
+  name?: string;
+  value?: string;
+  label?: string;
+  avatar?: string;
+};
+
 function isSystemManagedField(field: JiraField): boolean {
   const normalizedKey = field.key.trim().toLowerCase().replace(/[_-]/g, '');
   const normalizedSystem = (field.system || '').trim().toLowerCase();
@@ -27,6 +35,44 @@ function isSystemManagedField(field: JiraField): boolean {
     ['summary', 'description', 'project', 'issuetype'].includes(normalizedSystem) ||
     ['projectid', 'issuetypeid', 'pid', 'typeid'].includes(normalizedKey)
   );
+}
+
+function hasDisplayLabel(value: unknown): value is SelectDisplayValue {
+  return typeof value === 'object' && value !== null && (
+    'name' in value ||
+    'value' in value ||
+    'label' in value
+  );
+}
+
+function mergeDisplayValue(currentValue: unknown, fallbackValue: unknown): unknown {
+  if (Array.isArray(currentValue) && Array.isArray(fallbackValue)) {
+    return currentValue.map((item) => {
+      if (hasDisplayLabel(item) || typeof item !== 'object' || item === null || !('id' in item)) return item;
+      const match = fallbackValue.find((fallbackItem) =>
+        typeof fallbackItem === 'object' &&
+        fallbackItem !== null &&
+        'id' in fallbackItem &&
+        fallbackItem.id === item.id
+      );
+      return match && typeof match === 'object' ? { ...match, ...item } : item;
+    });
+  }
+
+  if (
+    typeof currentValue === 'object' &&
+    currentValue !== null &&
+    'id' in currentValue &&
+    !hasDisplayLabel(currentValue) &&
+    typeof fallbackValue === 'object' &&
+    fallbackValue !== null &&
+    'id' in fallbackValue &&
+    fallbackValue.id === currentValue.id
+  ) {
+    return { ...fallbackValue, ...currentValue };
+  }
+
+  return currentValue;
 }
 
 const MainView: React.FC = () => {
@@ -732,7 +778,10 @@ const MainView: React.FC = () => {
                                  if (!field) return null;
 
                                  const isMulti = field.type === 'array' || field.type === 'multi-select';
-                                 const currentVal = bug.extra_fields?.[fieldKey];
+                                 const currentVal = mergeDisplayValue(
+                                   bug.extra_fields?.[fieldKey],
+                                   session.fieldDefaults?.[fieldKey]
+                                 );
 
                                  return (
                                    <div key={fieldKey} className="space-y-2">
