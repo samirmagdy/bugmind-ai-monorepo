@@ -97,7 +97,7 @@ export default function App() {
 
       <main className="flex-1 overflow-y-auto overflow-x-hidden relative custom-scrollbar">
         <div className="p-4 pb-24 max-w-4xl mx-auto">
-          {session.error && !['NOT_A_JIRA_PAGE', 'UNSUPPORTED_ISSUE_TYPE', 'NO_ISSUE_TYPES_FOUND'].includes(session.error) && (
+          {session.error && !['NOT_A_JIRA_PAGE', 'UNSUPPORTED_ISSUE_TYPE', 'NO_ISSUE_TYPES_FOUND', 'STALE_PAGE'].includes(session.error) && (
             <div className="mb-6 p-5 bp-panel border-[var(--status-danger)]/20 rounded-[2rem] flex items-start gap-4 animate-bp-flicker shadow-2xl shadow-[var(--status-danger)]/5 relative overflow-hidden group">
               <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-transparent via-[var(--status-danger)]/30 to-transparent"></div>
               <div className="w-10 h-10 bg-[var(--status-danger)]/10 rounded-none flex items-center justify-center shrink-0 border border-[var(--status-danger)]/20">

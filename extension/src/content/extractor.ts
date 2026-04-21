@@ -18,8 +18,12 @@ declare global {
   interface Window {
     __BugMindInjected?: string | null;
     __BugMindCleanup?: () => void;
+    __BugMindHistoryPatched?: boolean;
   }
 }
+
+const VERSION = '1.2.0';
+const CONTEXT_NOTIFY_DEBOUNCE_MS = 350;
 
 type BugMindMessage =
   | { type: 'PING' }
@@ -30,6 +34,16 @@ type BugMindResponse =
   | { type: 'PONG'; version: string }
   | { type: 'ISSUE_DATA_SUCCESS'; data: ExtractedIssue | null }
   | { type: 'ISSUE_DATA_ERROR'; error: string };
+
+function buildContextSignature(data: ExtractedIssue | null, url: string = window.location.href): string {
+  return JSON.stringify({
+    url,
+    key: data?.key || null,
+    projectId: data?.projectId || null,
+    summary: data?.summary || null,
+    typeName: data?.typeName || null
+  });
+}
 
 function detectTheme(): 'light' | 'dark' {
   const mode = document.documentElement.getAttribute('data-color-mode');
@@ -108,7 +122,7 @@ const messageListener = (
   sendResponse: (response: BugMindResponse) => void
 ) => {
   if (request.type === 'PING') {
-    sendResponse({ type: 'PONG', version: '1.2.0' });
+    sendResponse({ type: 'PONG', version: VERSION });
     return true;
   }
 
@@ -125,8 +139,8 @@ const messageListener = (
 };
 
 function initialize() {
-  if (window.__BugMindInjected === '1.2.0') {
-    console.log('[BugMind] Version 1.2.0 already active.');
+  if (window.__BugMindInjected === VERSION) {
+    console.log(`[BugMind] Version ${VERSION} already active.`);
     return;
   }
 
@@ -134,8 +148,55 @@ function initialize() {
     window.__BugMindCleanup();
   }
 
-  window.__BugMindInjected = '1.2.0';
+  window.__BugMindInjected = VERSION;
   chrome.runtime.onMessage.addListener(messageListener);
+
+  let lastObservedUrl = window.location.href;
+  let lastContextSignature = buildContextSignature(extractJiraData(), lastObservedUrl);
+  let contextScanTimer: number | null = null;
+
+  const notifyContextChange = () => {
+    if (contextScanTimer !== null) {
+      window.clearTimeout(contextScanTimer);
+    }
+
+    contextScanTimer = window.setTimeout(() => {
+      contextScanTimer = null;
+      const currentUrl = window.location.href;
+      const data = extractJiraData();
+      const nextSignature = buildContextSignature(data, currentUrl);
+
+      if (currentUrl === lastObservedUrl && nextSignature === lastContextSignature) {
+        return;
+      }
+
+      lastObservedUrl = currentUrl;
+      lastContextSignature = nextSignature;
+
+      chrome.runtime.sendMessage({
+        type: 'JIRA_CONTEXT_CHANGED',
+        url: currentUrl
+      }).catch(() => {});
+    }, CONTEXT_NOTIFY_DEBOUNCE_MS);
+  };
+
+  if (!window.__BugMindHistoryPatched) {
+    window.__BugMindHistoryPatched = true;
+
+    const wrapHistoryMethod = (methodName: 'pushState' | 'replaceState') => {
+      const original = window.history[methodName];
+      window.history[methodName] = function (...args) {
+        const result = original.apply(this, args);
+        notifyContextChange();
+        return result;
+      };
+    };
+
+    wrapHistoryMethod('pushState');
+    wrapHistoryMethod('replaceState');
+    window.addEventListener('popstate', notifyContextChange);
+    window.addEventListener('hashchange', notifyContextChange);
+  }
 
   let lastTheme = detectTheme();
   const themeObserver = new MutationObserver(() => {
@@ -155,12 +216,32 @@ function initialize() {
     attributeFilter: ['data-color-mode', 'data-theme']
   });
 
+  const contextObserver = new MutationObserver(() => {
+    notifyContextChange();
+  });
+
+  const contextTarget = document.body || document.documentElement;
+  if (contextTarget) {
+    contextObserver.observe(contextTarget, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: ['href', 'content', 'data-testid', 'alt']
+    });
+  }
+
   window.__BugMindCleanup = () => {
     chrome.runtime.onMessage.removeListener(messageListener);
     themeObserver.disconnect();
+    contextObserver.disconnect();
+    if (contextScanTimer !== null) {
+      window.clearTimeout(contextScanTimer);
+    }
     window.__BugMindInjected = null;
   };
 
+  notifyContextChange();
   console.log('[BugMind] AI Content Engine Ready.');
 }
 

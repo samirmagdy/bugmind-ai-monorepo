@@ -136,8 +136,8 @@ export function translateError(error: unknown, context?: string): TranslatedErro
   // 5. Page State Errors
   if (message === 'STALE_PAGE') {
     return {
-      title: 'Page Connection Lost',
-      description: 'The connection to the Jira page is stale. Please refresh the browser tab to continue.'
+      title: 'Reconnecting to Jira',
+      description: 'BugMind is automatically trying to reconnect to the current Jira issue.'
     };
   }
 

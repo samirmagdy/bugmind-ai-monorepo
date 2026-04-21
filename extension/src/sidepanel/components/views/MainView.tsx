@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useBugMind } from '../../hooks/useBugMind';
 import { 
   Plus, ChevronDown, 
@@ -39,6 +39,8 @@ const MainView: React.FC = () => {
     } 
   } = useBugMind();
   const { log } = debug;
+  const isRecoveringStalePage = session.error === 'STALE_PAGE' && !session.issueData;
+  const staleRecoveryAttemptsRef = useRef(0);
 
   const bootstrapJiraConfig = async (issueTypeId?: string, options?: { force?: boolean; loading?: boolean; logTag?: string; errorMessage?: string }) => {
     const projectKey = session.issueData?.key.split('-')[0];
@@ -77,6 +79,29 @@ const MainView: React.FC = () => {
     }
   };
 
+  useEffect(() => {
+    if (!isRecoveringStalePage) {
+      staleRecoveryAttemptsRef.current = 0;
+      return;
+    }
+
+    if (staleRecoveryAttemptsRef.current >= 3) {
+      return;
+    }
+
+    staleRecoveryAttemptsRef.current += 1;
+    const attemptNumber = staleRecoveryAttemptsRef.current;
+    const delay = attemptNumber === 1 ? 0 : 2000;
+
+    const timer = window.setTimeout(() => {
+      log('STALE-RECOVER', `Automatic Jira recovery attempt ${attemptNumber}/3`);
+      refreshIssue(true);
+    }, delay);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [isRecoveringStalePage, log, refreshIssue]);
 
   // Trigger user search when query changes with 400ms debounce
   useEffect(() => {
@@ -157,21 +182,41 @@ const MainView: React.FC = () => {
           </div>
         ) : session.error === 'STALE_PAGE' ? (
           <div className="flex flex-col gap-3 py-1.5 animate-luxury">
-            <div className="flex items-center gap-2 text-[var(--status-warning)] font-black text-[11px] uppercase tracking-[0.05em]">
-              <div className="p-1.5 bg-[var(--status-warning)]/10 rounded-lg border border-[var(--status-warning)]/20 shadow-inner">
-                <AlertCircle size={14} />
+            <div className="flex items-center gap-2 text-[var(--status-info)] font-black text-[11px] uppercase tracking-[0.05em]">
+              <div className="p-1.5 bg-[var(--status-info)]/10 rounded-lg border border-[var(--status-info)]/20 shadow-inner">
+                <Loader2 size={14} className="animate-spin" />
               </div>
-              Connection Reset
+              Reconnecting to Jira
             </div>
             <p className="text-[11px] text-[var(--text-muted)] leading-relaxed font-medium">
-              The communication bridge to Jira was reset. Please refresh the page.
+              BugMind is re-scanning the open Jira tab automatically. This screen will update as soon as the issue context is available again.
             </p>
-            <button 
-              onClick={() => handleTabReload()} 
-              className="w-full luxury-input bg-[var(--status-warning)]/5 hover:bg-[var(--status-warning)]/10 border-[var(--status-warning)]/30 text-[var(--status-warning)] text-[9px] font-black py-2.5 rounded-xl transition-all uppercase tracking-widest shadow-lg shadow-[var(--status-warning)]/5"
-            >
-              Reload Jira Workspace
-            </button>
+            <div className="bg-[var(--bg-app)]/50 rounded-xl p-3 border border-[var(--border-main)] space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[8px] font-black uppercase tracking-widest text-[var(--text-muted)] block">Recovery Status</span>
+                <span className="text-[8px] font-black uppercase tracking-widest text-[var(--status-info)]">Auto Retry Active</span>
+              </div>
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--bg-input)] border border-[var(--border-main)]">
+                <div className="h-full w-1/2 bg-gradient-to-r from-[var(--status-info)]/20 via-[var(--status-info)] to-[var(--accent-hover)] animate-progress origin-left" />
+              </div>
+              <p className="text-[9px] text-[var(--text-muted)] leading-tight">
+                If Jira does not come back in a few seconds, reload the workspace once.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <button 
+                onClick={() => refreshIssue(true)}
+                className="flex-1 luxury-input bg-[var(--status-info)]/5 hover:bg-[var(--status-info)]/10 border-[var(--status-info)]/30 text-[var(--status-info)] text-[9px] font-black py-2.5 rounded-xl transition-all uppercase tracking-widest shadow-lg shadow-[var(--status-info)]/5"
+              >
+                Retry Now
+              </button>
+              <button 
+                onClick={() => handleTabReload()} 
+                className="flex-1 luxury-input bg-[var(--status-warning)]/5 hover:bg-[var(--status-warning)]/10 border-[var(--status-warning)]/30 text-[var(--status-warning)] text-[9px] font-black py-2.5 rounded-xl transition-all uppercase tracking-widest shadow-lg shadow-[var(--status-warning)]/5"
+              >
+                Reload Tab
+              </button>
+            </div>
           </div>
         ) : session.error === 'NOT_A_JIRA_PAGE' ? (
           <div className="flex flex-col gap-3 py-1 animate-in fade-in duration-300">

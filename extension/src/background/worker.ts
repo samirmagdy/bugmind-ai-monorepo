@@ -39,6 +39,11 @@ interface ThemeChangedMessage {
   theme: 'light' | 'dark';
 }
 
+interface JiraContextChangedMessage {
+  type: 'JIRA_CONTEXT_CHANGED';
+  url?: string;
+}
+
 function normalizeJiraUrl(url: string | null | undefined): string {
   if (!url) return '';
 
@@ -61,6 +66,7 @@ const tabContextCache: Record<number, TabContext> = {};
 const tabRefreshInFlight = new Map<number, Promise<TabContext | null>>();
 const tabLastRefreshAt = new Map<number, number>();
 const tabLastUrl = new Map<number, string>();
+const tabScriptInjectionInFlight = new Map<number, Promise<boolean>>();
 const REFRESH_DEBOUNCE_MS = 1200;
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -88,12 +94,45 @@ async function refreshExistingTabs() {
  * Ensures the content script is active and version-matched.
  */
 async function ensureContentScript(tabId: number): Promise<boolean> {
-  try {
+  const pingContentScript = async (): Promise<boolean> => {
     const response = await chrome.tabs.sendMessage(tabId, { type: 'PING' }).catch(() => null);
-    if (response?.type === 'PONG' && response?.version === VERSION) {
+    return response?.type === 'PONG' && response?.version === VERSION;
+  };
+
+  try {
+    if (await pingContentScript()) {
       return true;
     }
-    console.log(`[BugMind-BG] Content script not ready on tab ${tabId}. Waiting for manifest-injected script.`);
+    const existingInjection = tabScriptInjectionInFlight.get(tabId);
+    if (existingInjection) {
+      return existingInjection;
+    }
+
+    const injectPromise = (async () => {
+      console.log(`[BugMind-BG] Content script not ready on tab ${tabId}. Attempting runtime injection...`);
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId },
+          files: ['assets/content.js']
+        });
+
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+          if (await pingContentScript()) {
+            return true;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 150));
+        }
+      } catch (error) {
+        console.error(`[BugMind-BG] Failed to inject content script into tab ${tabId}:`, error);
+      } finally {
+        tabScriptInjectionInFlight.delete(tabId);
+      }
+
+      return false;
+    })();
+
+    tabScriptInjectionInFlight.set(tabId, injectPromise);
+    return injectPromise;
   } catch (e) {
     // Expected if script is not injected yet
   }
@@ -229,11 +268,24 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     // Forward theme changes to sidepanel
     chrome.runtime.sendMessage(message as ThemeChangedMessage).catch(() => {});
   }
+
+  if (message.type === 'JIRA_CONTEXT_CHANGED') {
+    const sender = _sender as chrome.runtime.MessageSender;
+    const tabId = sender.tab?.id;
+    const nextUrl = (message as JiraContextChangedMessage).url || sender.tab?.url;
+
+    if (typeof tabId === 'number') {
+      refreshTabContext(tabId, nextUrl, true).catch((err) => {
+        console.error('[BugMind-BG] Failed to refresh context from content hint:', err);
+      });
+    }
+  }
 });
 
 // 4. Cleanup storage + IndexedDB when a tab is closed
 chrome.tabs.onRemoved.addListener((tabId) => {
   delete tabContextCache[tabId];
+  tabScriptInjectionInFlight.delete(tabId);
   
   // 1. Clean chrome.storage.local metadata
   const key = `bugmind_tab_${tabId}`;

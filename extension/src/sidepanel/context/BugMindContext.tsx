@@ -90,7 +90,16 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
       issueTypeId: selectedIssueTypeIdRef.current || null
     });
 
-    if (lastBootstrapSignatureRef.current === signature || inFlightBootstrapRef.current) {
+    const alreadySynced =
+      !!session.jiraConnectionId &&
+      (!!session.jiraMetadata || !projectKey) &&
+      (!projectKey || session.jiraMetadata?.project_key === projectKey);
+
+    if (inFlightBootstrapRef.current) {
+      return null;
+    }
+
+    if (lastBootstrapSignatureRef.current === signature && alreadySynced) {
       return null;
     }
     
@@ -98,18 +107,30 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
     lastBootstrapSignatureRef.current = signature;
 
     logDebug('JIRA-BOOT', `Triggering background bootstrap for ${context.instanceUrl}`);
-    return jira.bootstrapContext({
-      instanceUrl: context.instanceUrl,
-      issueKey: context.issueData?.key,
-      projectKey,
-      projectId: context.issueData?.projectId,
-      issueTypeId: selectedIssueTypeIdRef.current,
-      tabId: tabId || currentTabId || undefined,
-      tokenOverride
-    }).finally(() => {
+    try {
+      const result = await jira.bootstrapContext({
+        instanceUrl: context.instanceUrl,
+        issueKey: context.issueData?.key,
+        projectKey,
+        projectId: context.issueData?.projectId,
+        issueTypeId: selectedIssueTypeIdRef.current,
+        tabId: tabId || currentTabId || undefined,
+        tokenOverride
+      });
+
+      if (result && auth.globalView === 'setup') {
+        auth.setGlobalView('main');
+      }
+
+      if (!result) {
+        lastBootstrapSignatureRef.current = '';
+      }
+
+      return result;
+    } finally {
       inFlightBootstrapRef.current = false;
-    });
-  }, [auth.authToken, currentTabId, jira, logDebug]);
+    }
+  }, [auth, currentTabId, jira, logDebug, session.jiraConnectionId, session.jiraMetadata]);
 
   const fetchCurrentContext = useCallback(async (force: boolean = false) => {
     if (!currentTabId) return null;
@@ -420,10 +441,10 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
       log: logDebug,
       clear: clearLogs
     }), [internalLogs, showDebug, setShowDebug, logDebug, clearLogs]),
-    refreshIssue: (force) => {
+    refreshIssue: useCallback((force) => {
       logDebug('MANUAL-SYNC', 'Triggering manual context refresh via worker...');
       chrome.runtime.sendMessage({ type: 'GET_CURRENT_CONTEXT', tabId: currentTabId, force });
-    },
+    }, [currentTabId, logDebug]),
     checkAuth,
     handleLogin,
     handleRegister: async (e) => {
