@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 
 class JiraAdapter(ABC):
     def __init__(self, host_url: str, username: str, token: str, verify_ssl: bool = True):
@@ -30,8 +30,8 @@ class JiraAdapter(ABC):
         pass
 
     @abstractmethod
-    def search_users(self, query: str, project_key: Optional[str] = None, project_id: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Searches for users based on query string, optionally scoped by project."""
+    def search_users(self, query: str) -> List[Dict[str, Any]]:
+        """Searches for users based on query string."""
         pass
 
     @abstractmethod

@@ -2,7 +2,7 @@ import httpx
 import base64
 import re
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 from fastapi import HTTPException
 from app.services.jira.adapters.base import JiraAdapter
 
@@ -277,30 +277,12 @@ class JiraCloudAdapter(JiraAdapter):
         if response.status_code not in [200, 201]:
             raise HTTPException(status_code=400, detail="Failed to link issues")
 
-    def search_users(self, query: str, project_key: Optional[str] = None, project_id: Optional[str] = None) -> List[Dict[str, Any]]:
-        # Use assignable search if project is known, which is more reliable for teammates.
-        users = []
-        if project_key or project_id:
-            project_param = project_key or project_id
-            url = f"/rest/api/3/user/assignable/search?query={query}&project={project_param}"
-            response = self.client.get(url)
-            if response.status_code == 200:
-                users = response.json()
-            elif response.status_code == 404:
-                logger.info("jira_cloud_user_search_assignable_404_fallback", extra={"project": project_param})
-
-        # Fallback to generic search if assignable search was skipped or failed
-        if not users:
-            url = f"/rest/api/3/user/search?query={query}"
-            response = self._request("GET", url)
-            if response.status_code == 200:
-                users = response.json()
-            else:
-                logger.warning("jira_cloud_user_search_failed", extra={"status": response.status_code, "query": query})
-                # We don't raise here if we already tried assignable; just return empty or error if both failed
-                if response.status_code != 200:
-                     raise HTTPException(status_code=400, detail="Failed to search users")
-
+    def search_users(self, query: str) -> List[Dict[str, Any]]:
+        response = self._request("GET", f"/rest/api/3/user/search?query={query}")
+        if response.status_code != 200:
+            raise HTTPException(status_code=400, detail="Failed to search users")
+        
+        users = response.json()
         return [{"id": u.get("accountId"), "name": u.get("displayName"), "email": u.get("emailAddress")} for u in users]
 
     def get_issue_link_types(self) -> List[str]:
