@@ -219,7 +219,7 @@ class JiraCloudAdapter(JiraAdapter):
                 return candidate_id or candidate_key or None
         return None
 
-    def get_issue_types(self, project_id: str) -> List[Dict[str, Any]]:
+    def get_issue_types(self, project_id: str) -> Dict[str, Any]:
         # Use project metadata endpoint instead of deprecated createmeta
         response = self._request("GET", f"/rest/api/3/project/{project_id}")
         if response.status_code == 404:
@@ -233,8 +233,19 @@ class JiraCloudAdapter(JiraAdapter):
         data = response.json()
         issue_types = data.get("issueTypes", [])
         
-        # Standardize for frontend (ensure id and name are present)
-        return [{"id": str(t["id"]), "name": t["name"]} for t in issue_types]
+        return {
+            "project_id": str(data.get("id")),
+            "project_key": str(data.get("key")),
+            "issue_types": [
+                {
+                    "id": str(t["id"]), 
+                    "name": t.get("name"),
+                    "icon_url": t.get("iconUrl") or t.get("icon_url"),
+                    "subtask": bool(t.get("subtask", False))
+                } 
+                for t in issue_types
+            ]
+        }
 
     def get_issue_context(self, issue_key: str) -> Dict[str, Any]:
         response = self._request("GET", f"/rest/api/3/issue/{issue_key}?fields=project,issuetype")

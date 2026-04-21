@@ -203,6 +203,7 @@ def resolve_jira_bootstrap_context(
     canonical_project_key = issue_context.get("project_key") or req.project_key
     canonical_issue_type_id = req.issue_type_id or issue_context.get("issue_type_id")
 
+    project_context: Optional[dict] = None
     issue_types_raw: list[dict] = []
     selected_issue_type_raw: Optional[dict] = None
     visible_fields: list[str] = []
@@ -220,30 +221,57 @@ def resolve_jira_bootstrap_context(
         if candidate and str(candidate) not in project_candidates:
             project_candidates.append(str(candidate))
 
-    if project_candidates:
-        last_project_error: Optional[HTTPException] = None
-        resolved_issue_type_project_ref: Optional[str] = None
-        for project_candidate in project_candidates:
-            try:
-                issue_types_raw = engine.get_project_metadata(project_candidate)
-                resolved_issue_type_project_ref = project_candidate
-                break
-            except HTTPException as exc:
-                last_project_error = exc
-                continue
+    # Phase 1: Resolve Project & Issue Types
+    last_project_error: Optional[HTTPException] = None
+    for project_candidate in project_candidates:
+        try:
+            project_context = engine.get_project_metadata(project_candidate)
+            issue_types_raw = project_context.get("issue_types", [])
+            canonical_project_id = project_context.get("project_id")
+            canonical_project_key = project_context.get("project_key")
+            break
+        except HTTPException as exc:
+            last_project_error = exc
+            continue
 
-        if not issue_types_raw and last_project_error:
-            raise last_project_error
+    # Fallback Case: No candidate worked or no candidate provided
+    if not issue_types_raw:
+        try:
+            projects = adapter.get_projects()
+            if projects:
+                # Default to the first available project to bootstrap the UI
+                default_project = projects[0]
+                p_ref = str(default_project.get("id") or default_project.get("key"))
+                project_context = engine.get_project_metadata(p_ref)
+                issue_types_raw = project_context.get("issue_types", [])
+                canonical_project_id = project_context.get("project_id")
+                canonical_project_key = project_context.get("project_key")
+        except HTTPException:
+            pass
 
+    if not issue_types_raw and last_project_error:
+        raise last_project_error
+
+    # Phase 2: Resolve Fields & Metadata
+    if issue_types_raw:
         selected_issue_type_raw = _select_issue_type(issue_types_raw, canonical_issue_type_id)
 
         if selected_issue_type_raw:
             selected_issue_type_id = str(selected_issue_type_raw.get("id", ""))
+            
+            # Fetch Field Schema using the most specific project reference available
+            # (Prefers numeric ID if captured to avoid 404s on certain Cloud configurations)
+            field_resolution_ref = canonical_project_id or canonical_project_key
+            try:
+                metadata_fields = engine.get_field_schema(field_resolution_ref, selected_issue_type_id)
+            except HTTPException:
+                metadata_fields = []
+
             mapping = db.query(JiraFieldMapping).filter(
                 JiraFieldMapping.user_id == current_user.id,
                 or_(
-                    JiraFieldMapping.project_key == (canonical_project_key or resolved_issue_type_project_ref),
-                    JiraFieldMapping.project_id == canonical_project_id,
+                    JiraFieldMapping.project_key == canonical_project_key,
+                    JiraFieldMapping.project_id == (canonical_project_id if str(canonical_project_id).isdigit() else None),
                 ),
                 JiraFieldMapping.issue_type_id == selected_issue_type_id
             ).first()
@@ -251,22 +279,11 @@ def resolve_jira_bootstrap_context(
             ai_mapping = mapping.field_mappings if mapping else {}
             field_defaults = mapping.field_defaults if mapping else {}
 
-            for project_candidate in project_candidates:
-                try:
-                    metadata_fields = engine.get_field_schema(project_candidate, selected_issue_type_id)
-                    if str(project_candidate).isdigit():
-                        canonical_project_id = canonical_project_id or project_candidate
-                    else:
-                        canonical_project_key = canonical_project_key or project_candidate
-                    break
-                except HTTPException:
-                    continue
-
     metadata_response: Optional[JiraMetadataResponse] = None
     if canonical_project_id or canonical_project_key:
         metadata_response = JiraMetadataResponse(
             project_key=canonical_project_key or str(canonical_project_id),
-            project_id=canonical_project_id or canonical_project_key,
+            project_id=canonical_project_id,
             issue_type_id=str(selected_issue_type_raw.get("id", "")) if selected_issue_type_raw else canonical_issue_type_id,
             fields=[JiraFieldResponse(**field) for field in metadata_fields]
         )
