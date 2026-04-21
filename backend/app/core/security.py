@@ -28,7 +28,7 @@ _secret_placeholders = [
 if not settings.SECRET_KEY or settings.SECRET_KEY in _secret_placeholders:
     raise ValueError("CRITICAL: SECRET_KEY is missing or using a placeholder value in .env. Please set a secure application secret.")
 
-ALGORITHM = "HS256"
+ALGORITHM = settings.ALGORITHM
 
 def _build_token_payload(
     subject: Union[str, Any],

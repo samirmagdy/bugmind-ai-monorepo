@@ -16,7 +16,8 @@ class Settings(BaseSettings):
     JWT_ISSUER: str = "bugmind-api"
     JWT_AUDIENCE: str = "bugmind-clients"
     DATABASE_URL: str = ""
-    REDIS_URL: str = "redis://localhost:6379/0"
+    ALGORITHM: str = "HS256"
+    FRONTEND_URL: str = "http://localhost:3000"
     CORS_ORIGINS: str = ""
     ALLOWED_HOSTS: str = ""
     ALLOW_INSECURE_JIRA_SSL: bool = False
@@ -64,10 +65,15 @@ class Settings(BaseSettings):
 
     @property
     def cors_origins_list(self) -> list[str]:
+        origins = []
+        if self.FRONTEND_URL:
+            origins.append(self.FRONTEND_URL.strip().rstrip("/"))
+            
         raw = (self.CORS_ORIGINS or "").strip()
-        if not raw:
-            return []
-        return [origin.strip() for origin in raw.split(",") if origin.strip()]
+        if raw:
+            origins.extend([origin.strip().rstrip("/") for origin in raw.split(",") if origin.strip()])
+            
+        return list(set(origins))  # Unique origins only
 
     @property
     def allowed_hosts_list(self) -> list[str]:
