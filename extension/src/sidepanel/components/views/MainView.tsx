@@ -71,7 +71,10 @@ const MainView: React.FC = () => {
         xrayFolderPath: session.xrayFolderPath || defaults.folder_path || session.issueData?.key || '',
         xrayTestIssueTypeName: session.xrayTestIssueTypeName || defaults.test_issue_type_name || 'Test',
         xrayLinkType: session.xrayLinkType || defaults.link_type || 'Tests',
-        xrayRepositoryPathFieldId: session.xrayRepositoryPathFieldId || defaults.repository_path_field_id || ''
+        xrayRepositoryPathFieldId: session.xrayRepositoryPathFieldId || defaults.repository_path_field_id || '',
+        xrayPublishSupported: defaults.publish_supported ?? true,
+        xrayPublishMode: defaults.publish_mode || 'jira_server',
+        xrayUnsupportedReason: defaults.unsupported_reason || null
       });
     });
 
@@ -478,9 +481,15 @@ const MainView: React.FC = () => {
               </div>
             )}
 
+            {!session.xrayPublishSupported && session.xrayUnsupportedReason && (
+              <div className="rounded-2xl border border-[var(--status-danger)]/20 bg-[var(--status-danger)]/5 p-4 text-[11px] text-[var(--text-main)]">
+                {session.xrayUnsupportedReason}
+              </div>
+            )}
+
             <button
               onClick={publishTestCasesToXray}
-              disabled={!session.xrayTargetProjectId || session.testCases.length === 0 || session.loading}
+              disabled={!session.xrayTargetProjectId || session.testCases.length === 0 || session.loading || !session.xrayPublishSupported}
               className="w-full bg-[var(--status-info)] hover:bg-[var(--status-info)]/90 text-white font-black py-4 rounded-[1.3rem] transition-all shadow-xl shadow-[var(--status-info)]/20 flex items-center justify-center gap-3 disabled:opacity-50"
             >
               <Send size={16} />

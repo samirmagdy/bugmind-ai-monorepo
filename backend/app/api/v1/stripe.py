@@ -25,18 +25,25 @@ async def stripe_webhook(request: Request, db: Session = Depends(deps.get_db)):
     except stripe.error.SignatureVerificationError as e:
         raise HTTPException(status_code=400, detail="Invalid signature")
 
-    if event['type'] == 'checkout.session.completed':
-        session = event['data']['object']
-        stripe_service.handle_checkout_session(session, db)
-    elif event['type'] == 'customer.subscription.deleted':
-        subscription = event['data']['object']
-        stripe_service.handle_subscription_deleted(subscription['id'], db)
+    event_type = event['type']
+    event_object = event['data']['object']
+
+    if event_type == 'checkout.session.completed':
+        stripe_service.handle_checkout_session(event_object, db)
+    elif event_type == 'customer.subscription.updated':
+        stripe_service.handle_subscription_updated(event_object, db)
+    elif event_type == 'customer.subscription.deleted':
+        stripe_service.handle_subscription_deleted(event_object['id'], db)
+    elif event_type == 'invoice.paid':
+        stripe_service.handle_invoice_paid(event_object, db)
+    elif event_type == 'invoice.payment_failed':
+        stripe_service.handle_invoice_payment_failed(event_object, db)
 
     log_audit(
         "stripe.webhook_event",
         user_id=None,
         db=db,
-        event_type=event['type'],
+        event_type=event_type,
         event_id=event.get('id'),
     )
     return {"status": "success"}

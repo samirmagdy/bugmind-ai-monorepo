@@ -2,6 +2,7 @@ import httpx
 import base64
 import re
 import logging
+import html
 from typing import Dict, Any, List, Optional, Sequence, Tuple
 from fastapi import HTTPException
 from app.services.jira.adapters.base import JiraAdapter
@@ -424,12 +425,14 @@ class JiraCloudAdapter(JiraAdapter):
                 or user.get("key")
                 or user.get("name")
             )
+            html_display_name = user.get("displayNameHtml") or user.get("html")
             display_name = (
                 user.get("displayName")
                 or user.get("name")
-                or user.get("displayNameHtml")
-                or user.get("html")
+                or (re.sub(r"<[^>]+>", "", html_display_name) if isinstance(html_display_name, str) else None)
             )
+            if isinstance(display_name, str):
+                display_name = html.unescape(display_name).strip()
             if not account_id or not display_name:
                 continue
 

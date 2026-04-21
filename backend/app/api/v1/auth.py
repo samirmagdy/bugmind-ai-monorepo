@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.api import deps
-from app.schemas.token import Token, RefreshTokenRequest, AuthBootstrapRequest, AuthBootstrapResponse
+from app.schemas.token import Token, RefreshTokenRequest, AuthBootstrapRequest, AuthBootstrapResponse, AuthBootstrapError
 from app.schemas.user import UserCreate, UserResponse
 from app.models.user import User
 from app.models.auth import RefreshSession
@@ -135,9 +135,10 @@ def bootstrap_authenticated_session(
     ).count() > 0
 
     if not has_connections:
-        return AuthBootstrapResponse(view="setup", has_connections=False, bootstrap_context=None)
+        return AuthBootstrapResponse(view="setup", has_connections=False, bootstrap_context=None, bootstrap_error=None)
 
     bootstrap_context = None
+    bootstrap_error = None
     if request.instance_url:
         try:
             bootstrap_context = resolve_jira_bootstrap_context(
@@ -152,12 +153,17 @@ def bootstrap_authenticated_session(
                 current_user,
                 http_request,
             )
-        except HTTPException:
+        except HTTPException as exc:
             bootstrap_context = None
+            bootstrap_error = AuthBootstrapError(
+                code="JIRA_BOOTSTRAP_FAILED",
+                message=str(exc.detail) if exc.detail else "Failed to resolve Jira bootstrap context",
+            )
 
     log_audit("auth.bootstrap", current_user.id, db=db, request_path=str(http_request.url.path), view="main")
     return AuthBootstrapResponse(
         view="main",
         has_connections=True,
         bootstrap_context=bootstrap_context,
+        bootstrap_error=bootstrap_error,
     )

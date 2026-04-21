@@ -97,6 +97,13 @@ export function translateError(error: unknown, context?: string): TranslatedErro
     };
   }
 
+  if (message.includes('Xray Cloud publishing is not enabled') || message.includes('Xray publishing is not available')) {
+    return {
+      title: 'Xray Publish Unsupported',
+      description: message
+    };
+  }
+
   if (message.includes('base_url')) {
     return {
       title: 'Invalid Jira URL',

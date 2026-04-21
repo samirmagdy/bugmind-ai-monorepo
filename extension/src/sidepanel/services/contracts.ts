@@ -30,8 +30,8 @@ export interface RegisterRequestPayload {
 }
 
 export interface AISettingsUpdateRequestPayload {
-  custom_model: string;
-  openrouter_key: string;
+  custom_model?: string;
+  openrouter_key?: string;
 }
 
 export interface AuthRefreshRequestPayload {
@@ -100,6 +100,7 @@ export interface XrayPublishRequestPayload {
   xray_project_id: string;
   xray_project_key: string | null;
   test_cases: TestCase[];
+  test_issue_type_id?: string;
   test_issue_type_name: string;
   repository_path_field_id?: string;
   folder_path?: string;
@@ -122,6 +123,10 @@ export interface AuthBootstrapResponsePayload {
   view: 'main' | 'setup';
   has_connections: boolean;
   bootstrap_context: JiraBootstrapContext | null;
+  bootstrap_error?: {
+    code: string;
+    message: string;
+  } | null;
 }
 
 export interface AIGenerationResponsePayload {

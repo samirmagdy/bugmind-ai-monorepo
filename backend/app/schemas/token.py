@@ -25,7 +25,13 @@ class AuthBootstrapRequest(BaseModel):
     issue_type_id: Optional[str] = None
 
 
+class AuthBootstrapError(BaseModel):
+    code: str
+    message: str
+
+
 class AuthBootstrapResponse(BaseModel):
     view: Literal["main", "setup"]
     has_connections: bool
     bootstrap_context: Optional[JiraBootstrapContextResponse] = None
+    bootstrap_error: Optional[AuthBootstrapError] = None

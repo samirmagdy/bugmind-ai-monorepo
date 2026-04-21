@@ -122,6 +122,9 @@ export interface TabSession {
   xrayFolderPath: string;
   xrayLinkType: string;
   xrayWarnings: string[];
+  xrayPublishSupported: boolean;
+  xrayPublishMode: 'jira_server' | 'xray_cloud';
+  xrayUnsupportedReason: string | null;
   previewBugIndex: number | null;
   validationErrors: string[];
   resolvedPayload: ResolvedPayload | null;
@@ -174,6 +177,9 @@ export interface XrayDefaultsResponse {
   repository_path_field_id?: string | null;
   folder_path: string;
   link_type: string;
+  publish_supported: boolean;
+  publish_mode: 'jira_server' | 'xray_cloud';
+  unsupported_reason?: string | null;
 }
 
 export interface IssueType {
@@ -232,6 +238,9 @@ export const INITIAL_SESSION: TabSession = {
   xrayFolderPath: '',
   xrayLinkType: 'Tests',
   xrayWarnings: [],
+  xrayPublishSupported: true,
+  xrayPublishMode: 'jira_server',
+  xrayUnsupportedReason: null,
   previewBugIndex: null,
   validationErrors: [],
   resolvedPayload: null

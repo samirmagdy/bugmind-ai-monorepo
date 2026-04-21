@@ -165,17 +165,20 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
       throw new Error(await response.text() || `Auth bootstrap failed (${response.status})`);
     }
 
-    const data = await readJsonResponse<AuthBootstrapResponsePayload>(response);
-    if (data.bootstrap_context) {
-      jira.applyBootstrapContext(
-        data.bootstrap_context,
-        currentTabId || undefined,
-        Boolean(currentContext?.issueData?.key || currentContext?.issueData?.projectId)
-      );
-      logDebug('AUTH-BOOT-OK', `Resolved landing view ${data.view.toUpperCase()} with Jira bootstrap.`);
-    } else {
-      logDebug('AUTH-BOOT-OK', `Resolved landing view ${data.view.toUpperCase()} without Jira bootstrap payload.`);
-    }
+      const data = await readJsonResponse<AuthBootstrapResponsePayload>(response);
+      if (data.bootstrap_context) {
+        jira.applyBootstrapContext(
+          data.bootstrap_context,
+          currentTabId || undefined,
+          Boolean(currentContext?.issueData?.key || currentContext?.issueData?.projectId)
+        );
+        logDebug('AUTH-BOOT-OK', `Resolved landing view ${data.view.toUpperCase()} with Jira bootstrap.`);
+      } else {
+        if (data.bootstrap_error?.message) {
+          logDebug('AUTH-BOOT-WARN', data.bootstrap_error.message);
+        }
+        logDebug('AUTH-BOOT-OK', `Resolved landing view ${data.view.toUpperCase()} without Jira bootstrap payload.`);
+      }
 
     return data.view;
   }, [auth.apiBase, currentTabId, fetchCurrentContext, jira, logDebug, session.selectedIssueType?.id, updateSession, withTimeout]);
@@ -453,10 +456,13 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
       saveSettingsInFlightRef.current = true;
       sessionData.updateSession({ loading: true, error: null, success: null });
       try {
-        const payload: AISettingsUpdateRequestPayload = {
-          custom_model: ai.customModel,
-          openrouter_key: ai.customKey
-        };
+        const payload: AISettingsUpdateRequestPayload = {};
+        if (ai.customModel.trim()) {
+          payload.custom_model = ai.customModel.trim();
+        }
+        if (ai.customKey.trim()) {
+          payload.openrouter_key = ai.customKey.trim();
+        }
         const res = await apiRequest(`${auth.apiBase}/settings/ai`, {
           method: 'POST', token: auth.authToken, onUnauthorized: auth.refreshSession,
           body: JSON.stringify(payload)

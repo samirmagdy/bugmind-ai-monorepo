@@ -471,6 +471,12 @@ def get_xray_defaults(
         for project in projects
     ]
 
+    publish_supported = conn.auth_type != JiraAuthType.CLOUD
+    publish_mode = "xray_cloud" if conn.auth_type == JiraAuthType.CLOUD else "jira_server"
+    unsupported_reason = None
+    if conn.auth_type == JiraAuthType.CLOUD:
+        unsupported_reason = "Xray Cloud publishing is not enabled in this build. Use Jira Server/DC for Jira-native Xray publishing, or add a dedicated Xray Cloud external API implementation."
+
     return XrayDefaultsResponse(
         projects=projects_response,
         target_project_id=str(default_project.get("id")) if default_project else None,
@@ -479,6 +485,9 @@ def get_xray_defaults(
         repository_path_field_id=None,
         folder_path=(story_issue_key or "").strip(),
         link_type="Tests",
+        publish_supported=publish_supported,
+        publish_mode=publish_mode,
+        unsupported_reason=unsupported_reason,
     )
 
 @router.post("/users/search")

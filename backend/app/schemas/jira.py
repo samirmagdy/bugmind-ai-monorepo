@@ -94,3 +94,6 @@ class XrayDefaultsResponse(BaseModel):
     repository_path_field_id: Optional[str] = None
     folder_path: str = ""
     link_type: str = "Tests"
+    publish_supported: bool = True
+    publish_mode: str = "jira_server"
+    unsupported_reason: Optional[str] = None

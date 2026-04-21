@@ -300,6 +300,10 @@ export const AIProvider: React.FC<{
   const publishTestCasesToXray = useCallback(async () => {
     if (publishXrayInFlightRef.current) return;
     if (!currentTabId || !session.issueData || !session.jiraConnectionId || !session.testCases.length) return;
+    if (!session.xrayPublishSupported) {
+      updateSession({ error: session.xrayUnsupportedReason || 'Xray publishing is not available for this Jira connection.' }, currentTabId);
+      return;
+    }
     if (!session.xrayTargetProjectId) {
       updateSession({ error: 'Please choose an Xray target project before publishing.' }, currentTabId);
       return;
@@ -315,6 +319,7 @@ export const AIProvider: React.FC<{
         xray_project_id: session.xrayTargetProjectId,
         xray_project_key: session.xrayTargetProjectKey,
         test_cases: session.testCases,
+        test_issue_type_id: undefined,
         test_issue_type_name: session.xrayTestIssueTypeName || 'Test',
         repository_path_field_id: session.xrayRepositoryPathFieldId || undefined,
         folder_path: session.xrayFolderPath || session.issueData.key,
@@ -343,7 +348,7 @@ export const AIProvider: React.FC<{
       publishXrayInFlightRef.current = false;
       updateSession({ loading: false }, currentTabId);
     }
-  }, [apiBase, authToken, currentTabId, refreshAuthToken, session.issueData, session.jiraConnectionId, session.testCases, session.xrayFolderPath, session.xrayLinkType, session.xrayRepositoryPathFieldId, session.xrayTargetProjectId, session.xrayTargetProjectKey, session.xrayTestIssueTypeName, updateSession]);
+  }, [apiBase, authToken, currentTabId, refreshAuthToken, session.issueData, session.jiraConnectionId, session.testCases, session.xrayFolderPath, session.xrayLinkType, session.xrayPublishSupported, session.xrayRepositoryPathFieldId, session.xrayTargetProjectId, session.xrayTargetProjectKey, session.xrayTestIssueTypeName, session.xrayUnsupportedReason, updateSession]);
 
   const handleManualGenerate = useCallback(async () => {
     if (manualGenerateInFlightRef.current) return;
