@@ -213,9 +213,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (tabContextCache[tabId] && !force) {
       sendResponse(tabContextCache[tabId]);
     } else {
-      refreshTabContext(tabId, undefined, Boolean(force)).then((context) => {
-        sendResponse(context || tabContextCache[tabId] || { error: 'STALE_PAGE' });
-      });
+      refreshTabContext(tabId, undefined, Boolean(force))
+        .then((context) => {
+          sendResponse(context || tabContextCache[tabId] || { error: 'STALE_PAGE' });
+        })
+        .catch((err) => {
+          console.error('[BugMind-BG] Message handler crash:', err);
+          sendResponse({ error: 'WORKER_INTERNAL_ERROR' });
+        });
     }
     return true; // Keep channel open for async response
   }

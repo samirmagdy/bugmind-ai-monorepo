@@ -53,6 +53,7 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
   const selectedIssueTypeIdRef = useRef<string | undefined>(undefined);
   const hydratedTabRef = useRef<number | null>(null);
   const lastBootstrapSignatureRef = useRef<string>('');
+  const inFlightBootstrapRef = useRef<boolean>(false);
   const lastContextMessageSignatureRef = useRef<string>('');
   const staleRecoveryAttemptedRef = useRef<number | null>(null);
   const loginInFlightRef = useRef(false);
@@ -89,12 +90,14 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
       issueTypeId: selectedIssueTypeIdRef.current || null
     });
 
-    if (lastBootstrapSignatureRef.current === signature) {
+    if (lastBootstrapSignatureRef.current === signature || inFlightBootstrapRef.current) {
       return null;
     }
+    
+    inFlightBootstrapRef.current = true;
     lastBootstrapSignatureRef.current = signature;
 
-    logDebug('SYNC-CONN-CONTEXT', `Bootstrapping Jira context for ${context.instanceUrl}`);
+    logDebug('JIRA-BOOT', `Triggering background bootstrap for ${context.instanceUrl}`);
     return jira.bootstrapContext({
       instanceUrl: context.instanceUrl,
       issueKey: context.issueData?.key,
@@ -103,6 +106,8 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
       issueTypeId: selectedIssueTypeIdRef.current,
       tabId: tabId || currentTabId || undefined,
       tokenOverride
+    }).finally(() => {
+      inFlightBootstrapRef.current = false;
     });
   }, [auth.authToken, currentTabId, jira, logDebug]);
 
