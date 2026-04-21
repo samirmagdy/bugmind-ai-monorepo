@@ -240,32 +240,52 @@ class JiraCloudAdapter(JiraAdapter):
         # Use the official Jira Cloud v3 createmeta endpoint with query filters
         # Note: The path-based version is for Server/DC only.
         url = "/rest/api/3/issue/createmeta"
-        params = {
-            "projectIds": project_id,
+        param_sets = []
+        project_ref = str(project_id).strip()
+        base_params = {
             "issueTypeIds": issue_type_id,
             "expand": "projects.issuetypes.fields"
         }
-        
-        try:
-            response = self.client.get(url, params=params)
-        except httpx.TimeoutException:
-            logger.error("jira_cloud_get_fields_timeout", extra={"project": project_id})
-            raise HTTPException(status_code=504, detail="Jira metadata request timed out. High project complexity detected.")
-        except httpx.HTTPError as exc:
-            logger.error("jira_cloud_get_fields_network_error", extra={"error": str(exc), "project": project_id})
-            raise HTTPException(status_code=502, detail=f"Failed to connect to Jira: {str(exc)}")
 
-        if response.status_code != 200:
-            logger.error("jira_cloud_get_fields_failed", extra={
-                "status": response.status_code,
-                "project": project_id,
-                "type": issue_type_id,
-                "response": response.text[:200]
-            })
-            raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to fetch Jira field metadata"))
+        if project_ref.isdigit():
+            param_sets.append({**base_params, "projectIds": project_ref})
+        else:
+            param_sets.append({**base_params, "projectKeys": project_ref})
+            resolved_project_ref = self._resolve_project_ref(project_ref)
+            if resolved_project_ref and str(resolved_project_ref) != project_ref:
+                param_sets.append({**base_params, "projectIds": str(resolved_project_ref)})
 
-        data = response.json()
-        return self._normalize_fields_payload(data)
+        last_error_response: Optional[httpx.Response] = None
+        for params in param_sets:
+            try:
+                response = self.client.get(url, params=params)
+            except httpx.TimeoutException:
+                logger.error("jira_cloud_get_fields_timeout", extra={"project": project_id})
+                raise HTTPException(status_code=504, detail="Jira metadata request timed out. High project complexity detected.")
+            except httpx.HTTPError as exc:
+                logger.error("jira_cloud_get_fields_network_error", extra={"error": str(exc), "project": project_id})
+                raise HTTPException(status_code=502, detail=f"Failed to connect to Jira: {str(exc)}")
+
+            if response.status_code == 200:
+                data = response.json()
+                return self._normalize_fields_payload(data)
+
+            last_error_response = response
+            logger.info(
+                "jira_cloud_get_fields_fallback",
+                extra={"status": response.status_code, "project": project_id, "params": params},
+            )
+
+        logger.error("jira_cloud_get_fields_failed", extra={
+            "status": last_error_response.status_code if last_error_response is not None else "unknown",
+            "project": project_id,
+            "type": issue_type_id,
+            "response": last_error_response.text[:200] if last_error_response is not None else "",
+        })
+        raise HTTPException(
+            status_code=400,
+            detail=self._extract_error_message(last_error_response, "Failed to fetch Jira field metadata") if last_error_response is not None else "Failed to fetch Jira field metadata",
+        )
 
 
 
