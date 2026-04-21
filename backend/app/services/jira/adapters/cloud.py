@@ -219,23 +219,20 @@ class JiraCloudAdapter(JiraAdapter):
         return [{"id": str(t["id"]), "name": t["name"]} for t in issue_types]
 
     def get_fields(self, project_id: str, issue_type_id: str) -> List[Dict[str, Any]]:
-        # Use the replacement for the deprecated createmeta endpoint
-        # Primary: Target nested metadata (Performance optimized)
-        # Note: Atlassian removed the global /createmeta endpoint in 2021.
-        url = f"/rest/api/3/issue/createmeta/{project_id}/issuetypes/{issue_type_id}"
+        # Use the official Jira Cloud v3 createmeta endpoint with query filters
+        # Note: The path-based version is for Server/DC only.
+        url = "/rest/api/3/issue/createmeta"
+        params = {
+            "projectIds": project_id,
+            "issueTypeIds": issue_type_id,
+            "expand": "projects.issuetypes.fields"
+        }
+        
         try:
-            response = self.client.get(url)
+            response = self.client.get(url, params=params)
         except httpx.HTTPError as exc:
             logger.error("jira_cloud_get_fields_network_error", extra={"error": str(exc), "project": project_id})
             raise HTTPException(status_code=502, detail=f"Failed to connect to Jira: {str(exc)}")
-
-        if response.status_code == 404:
-            logger.warning("jira_cloud_get_fields_404", extra={"project": project_id, "type": issue_type_id})
-            # Often caused by invalid IDs or missing permissions for that specific project/type
-            raise HTTPException(
-                status_code=404, 
-                detail=f"Jira metadata not found for project '{project_id}' and issue type '{issue_type_id}'. Ensure the IDs are correct and your account has 'Browse Project' and 'Create Issue' permissions."
-            )
 
         if response.status_code != 200:
             logger.error("jira_cloud_get_fields_failed", extra={
@@ -248,6 +245,7 @@ class JiraCloudAdapter(JiraAdapter):
 
         data = response.json()
         return self._normalize_fields_payload(data)
+
 
 
     def create_issue(self, issue_data: Dict[str, Any]) -> str:
