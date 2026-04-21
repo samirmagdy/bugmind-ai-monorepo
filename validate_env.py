@@ -86,10 +86,13 @@ def main():
     # Check database connection if not SQLite
     print("--- Database Check ---")
     if not settings.DATABASE_URL.startswith("sqlite"):
+        db_url_lower = settings.DATABASE_URL.lower()
         print("Note: Using PostgreSQL database")
-        if "supabase" in settings.DATABASE_URL.lower():
+        if "supabase" in db_url_lower:
             print("✓ Using Supabase database")
-        elif "localhost" in settings.DATABASE_URL or "127.0.0.1" in settings.DATABASE_URL:
+        elif "render.com" in db_url_lower:
+            print("✓ Using Render managed database")
+        elif "localhost" in db_url_lower or "127.0.0.1" in db_url_lower:
             print("⚠ Using local database - ensure PostgreSQL is running")
         else:
             print("✓ Using remote database")

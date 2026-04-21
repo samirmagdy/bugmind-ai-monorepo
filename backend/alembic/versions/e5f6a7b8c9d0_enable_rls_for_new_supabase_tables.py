@@ -29,9 +29,16 @@ def _policy_name(table_name: str, role_name: str) -> str:
     return f"{table_name}_{role_name}_deny_all"
 
 
+from sqlalchemy import text
+
 def upgrade() -> None:
     bind = op.get_bind()
     if bind.dialect.name != "postgresql":
+        return
+
+    # Only run on Supabase instances (checked by presence of specific roles)
+    roles_check = bind.execute(text("SELECT 1 FROM pg_roles WHERE rolname IN ('anon', 'authenticated')")).fetchall()
+    if not roles_check:
         return
 
     for table_name in TABLES:
@@ -56,6 +63,11 @@ def upgrade() -> None:
 def downgrade() -> None:
     bind = op.get_bind()
     if bind.dialect.name != "postgresql":
+        return
+
+    # Only run on Supabase instances (checked by presence of specific roles)
+    roles_check = bind.execute(text("SELECT 1 FROM pg_roles WHERE rolname IN ('anon', 'authenticated')")).fetchall()
+    if not roles_check:
         return
 
     for table_name in TABLES:

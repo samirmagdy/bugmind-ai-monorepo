@@ -28,10 +28,18 @@ TABLES = (
 )
 
 
+from sqlalchemy import text
+
 def upgrade() -> None:
     bind = op.get_bind()
     if bind.dialect.name != "postgresql":
         return
+    
+    # Only run on Supabase instances (checked by presence of specific roles)
+    roles_check = bind.execute(text("SELECT 1 FROM pg_roles WHERE rolname IN ('anon', 'authenticated')")).fetchall()
+    if not roles_check:
+        return
+
     for table_name in TABLES:
         op.execute(f'ALTER TABLE "{table_name}" ENABLE ROW LEVEL SECURITY')
 
@@ -40,5 +48,11 @@ def downgrade() -> None:
     bind = op.get_bind()
     if bind.dialect.name != "postgresql":
         return
+    
+    # Only run on Supabase instances (checked by presence of specific roles)
+    roles_check = bind.execute(text("SELECT 1 FROM pg_roles WHERE rolname IN ('anon', 'authenticated')")).fetchall()
+    if not roles_check:
+        return
+
     for table_name in TABLES:
         op.execute(f'ALTER TABLE "{table_name}" DISABLE ROW LEVEL SECURITY')

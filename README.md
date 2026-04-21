@@ -37,6 +37,7 @@ This repo now includes a Render Blueprint at [render.yaml](/Users/samirmagdy/JBG
 
 What it provisions:
 - one Python web service for FastAPI
+- one managed PostgreSQL database
 
 How to deploy:
 1. Push the repo to GitHub/GitLab.
@@ -44,8 +45,8 @@ How to deploy:
 3. Select this repository.
 4. Render will detect `render.yaml` and propose:
    - `bugmind-backend`
-5. Fill in the prompted secret env vars:
-   - `DATABASE_URL`
+   - `bugmind-db`
+5. Fill in the prompted secret env vars (the `DATABASE_URL` is automatically linked):
    - `ENVIRONMENT`
    - `LOG_LEVEL`
    - `SECRET_KEY`
@@ -69,9 +70,8 @@ Deployment behavior:
 - the free-tier setup does not provision Redis; Redis-backed rate limiting, idempotency replay, and metadata caching degrade gracefully
 
 Important:
-- Alembic is now configured to use `DATABASE_URL` from the environment, which is required for Render Postgres.
-- The current deployment blueprint expects an external Postgres database URL, such as Supabase Postgres.
-- For Supabase Postgres, use `?sslmode=require` in `DATABASE_URL`.
+- Alembic is now configured to use `DATABASE_URL` from the environment, provided automatically by the Render Blueprint.
+- The system now uses Render's managed Postgres, simplifying connectivity and security.
 - `/health` verifies database connectivity and is suitable for Render health checks.
 - In production, set `CORS_ORIGINS` to your real extension/web origins and `ALLOWED_HOSTS` to your Render hostname(s).
 - The free Render blueprint sets `REDIS_URL=redis://localhost:6379/0` and `RATE_LIMITS_ENABLED=false` so the app can run without a paid Redis service.

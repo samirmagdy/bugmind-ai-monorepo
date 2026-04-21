@@ -43,11 +43,11 @@ The deployment was failing because:
 
 1. Go to https://dashboard.render.com/
 2. Navigate to your service → **Environment** tab
-3. Add/Verify these variables:
+3. The `DATABASE_URL` is automatically provided by the linked **bugmind-db** resource.
+4. Verify/Add these other variables:
 
 | Variable | Value | Notes |
 |----------|-------|-------|
-| `DATABASE_URL` | `postgresql://postgres:<password>@db.<project-ref>.supabase.co:5432/postgres?sslmode=require` | From your Supabase dashboard |
 | `SECRET_KEY` | 64+ character random string | `openssl rand -hex 64` |
 | `ENCRYPTION_KEY` | 32 byte base64 string | `openssl rand -base64 32` |
 | `OPENROUTER_API_KEY` | Your OpenRouter API key | Required for AI features |
@@ -58,15 +58,17 @@ The deployment was failing because:
 
 ### Step 2: Commit and Push Changes
 
+The system now uses Render managed Postgres via Blueprint logic.
+
 ```bash
 git add .
-git commit -m "Fix deployment: update DATABASE_URL handling and env vars"
+git commit -m "Migrate to Render managed Postgres"
 git push origin main
 ```
 
 ### Step 3: Trigger New Deploy
 
-Render should auto-deploy. Alternatively:
+Render should auto-deploy after detected changes in `render.yaml`. Alternatively:
 1. Go to Render dashboard
 2. Click **Manual Deploy** → **Deploy latest commit**
 
@@ -80,12 +82,6 @@ Check logs for successful startup:
 # INFO:     Application startup complete.
 # INFO:     Uvicorn running on http://0.0.0.0:10000
 ```
-
-### Step 5: Add Supabase Database Security Group (if needed)
-
-If using Supabase:
-1. Go to Supabase dashboard → Security → IP Lists
-2. Add Render IPs or use `0.0.0.0/0` (less secure but works)
 
 ## Local Development
 
@@ -101,24 +97,17 @@ OPENROUTER_API_KEY=your-key
 ## Common Issues and Solutions
 
 ### "DATABASE_URL must be set in production"
-- **Fix**: Set DATABASE_URL in Render dashboard or ensure sync is enabled
-
-### "Network is unreachable" error
-- **Fix**: Ensure Supabase database allows connections from anywhere (or Render IPs)
-- **Check**: Supabase dashboard → Security → IP Lists → Add 0.0.0.0/0
+- **Fix**: Ensure the `bugmind-backend` service is correctly linked to the `bugmind-db` database in the Render dashboard. This should happen automatically via the `render.yaml` Blueprint.
 
 ### "psycopg.OperationalError connection to server failed"
-- **Fix**: Verify DATABASE_URL format:
-  ```
-  postgresql://<user>:<password>@<host>:5432/<dbname>?sslmode=require
-  ```
+- **Fix**: Verify that the managed database "bugmind-db" is active and healthy in your Render dashboard.
 
 ## Summary of Changes Made
 
 Files modified:
-1. `backend/start_render.sh` - Now loads parent .env, validates DB connection
-2. `backend/app/core/config.py` - Better DATABASE_URL validation and defaults
-3. `render.yaml` - Enabled sync for all environment variables
-4. `DEPLOYMENT_GUIDE.md` - This guide
+1. `render.yaml` - Added managed PostgreSQL resource and linked it to the backend.
+2. `backend/alembic/versions/*.py` - Hardened migrations to support non-Supabase Postgres.
+3. `validate_env.py` - Added support for identifying Render databases.
+4. `README.md` & `DEPLOYMENT_GUIDE.md` - Updated documentation.
 
-Next deployment should work without database connection errors.
+Next deployment will use a fully integrated Render Postgres database.

@@ -1,3 +1,9 @@
+databases:
+  - name: bugmind-db
+    plan: free
+    databaseName: bugmind
+    user: bugmind_admin
+
 services:
   - type: web
     name: bugmind-backend
@@ -12,7 +18,9 @@ services:
       - key: PYTHON_VERSION
         value: 3.14.3
       - key: DATABASE_URL
-        sync: true  # Changed from false to true
+        fromDatabase:
+          name: bugmind-db
+          property: connectionString
       - key: ENVIRONMENT
         value: production
       - key: LOG_LEVEL
