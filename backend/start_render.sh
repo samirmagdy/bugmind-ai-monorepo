@@ -9,10 +9,11 @@ fi
 # On Render, the DATABASE_URL is provided by the Blueprint
 # No manual override to SQLite is needed anymore.
 
-# If DATABASE_URL not set, use sqlite fallback for local development
+# DATABASE_URL is MANDATORY for all environments. Fail fast if it is missing.
 if [ -z "${DATABASE_URL:-}" ]; then
-    export DATABASE_URL="sqlite:///./bugmind.db"
-    echo "WARNING: DATABASE_URL not set, using SQLite fallback"
+    echo "ERROR: DATABASE_URL is not set. The application cannot start without a valid database connection."
+    echo "Current ENVIRONMENT: ${ENVIRONMENT:-development}"
+    exit 1
 fi
 
 exec uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-10000}"

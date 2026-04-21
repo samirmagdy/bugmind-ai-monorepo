@@ -50,14 +50,9 @@ class Settings(BaseSettings):
                 separator = "&" if "?" in v else "?"
                 v = f"{v}{separator}sslmode=require"
         
-        # Default to sqlite for local development if empty
+        # Raise error if DATABASE_URL is empty (all environments)
         if not v:
-            import os
-            env = os.getenv("ENVIRONMENT", "development")
-            if env.lower() == "development" or env.lower() == "test":
-                v = "sqlite:///./bugmind.db"
-            else:
-                raise ValueError("DATABASE_URL must be set when ENVIRONMENT is 'production' or handled via Blueprint.")
+            raise ValueError("DATABASE_URL is mandatory. Please provide a valid PostgreSQL connection string via environment variables.")
         return v
 
     @property
