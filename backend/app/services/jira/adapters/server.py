@@ -179,7 +179,7 @@ class JiraServerAdapter(JiraAdapter):
         if response.status_code not in [200, 201]:
             raise HTTPException(status_code=400, detail="Failed to link issues")
 
-    def search_users(self, query: str) -> List[Dict[str, Any]]:
+    def search_users(self, query: str, project_key: Optional[str] = None, project_id: Optional[str] = None) -> List[Dict[str, Any]]:
         response = self._request("GET", f"/rest/api/2/user/search?username={query}")
         if response.status_code != 200:
             raise HTTPException(status_code=400, detail="Failed to search users")

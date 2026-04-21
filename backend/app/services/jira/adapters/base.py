@@ -30,8 +30,8 @@ class JiraAdapter(ABC):
         pass
 
     @abstractmethod
-    def search_users(self, query: str) -> List[Dict[str, Any]]:
-        """Searches for users based on query string."""
+    def search_users(self, query: str, project_key: Optional[str] = None, project_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Searches for users based on query string, optionally scoped by project."""
         pass
 
     @abstractmethod

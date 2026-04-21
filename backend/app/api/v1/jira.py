@@ -430,7 +430,11 @@ def search_jira_users(
         raise HTTPException(status_code=404, detail="Connection not found")
 
     adapter = get_adapter(conn)
-    results = adapter.search_users(query)
+    results = adapter.search_users(
+        query,
+        project_key=request.project_key,
+        project_id=request.project_id
+    )
     log_audit(
         "jira.user_search",
         current_user.id,

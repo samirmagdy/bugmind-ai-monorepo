@@ -277,8 +277,15 @@ class JiraCloudAdapter(JiraAdapter):
         if response.status_code not in [200, 201]:
             raise HTTPException(status_code=400, detail="Failed to link issues")
 
-    def search_users(self, query: str) -> List[Dict[str, Any]]:
-        response = self._request("GET", f"/rest/api/3/user/search?query={query}")
+    def search_users(self, query: str, project_key: Optional[str] = None, project_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        # Use assignable search if project is known, which is more reliable for teammates.
+        if project_key or project_id:
+            project_param = project_key or project_id
+            url = f"/rest/api/3/user/assignable/search?query={query}&project={project_param}"
+        else:
+            url = f"/rest/api/3/user/search?query={query}"
+            
+        response = self._request("GET", url)
         if response.status_code != 200:
             raise HTTPException(status_code=400, detail="Failed to search users")
         
