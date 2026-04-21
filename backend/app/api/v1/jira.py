@@ -51,18 +51,25 @@ def get_adapter(connection: JiraConnection):
 
 
 def _normalize_instance_url(url: Optional[str]) -> str:
-    trimmed = (url or "").strip().rstrip("/")
+    trimmed = (url or "").strip().lower().rstrip("/")
     if not trimmed:
         return ""
 
+    if not (trimmed.startswith("http://") or trimmed.startswith("https://")):
+        trimmed = f"https://{trimmed}"
+
     try:
         parsed = urlparse(trimmed)
+        scheme = parsed.scheme or "https"
+        netloc = parsed.netloc
+        
         path = parsed.path.rstrip("/")
-        for marker in ("/browse/", "/issues/", "/projects/"):
+        for marker in ("/browse/", "/issues/", "/projects/", "/rest/"):
             if marker in path:
                 path = path.split(marker, 1)[0]
                 break
-        normalized = f"{parsed.scheme}://{parsed.netloc}{path}"
+        
+        normalized = f"{scheme}://{netloc}{path}"
         return normalized.rstrip("/")
     except Exception:
         return trimmed

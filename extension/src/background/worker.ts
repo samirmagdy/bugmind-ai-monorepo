@@ -39,8 +39,21 @@ interface ThemeChangedMessage {
   theme: 'light' | 'dark';
 }
 
-function isInjectableUrl(url: string): boolean {
-  return /^https?:\/\//i.test(url);
+function normalizeJiraUrl(url: string | null | undefined): string {
+  if (!url) return '';
+
+  const trimmed = url.trim().replace(/\/+$/, '');
+  if (!trimmed) return '';
+
+  try {
+    const parsed = new URL(trimmed);
+    const normalizedPath = parsed.pathname.replace(/\/+$/, '');
+    const issuePathMatch = normalizedPath.match(/^(.*?)(\/browse\/|\/issues\/|\/projects\/)/);
+    const basePath = issuePathMatch ? issuePathMatch[1] : normalizedPath;
+    return `${parsed.origin}${basePath}`.replace(/\/+$/, '');
+  } catch {
+    return trimmed;
+  }
 }
 
 // In-memory cache for active tab context
@@ -113,7 +126,7 @@ async function refreshTabContext(tabId: number, url?: string, force: boolean = f
   }
 
   if (!url) return null;
-  if (!isInjectableUrl(url)) return null;
+  if (!/^https?:\/\//i.test(url)) return null;
 
   const now = Date.now();
   const lastRefresh = tabLastRefreshAt.get(tabId) || 0;
@@ -143,7 +156,7 @@ async function refreshTabContext(tabId: number, url?: string, force: boolean = f
     const response = await chrome.tabs.sendMessage(tabId, { type: 'GET_ISSUE_DATA' });
     if (response?.type === 'ISSUE_DATA_SUCCESS') {
       const data = response.data;
-      const detectedInstance = url.split('/browse/')[0].split('/issues/')[0];
+      const detectedInstance = normalizeJiraUrl(url);
 
       const nextContext: TabContext = {
         issueData: data,

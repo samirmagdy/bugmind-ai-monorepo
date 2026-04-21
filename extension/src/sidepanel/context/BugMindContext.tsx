@@ -277,10 +277,12 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
     }
 
     if (isMain && hasContext) {
-      if (!session.jiraConnectionId) {
-        logDebug('SYNC-CONN', 'Connection ID missing. Discovering connection...');
+      const projectKey = session.issueData?.key?.split('-')[0];
+      const needsSync = !session.jiraConnectionId || !session.jiraMetadata || session.jiraMetadata.project_key !== projectKey;
+      
+      if (needsSync) {
+        logDebug('SYNC-CONN', 'Jira context sync triggered...');
         bootstrapCurrentContext(session, currentTabId);
-        return;
       }
     } else if (isMain) {
       const missing = [];
