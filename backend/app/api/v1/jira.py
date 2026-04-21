@@ -264,6 +264,19 @@ def resolve_jira_bootstrap_context(
                 except HTTPException:
                     continue
 
+            # Identity Backfill: If we found a mapping but it was missing an ID or Key,
+            # and we just resolved them, backfill the record to prevent future desync.
+            if mapping and (canonical_project_id or canonical_project_key):
+                updated = False
+                if not mapping.project_id and canonical_project_id:
+                    mapping.project_id = str(canonical_project_id)
+                    updated = True
+                if not mapping.project_key and canonical_project_key:
+                    mapping.project_key = str(canonical_project_key)
+                    updated = True
+                if updated:
+                    db.commit()
+
     metadata_response: Optional[JiraMetadataResponse] = None
     if canonical_project_id or canonical_project_key:
         metadata_response = JiraMetadataResponse(
