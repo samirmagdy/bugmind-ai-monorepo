@@ -13,18 +13,17 @@ class JiraMetadataEngine:
         self.redis = redis.Redis.from_url(settings.REDIS_URL, decode_responses=True)
         self.cache_ttl = 600 # 10 minutes
 
-    def _get_cached_json(self, cache_key: str) -> Optional[List[Dict[str, Any]]]:
+    def _get_cached_json(self, cache_key: str) -> Any:
         try:
             cached = self.redis.get(cache_key)
-        except RedisError:
-            return None
+            if cached:
+                return json.loads(cached)
+        except (RedisError, json.JSONDecodeError, TypeError):
+            # Log warning if needed, but fail silently for best-effort caching
+            pass
+        return None
 
-        if not cached:
-            return None
-
-        return json.loads(cached)
-
-    def _set_cached_json(self, cache_key: str, value: List[Dict[str, Any]]) -> None:
+    def _set_cached_json(self, cache_key: str, value: Any) -> None:
         try:
             self.redis.setex(cache_key, self.cache_ttl, json.dumps(value))
         except RedisError:
@@ -33,12 +32,9 @@ class JiraMetadataEngine:
 
     def get_project_metadata(self, project_id: str) -> Dict[str, Any]:
         cache_key = f"jira:project_context:v1:{self.adapter.host_url}:{project_id}"
-        cached_raw = self.redis.get(cache_key)
-        if cached_raw:
-            try:
-                return json.loads(cached_raw)
-            except Exception:
-                pass
+        cached = self._get_cached_json(cache_key)
+        if isinstance(cached, dict):
+            return cached
             
         data = self.adapter.get_issue_types(project_id)
         self._set_cached_json(cache_key, data)
