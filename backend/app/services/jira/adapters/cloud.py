@@ -220,8 +220,26 @@ class JiraCloudAdapter(JiraAdapter):
 
     def get_fields(self, project_id: str, issue_type_id: str) -> List[Dict[str, Any]]:
         # Use the replacement for the deprecated createmeta endpoint
-        response = self._request("GET", f"/rest/api/3/issue/createmeta/{project_id}/issuetypes/{issue_type_id}")
+        # Primary: Target nested metadata (Performance optimized)
+        url = f"/rest/api/3/issue/createmeta/{project_id}/issuetypes/{issue_type_id}"
+        response = self.client.get(url)
+        
+        # Fallback: Query-param based metadata (Legacy support / Robustness)
+        if response.status_code == 404:
+            logger.info("jira_cloud_createmeta_404_fallback", extra={"project_id": project_id, "issue_type_id": issue_type_id})
+            params = {
+                "projectIds": project_id,
+                "issueTypeIds": issue_type_id,
+                "expand": "projects.issuetypes.fields"
+            }
+            response = self.client.get("/rest/api/3/issue/createmeta", params=params)
+
         if response.status_code != 200:
+            logger.error("jira_cloud_get_fields_failed", extra={
+                "status": response.status_code,
+                "project": project_id,
+                "type": issue_type_id
+            })
             raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to fetch Jira field metadata"))
 
         data = response.json()

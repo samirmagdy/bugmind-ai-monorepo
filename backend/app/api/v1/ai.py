@@ -271,6 +271,12 @@ async def generate_bug_report(
     LimitChecker.check_and_increment(db, current_user.id, "/generate", 0)
 
     # 2. Get Jira Schema
+    if not (req.project_id or req.project_key) or not req.issue_type_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing Jira context (Project or Issue Type). Please ensure you are on a valid Jira issue tab."
+        )
+
     conn = db.query(JiraConnection).filter(
         JiraConnection.id == req.jira_connection_id, 
         JiraConnection.user_id == current_user.id
@@ -282,7 +288,16 @@ async def generate_bug_report(
     adapter = get_adapter(conn)
     engine = JiraMetadataEngine(adapter)
     schema_project_id = req.project_id or req.project_key
-    schema = engine.get_field_schema(schema_project_id, req.issue_type_id)
+    try:
+        schema = engine.get_field_schema(schema_project_id, req.issue_type_id)
+    except HTTPException as e:
+        # Re-wrap Jira errors with better context
+        if e.status_code == 400:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to fetch Jira configurations for project '{schema_project_id}' and issue type '{req.issue_type_id}'. Verify these exist and your account has access."
+            )
+        raise e
 
     # 3. Request AI Generation
     custom_api_key = None
@@ -446,9 +461,23 @@ async def submit_bugs(
     _assert_connection_matches_instance(conn, req.instance_url)
     adapter = get_adapter(conn)
     prefer_project_key = isinstance(adapter, JiraServerAdapter)
+    if not (req.project_id or req.project_key) or not req.issue_type_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing Jira context (Project or Issue Type). Submission aborted."
+        )
+
     schema_project_id = req.project_id or req.project_key
     engine = JiraMetadataEngine(adapter)
-    schema = engine.get_field_schema(schema_project_id, req.issue_type_id)
+    try:
+        schema = engine.get_field_schema(schema_project_id, req.issue_type_id)
+    except HTTPException as e:
+        if e.status_code == 400:
+             raise HTTPException(
+                status_code=400,
+                detail=f"Failed to fetch Jira configurations for submission. Project '{schema_project_id}' or issue type '{req.issue_type_id}' may be invalid or inaccessible."
+            )
+        raise e
     created_issues: List[XrayPublishedTest] = []
 
     for bug in req.bugs:
