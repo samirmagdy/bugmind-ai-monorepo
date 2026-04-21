@@ -225,7 +225,7 @@ def resolve_jira_bootstrap_context(
         resolved_issue_type_project_ref: Optional[str] = None
         for project_candidate in project_candidates:
             try:
-                issue_types_raw = engine.get_project_metadata(project_candidate)
+                issue_types_raw = engine.get_project_metadata(project_candidate, force_refresh=req.force_refresh)
                 resolved_issue_type_project_ref = project_candidate
                 last_project_error = None # Clear any errors from previous candidates
                 break
@@ -255,7 +255,7 @@ def resolve_jira_bootstrap_context(
 
             for project_candidate in project_candidates:
                 try:
-                    metadata_fields = engine.get_field_schema(project_candidate, selected_issue_type_id)
+                    metadata_fields = engine.get_field_schema(project_candidate, selected_issue_type_id, force_refresh=req.force_refresh)
                     if str(project_candidate).isdigit():
                         canonical_project_id = canonical_project_id or project_candidate
                     else:

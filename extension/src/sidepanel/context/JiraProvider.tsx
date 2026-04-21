@@ -168,7 +168,8 @@ export const JiraProvider: React.FC<{
       issue_key: issueKey,
       project_key: projectKey,
       project_id: projectId,
-      issue_type_id: requestIssueTypeId
+      issue_type_id: requestIssueTypeId,
+      force_refresh: force
     };
 
     const performFetch = async (retryCount = 0): Promise<JiraBootstrapContext | null> => {
