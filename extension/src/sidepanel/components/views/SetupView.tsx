@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useBugMind } from '../../hooks/useBugMind';
-import { ExternalLink, ArrowLeft } from 'lucide-react';
+import { ExternalLink, ArrowLeft, RefreshCw, Globe, ShieldCheck } from 'lucide-react';
 
 const SetupView: React.FC = () => {
   const { 
@@ -50,10 +50,10 @@ const SetupView: React.FC = () => {
       });
 
       if (connected) {
-        updateSession({ success: 'Connection saved successfully.' });
+        updateSession({ success: 'Jira environment synchronized successfully.' });
         setGlobalView('main');
       } else {
-        updateSession({ error: 'Failed to save Jira connection.' });
+        updateSession({ error: 'Orchestration failed: Check your Jira credentials.' });
       }
     } finally {
       setIsSubmitting(false);
@@ -63,32 +63,37 @@ const SetupView: React.FC = () => {
   const hasConnections = (session.connections?.length || 0) > 0;
 
   return (
-    <div className="space-y-6 pt-4 animate-in slide-in-from-right-4 duration-300">
-      <div className="flex items-center gap-3">
+    <div className="space-y-8 pt-6 animate-bp-flicker">
+      <div className="flex items-center gap-4">
         {hasConnections && (
           <button 
             onClick={() => setGlobalView('main')}
-            className="p-2 hover:bg-[var(--bg-input)] rounded-full transition-colors text-[var(--text-muted)] hover:text-[var(--text-main)]"
-            title="Back to Main"
+            className="p-3 bg-[var(--bg-input)] hover:bg-[var(--bg-card)] rounded-none border border-[var(--border-main)] transition-all text-[var(--text-muted)] hover:text-[var(--text-main)] shadow-sm group"
           >
-            <ArrowLeft size={18} />
+            <ArrowLeft size={20} className="group-hover:-translate-x-1 transition-transform" />
           </button>
         )}
         <div className="space-y-1">
-          <h2 className="text-xl font-bold text-[var(--text-main)]">Add Connection</h2>
-          <p className="text-sm text-[var(--text-muted)] opacity-80">Link a new Jira instance to BugMind.</p>
+          <h2 className="text-xl font-black bp-heading">Instance Config</h2>
+          <div className="flex items-center gap-2">
+            <div className="h-1 w-6 bg-[var(--status-info)]/30 rounded-full"></div>
+            <p className="bp-subheading lowercase font-bold tracking-tight opacity-40">Link your Jira workspace</p>
+          </div>
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
-        {/* Backend Endpoint - Only show if not configured or in advanced mode? Actually SetupView is for first time too */}
-        <div className="p-4 bg-[var(--bg-card)] rounded-2xl border border-[var(--border-main)] shadow-[var(--shadow-sm)] space-y-3">
-          <div className="flex items-center gap-2 mb-1">
-            <div className="h-1 w-1 bg-[var(--status-info)] rounded-full"></div>
-            <span className="text-[10px] font-black uppercase text-[var(--status-info)] tracking-widest">Global Settings</span>
+      <form onSubmit={handleSubmit} className="space-y-8">
+        {/* Global Orchestrator Settings */}
+        <div className="bp-panel p-6 rounded-none relative overflow-hidden group">
+          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-[var(--status-info)]/20 to-transparent"></div>
+          <div className="flex items-center gap-3 mb-5">
+            <div className="p-2 bg-[var(--status-info)]/10 rounded-none border border-[var(--status-info)]/20 shadow-inner">
+              <Globe size={16} className="text-[var(--status-info)]" />
+            </div>
+            <span className="bp-subheading text-[var(--status-info)]">BugMind Engine</span>
           </div>
-          <div className="space-y-1.5">
-            <label className="text-[11px] font-bold uppercase tracking-widest text-[var(--text-muted)] ml-1">BugMind API Endpoint</label>
+          <div className="space-y-2">
+            <label className="bp-subheading ml-1 opacity-40 lowercase">Control Plane Endpoint</label>
             <input 
               type="url" 
               value={apiBase} 
@@ -97,96 +102,110 @@ const SetupView: React.FC = () => {
                 setApiBase(val);
                 chrome.storage.local.set({ 'bugmind_api_base': val.trim().replace(/\/+$/, '') });
               }}
-              className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-4 py-3 outline-none focus:border-[var(--status-info)]/50 transition-all text-sm text-[var(--text-main)] placeholder:text-[var(--text-muted)]"
-              placeholder="https://api.bugmind.ai/api/v1"
+              className="w-full bp-input rounded-none px-5 py-4 outline-none transition-all text-sm text-[var(--text-main)] placeholder:text-[var(--text-muted)] placeholder:opacity-20"
+              placeholder="https://api.bugmind.ai/v1"
               required
             />
           </div>
         </div>
 
-        <div className="flex bg-[var(--bg-input)] p-1 rounded-xl border border-[var(--border-main)] shadow-[var(--shadow-sm)]">
-          <button 
-            type="button" 
-            onClick={() => setPlatform('cloud')}
-            className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${platform === 'cloud' ? 'bg-[var(--accent)] text-white shadow-lg' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}
-          >
-            Jira Cloud
-          </button>
-          <button 
-            type="button" 
-            onClick={() => setPlatform('server')}
-            className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${platform === 'server' ? 'bg-[var(--accent)] text-white shadow-lg' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}
-          >
-            Server / DC
-          </button>
-        </div>
-
-        <div className="space-y-1.5">
-          <label className="text-[11px] font-bold uppercase tracking-widest text-[var(--text-muted)] ml-1">Jira Base URL</label>
-          <input 
-            type="url" 
-            value={url} 
-            onChange={e => setUrl(e.target.value)}
-            className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-4 py-3 outline-none focus:border-[var(--status-info)]/50 transition-all text-sm text-[var(--text-main)]"
-            placeholder={platform === 'cloud' ? "https://company.atlassian.net" : "http://jira.internal.com"}
-            required
-          />
-        </div>
-
-        <div className="space-y-1.5">
-          <label className="text-[11px] font-bold uppercase tracking-widest text-[var(--text-muted)] ml-1">Jira Email / Username</label>
-          <input 
-            type="text" 
-            value={username} 
-            onChange={e => setUsername(e.target.value)}
-            className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-4 py-3 outline-none focus:border-[var(--status-info)]/50 transition-all text-sm text-[var(--text-main)]"
-            placeholder="email@company.com"
-            required
-          />
-        </div>
-
-        <div className="space-y-1.5">
-          <div className="flex justify-between items-center px-1">
-            <label className="text-[11px] font-bold uppercase tracking-widest text-[var(--text-muted)]">API Token / PAT</label>
-            <a 
-              href={platform === 'cloud' ? "https://id.atlassian.com/manage-profile/security/api-tokens" : "https://confluence.atlassian.com/x/8Y9XN"} 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="text-[10px] text-[var(--status-info)] hover:underline flex items-center gap-1 font-bold"
+        {/* Platform Selection */}
+        <div className="space-y-3">
+          <label className="bp-subheading ml-2 opacity-40 lowercase">Deployment Architecture</label>
+          <div className="flex bg-[var(--bg-input)] p-1.5 rounded-none border border-[var(--border-main)] shadow-inner">
+            <button 
+              type="button" 
+              onClick={() => setPlatform('cloud')}
+              className={`flex-1 py-3 text-[10px] font-black uppercase tracking-[0.2em] rounded-none transition-all duration-500 ${platform === 'cloud' ? 'bg-[var(--accent)] text-white shadow-xl shadow-[var(--accent)]/20 translate-y-[-1px]' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}
             >
-              Get {platform === 'cloud' ? 'Token' : 'PAT'}
-              <ExternalLink size={10} />
-            </a>
+              Atlassian Cloud
+            </button>
+            <button 
+              type="button" 
+              onClick={() => setPlatform('server')}
+              className={`flex-1 py-3 text-[10px] font-black uppercase tracking-[0.2em] rounded-none transition-all duration-500 ${platform === 'server' ? 'bg-[var(--accent)] text-white shadow-xl shadow-[var(--accent)]/20 translate-y-[-1px]' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}
+            >
+              Data Center
+            </button>
           </div>
-          <input 
-            type="password" 
-            value={token} 
-            onChange={e => setToken(e.target.value)}
-            className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-4 py-3 outline-none focus:border-[var(--status-info)]/50 transition-all text-sm text-[var(--text-main)]"
-            placeholder="••••••••••••••••"
-            required
-          />
         </div>
 
-        <div className="flex items-center gap-3 px-1 py-1">
-          <input 
-            type="checkbox" 
-            id="verify-ssl-setup"
-            checked={verifySsl} 
-            onChange={e => setVerifySsl(e.target.checked)}
-            className="w-4 h-4 rounded border-[var(--border-main)] bg-[var(--bg-input)] text-[var(--status-info)]"
-          />
-          <label htmlFor="verify-ssl-setup" className="text-xs text-[var(--text-muted)] cursor-pointer">
-            Enforce SSL Security
-          </label>
+        {/* Credentials Section */}
+        <div className="bp-card rounded-none p-8 space-y-6 shadow-2xl relative overflow-hidden border border-[var(--border-main)]">
+          <div className="space-y-2">
+            <label className="bp-subheading ml-1 opacity-40 lowercase">Workspace URL</label>
+            <input 
+              type="url" 
+              value={url} 
+              onChange={e => setUrl(e.target.value)}
+              className="w-full bp-input rounded-none px-5 py-4 outline-none transition-all text-sm text-[var(--text-main)]"
+              placeholder={platform === 'cloud' ? "https://your-domain.atlassian.net" : "https://jira.your-corp.com"}
+              required
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label className="bp-subheading ml-1 opacity-40 lowercase">Administrative Identity</label>
+            <input 
+              type="text" 
+              value={username} 
+              onChange={e => setUsername(e.target.value)}
+              className="w-full bp-input rounded-none px-5 py-4 outline-none transition-all text-sm text-[var(--text-main)]"
+              placeholder="identity@company.com"
+              required
+            />
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex justify-between items-center px-2">
+              <label className="bp-subheading opacity-40 lowercase">Secure Access Key</label>
+              <a 
+                href={platform === 'cloud' ? "https://id.atlassian.com/manage-profile/security/api-tokens" : "https://confluence.atlassian.com/x/8Y9XN"} 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="text-[9px] text-[var(--status-info)] hover:text-[var(--accent-hover)] flex items-center gap-1.5 font-black uppercase tracking-widest transition-all"
+              >
+                Generate {platform === 'cloud' ? 'API Token' : 'PAT'}
+                <ExternalLink size={12} />
+              </a>
+            </div>
+            <input 
+              type="password" 
+              value={token} 
+              onChange={e => setToken(e.target.value)}
+              className="w-full bp-input rounded-none px-5 py-4 outline-none transition-all text-sm text-[var(--text-main)] placeholder:text-[var(--text-muted)] placeholder:opacity-20"
+              placeholder="••••••••••••••••"
+              required
+            />
+          </div>
+
+          <div className="flex items-center gap-4 px-2 py-1 group cursor-pointer" onClick={() => setVerifySsl(!verifySsl)}>
+            <div className={`w-6 h-6 rounded-none border transition-all flex items-center justify-center ${verifySsl ? 'bg-[var(--status-success)] border-[var(--status-success)] shadow-[0_0_15px_rgba(16,185,129,0.3)]' : 'border-[var(--border-main)] bg-[var(--bg-input)] group-hover:border-[var(--status-success)]/40'}`}>
+              <ShieldCheck size={14} className={verifySsl ? 'text-white' : 'text-[var(--text-muted)]'} />
+            </div>
+            <div className="flex flex-col">
+              <span className="bp-subheading opacity-80 group-hover:opacity-100 transition-opacity">Enforce Protocol Security</span>
+              <span className="text-[8px] font-bold text-[var(--text-muted)] opacity-40 uppercase tracking-tight">Verify SSL certificates during sync</span>
+            </div>
+          </div>
         </div>
 
         <button 
           type="submit" 
           disabled={isSubmitting}
-          className="w-full bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-bold py-3.5 rounded-xl transition-all shadow-lg"
+          className="group relative w-full overflow-hidden bg-gradient-to-br from-[var(--accent)] to-[var(--accent-hover)] text-white font-black py-5 rounded-[2rem] transition-all shadow-2xl shadow-[var(--accent)]/30 enabled:hover:scale-[1.02] enabled:hover:shadow-[var(--accent)]/50 active:scale-[0.98] disabled:opacity-40 disabled:grayscale cursor-pointer"
         >
-          {isSubmitting ? 'Connecting...' : 'Test & Save Connection'}
+          {/* Shimmer Effect */}
+          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000 ease-in-out"></div>
+          
+          <div className="relative flex items-center justify-center gap-3">
+            {isSubmitting ? (
+              <RefreshCw size={20} className="animate-spin" />
+            ) : (
+              <ShieldCheck size={20} />
+            )}
+            <span className="text-sm uppercase tracking-[0.15em]">{isSubmitting ? 'Synchronizing Environment...' : 'Authenticate & Save Cluster'}</span>
+          </div>
         </button>
       </form>
     </div>
@@ -194,3 +213,4 @@ const SetupView: React.FC = () => {
 };
 
 export default SetupView;
+

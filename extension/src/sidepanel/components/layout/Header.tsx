@@ -6,44 +6,57 @@ const Header: React.FC = () => {
   const { session: { theme }, auth: { globalView }, ai: { fetchAISettings, usage }, updateSession, handleLogout } = useBugMind();
 
   return (
-    <header className="px-5 py-4 border-b border-[var(--border-main)] flex justify-between items-center backdrop-blur-xl bg-[var(--bg-app)]/80 dark:bg-white/5 sticky top-0 z-50 shadow-[var(--shadow-sm)]">
-      <div className="flex items-center gap-2.5">
-        <div className="p-1.5 bg-blue-500/10 rounded-xl border border-blue-500/20 shadow-inner">
-          <Bug className="text-blue-500" size={20} />
+    <header className="px-4 py-3 border-b border-[var(--border-main)] flex justify-between items-center backdrop-blur-[20px] bg-[var(--bg-app)]/70 sticky top-0 z-[100] shadow-xl shadow-black/5">
+      <div className="flex items-center gap-3">
+        <div className="p-2 bg-[var(--accent)]/10 rounded-xl border border-[var(--accent)]/20 shadow-inner group">
+          <Bug className="text-[var(--accent)] group-hover:scale-110 transition-transform duration-500" size={16} />
         </div>
-        <h1 className="text-lg font-black tracking-tighter bg-gradient-to-tr from-blue-500 via-blue-400 to-indigo-400 bg-clip-text text-transparent">BugMind</h1>
+        <h1 className="text-lg font-black tracking-tighter luxury-heading">
+          BugMind <span className="opacity-30">AI</span>
+        </h1>
       </div>
+
       {globalView !== 'auth' && (
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-2">
           {usage && (
-            <div className="px-2.5 py-1 rounded-xl border border-[var(--border-main)] bg-[var(--bg-card)] text-[9px] font-black uppercase tracking-widest text-[var(--text-muted)] mr-1">
-              {usage.plan} {usage.remaining}/{usage.limit}
+            <div className="hidden sm:flex px-3 py-1.5 rounded-full border border-[var(--border-main)] bg-[var(--bg-card)]/50 backdrop-blur-md shadow-inner items-center gap-2">
+              <div className="h-1 w-1 bg-[var(--status-success)] rounded-full shadow-[0_0_5px_var(--status-success)]"></div>
+              <span className="text-[9px] font-black uppercase tracking-[0.2em] text-[var(--text-muted)]">
+                {usage.plan}: {usage.remaining}
+              </span>
             </div>
           )}
-          <button 
-            onClick={() => { fetchAISettings(); updateSession({ view: 'settings' }); }} 
-            className="p-2.5 hover:bg-blue-500/10 rounded-2xl transition-all text-[var(--text-muted)] hover:text-blue-500 border border-transparent hover:border-blue-500/20"
-            title="Settings"
-          >
-            <Settings size={18} />
-          </button>
-          <button 
-            onClick={() => updateSession({ 
-              theme: theme === 'light' ? 'dark' : 'light',
-              themeSource: 'manual'
-            })}
-            className="p-2.5 hover:bg-amber-500/10 dark:hover:bg-blue-500/10 rounded-2xl transition-all text-[var(--text-muted)] hover:text-amber-500 dark:hover:text-blue-400 border border-transparent hover:border-amber-500/20 dark:hover:border-blue-500/20"
-            title={theme === 'light' ? "Switch to Dark Mode" : "Switch to Light Mode"}
-          >
-            {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
-          </button>
-          <button 
-            onClick={handleLogout} 
-            className="p-2.5 hover:bg-red-500/10 rounded-2xl transition-all text-[var(--text-muted)] hover:text-red-500 border border-transparent hover:border-red-500/20"
-            title="Log Out"
-          >
-            <LogOut size={18} />
-          </button>
+          
+          <div className="flex items-center gap-1.5 p-1 bg-[var(--bg-input)]/50 rounded-xl border border-[var(--border-main)]">
+            <button 
+              onClick={() => { fetchAISettings(); updateSession({ view: 'settings' }); }} 
+              className="p-2 hover:bg-[var(--bg-card)] rounded-xl transition-all text-[var(--text-muted)] hover:text-[var(--status-info)] border border-transparent hover:border-[var(--border-main)] group"
+              title="Intelligence Config"
+            >
+              <Settings size={16} className="group-hover:rotate-45 transition-transform duration-500" />
+            </button>
+            
+            <button 
+              onClick={() => updateSession({ 
+                theme: theme === 'light' ? 'dark' : 'light',
+                themeSource: 'manual'
+              })}
+              className="p-2 hover:bg-[var(--bg-card)] rounded-xl transition-all text-[var(--text-muted)] hover:text-[var(--accent)] border border-transparent hover:border-[var(--border-main)]"
+              title={theme === 'light' ? "Oscurify Interface" : "Illuminate Interface"}
+            >
+              {theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
+            </button>
+            
+            <div className="w-px h-4 bg-[var(--border-main)] mx-1"></div>
+            
+            <button 
+              onClick={handleLogout} 
+              className="p-2 hover:bg-[var(--status-danger)]/10 rounded-xl transition-all text-[var(--text-muted)] hover:text-[var(--status-danger)] border border-transparent hover:border-[var(--status-danger)]/20"
+              title="Terminate Session"
+            >
+              <LogOut size={16} />
+            </button>
+          </div>
         </div>
       )}
     </header>
@@ -51,3 +64,4 @@ const Header: React.FC = () => {
 };
 
 export default Header;
+

@@ -62,19 +62,27 @@ export default function App() {
 
   if (initializing) {
     return (
-      <div className={`h-screen flex flex-col items-center justify-center space-y-6 p-8 transition-colors duration-700 bg-[var(--bg-app)]`}>
-        <div className="relative">
-          <div className={`absolute inset-0 blur-3xl rounded-full animate-pulse bg-[var(--status-info)]/20`} />
-          <div className="relative z-10 bg-[var(--bg-card)] backdrop-blur-md p-6 rounded-3xl border border-[var(--border-main)] shadow-2xl">
-            <Loader2 className="w-10 h-10 text-[var(--status-info)] animate-spin" />
+      <div className="h-screen flex flex-col items-center justify-center space-y-8 p-10 bg-[var(--bg-app)] relative overflow-hidden">
+        {/* Luxury Background Glow */}
+        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-[var(--status-info)]/10 blur-[120px] rounded-full animate-pulse-slow"></div>
+        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-[var(--status-success)]/5 blur-[120px] rounded-full animate-pulse-slow"></div>
+
+        <div className="relative group">
+          <div className="absolute inset-0 blur-3xl rounded-full animate-pulse bg-[var(--status-info)]/20 group-hover:bg-[var(--status-info)]/30 transition-all duration-1000"></div>
+          <div className="relative z-10 bp-panel p-8 rounded-none border border-[var(--border-main)] shadow-2xl animate-bp-flicker">
+            <Loader2 className="w-12 h-12 text-[var(--status-info)] animate-spin" />
           </div>
         </div>
-        <div className="text-center space-y-3">
-          <h2 className={`text-2xl font-black tracking-tight text-[var(--text-main)]`}>BugMind AI</h2>
-          <div className="flex flex-col items-center gap-1">
-            <p className={`text-sm font-medium text-[var(--text-muted)] opacity-80`}>Resuming secure session...</p>
-            <div className={`h-1 w-32 rounded-full overflow-hidden bg-[var(--border-main)] opacity-50`}>
-              <div className="h-full bg-[var(--status-info)] animate-progress origin-left" />
+
+        <div className="text-center space-y-4 animate-bp-flicker stagger-1">
+          <h2 className="text-xl font-black tracking-tighter bp-heading">BugMind <span className="opacity-40">AI</span></h2>
+          <div className="flex flex-col items-center gap-3">
+            <div className="flex items-center gap-2">
+              <div className="h-1.5 w-1.5 bg-[var(--status-info)] rounded-full animate-pulse"></div>
+              <p className="text-[10px] font-black uppercase tracking-[0.3em] text-[var(--text-muted)]">Resuming secure session</p>
+            </div>
+            <div className="h-1 w-40 rounded-full overflow-hidden bg-[var(--bg-input)] border border-[var(--border-main)]">
+              <div className="h-full bg-gradient-to-r from-[var(--status-info)] to-[var(--accent-hover)] animate-progress origin-left" />
             </div>
           </div>
         </div>
@@ -89,34 +97,39 @@ export default function App() {
 
       <main className="flex-1 overflow-y-auto overflow-x-hidden relative custom-scrollbar">
         <div className="p-4 pb-24 max-w-4xl mx-auto">
-          {session.error && !['NOT_A_JIRA_PAGE', 'UNSUPPORTED_ISSUE_TYPE'].includes(session.error) && (
-            <div className="mb-4 p-4 bg-[var(--status-danger)]/10 border border-[var(--status-danger)]/20 rounded-2xl flex items-start gap-3 animate-in slide-in-from-top-2 duration-300">
-              <AlertCircle className="w-5 h-5 text-[var(--status-danger)] shrink-0 mt-0.5" />
+          {session.error && !['NOT_A_JIRA_PAGE', 'UNSUPPORTED_ISSUE_TYPE', 'NO_ISSUE_TYPES_FOUND'].includes(session.error) && (
+            <div className="mb-6 p-5 bp-panel border-[var(--status-danger)]/20 rounded-[2rem] flex items-start gap-4 animate-bp-flicker shadow-2xl shadow-[var(--status-danger)]/5 relative overflow-hidden group">
+              <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-transparent via-[var(--status-danger)]/30 to-transparent"></div>
+              <div className="w-10 h-10 bg-[var(--status-danger)]/10 rounded-none flex items-center justify-center shrink-0 border border-[var(--status-danger)]/20">
+                <AlertCircle className="w-5 h-5 text-[var(--status-danger)]" />
+              </div>
               <div className="flex-1">
-                <p className="text-sm font-black text-[var(--status-danger)] tracking-tight opacity-90">{translateError(session.error).title}</p>
-                <p className="text-[11px] font-medium text-[var(--status-danger)]/80 leading-relaxed mt-0.5">{translateError(session.error).description}</p>
+                <p className="text-xs font-black text-[var(--text-main)] tracking-tight uppercase">{translateError(session.error).title}</p>
+                <p className="text-[11px] font-medium text-[var(--text-muted)] leading-relaxed mt-1">{translateError(session.error).description}</p>
                 <button 
                   onClick={() => updateSession({ error: null })}
-                  className="mt-2 text-xs font-bold text-[var(--status-danger)] hover:opacity-70 transition-colors uppercase tracking-widest"
+                  className="mt-3 text-[10px] font-black text-[var(--status-danger)] hover:opacity-70 transition-all uppercase tracking-widest flex items-center gap-2"
                 >
-                  Dismiss
+                  <Plus size={12} className="rotate-45" />
+                  Dismiss Warning
                 </button>
               </div>
             </div>
           )}
           
           {session.success && (
-            <div className="mb-4 p-4 bg-[var(--status-success)]/10 border border-[var(--status-success)]/20 rounded-[1.5rem] flex items-center gap-4 animate-in slide-in-from-top-4 duration-500 shadow-xl shadow-[var(--status-success)]/5">
-              <div className="w-10 h-10 bg-[var(--status-success)]/20 rounded-2xl flex items-center justify-center shrink-0 border border-[var(--status-success)]/30">
-                <div className="w-2 h-2 bg-[var(--status-success)] rounded-full animate-ping" />
+            <div className="mb-6 p-5 bp-panel border-[var(--status-success)]/20 rounded-[2rem] flex items-center gap-4 animate-bp-flicker shadow-2xl shadow-[var(--status-success)]/5 relative overflow-hidden group">
+              <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-transparent via-[var(--status-success)]/30 to-transparent"></div>
+              <div className="w-10 h-10 bg-[var(--status-success)]/10 rounded-none flex items-center justify-center shrink-0 border border-[var(--status-success)]/20">
+                <div className="w-1.5 h-1.5 bg-[var(--status-success)] rounded-full animate-pulse shadow-[0_0_10px_var(--status-success)]" />
               </div>
               <div className="flex-1">
-                <p className="text-sm font-black text-[var(--status-success)] tracking-tight leading-tight opacity-90">{session.success}</p>
-                <p className="text-[10px] text-[var(--status-success)]/70 font-bold uppercase tracking-widest mt-0.5">Operation Successful</p>
+                <p className="text-xs font-black text-[var(--text-main)] tracking-tight uppercase leading-tight">{session.success}</p>
+                <p className="text-[9px] text-[var(--status-success)]/70 font-black uppercase tracking-[0.2em] mt-1">Operation Finalized</p>
               </div>
               <button 
                 onClick={() => updateSession({ success: null })}
-                className="p-2 hover:bg-[var(--status-success)]/10 rounded-xl transition-all text-[var(--status-success)] hover:text-[var(--text-main)]"
+                className="p-2 hover:bg-[var(--status-success)]/10 rounded-none transition-all text-[var(--status-success)] hover:text-[var(--text-main)]"
               >
                 <Plus size={16} className="rotate-45" />
               </button>

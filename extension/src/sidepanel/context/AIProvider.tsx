@@ -515,7 +515,7 @@ export const AIProvider: React.FC<{
     }
   }, [authToken, apiBase, getProjectRequestParams, parseJiraRequiredFieldErrors, refreshAuthToken, session.bugs, session.instanceUrl, session.issueData, session.jiraConnectionId, session.previewBugIndex, session.selectedIssueType, session.visibleFields, updateSession]);
 
-  const searchUsers = useCallback(async (query: string, bugIndex?: number) => {
+  const searchUsers = useCallback(async (query: string, bugIndex?: number, fieldId?: string) => {
     if (query.length < 2 || !session.jiraConnectionId) return;
     if (bugIndex !== undefined) handleUpdateBug(bugIndex, { isSearchingUsers: true, lastSearchedQuery: query });
     if (searchControllerRef.current) searchControllerRef.current.abort();
@@ -528,7 +528,7 @@ export const AIProvider: React.FC<{
         project_id: getProjectRequestParams().projectId,
         project_key: getProjectRequestParams().projectKey,
         issue_type_id: session.selectedIssueType?.id ?? null,
-        field_id: bugIndex !== undefined ? session.bugs[bugIndex]?.activeUserSearchField ?? null : null,
+        field_id: fieldId || (bugIndex !== undefined ? session.bugs[bugIndex]?.activeUserSearchField ?? null : null),
       };
       const res = await apiRequest(`${apiBase}/jira/users/search`, {
         method: 'POST',
@@ -538,19 +538,21 @@ export const AIProvider: React.FC<{
         body: JSON.stringify(payload)
       });
 
-      if (bugIndex === undefined) {
+      if (!res.ok) {
+        if (bugIndex !== undefined) handleUpdateBug(bugIndex, { userSearchResults: [], isSearchingUsers: false });
         return;
       }
 
-      if (res.ok) {
+      const results = await readJsonResponse<JiraUsersSearchResponsePayload>(res);
+
+      if (bugIndex !== undefined) {
         handleUpdateBug(bugIndex, {
-          userSearchResults: await readJsonResponse<JiraUsersSearchResponsePayload>(res),
+          userSearchResults: results,
           isSearchingUsers: false
         });
-        return;
       }
-
-      handleUpdateBug(bugIndex, { userSearchResults: [], isSearchingUsers: false });
+      
+      return results;
     } catch (err) {
       if (bugIndex !== undefined) handleUpdateBug(bugIndex, { userSearchResults: [], isSearchingUsers: false });
     }

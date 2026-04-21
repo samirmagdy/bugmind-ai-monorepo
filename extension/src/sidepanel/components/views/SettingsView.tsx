@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
-import { X, ChevronDown, Loader2, AlertCircle, RefreshCw, Pencil, FolderOpen, Save } from 'lucide-react';
+import { useEffect, useState, useRef } from 'react';
+import { X, ChevronDown, Loader2, AlertCircle, RefreshCw, Pencil, FolderOpen, Save, User, Search, Plus, Zap, Check } from 'lucide-react';
 import { useBugMind } from '../../hooks/useBugMind';
-import { IssueType, JiraField, JiraFieldOption, JiraProject } from '../../types';
+import { IssueType, JiraField, JiraProject, JiraUser } from '../../types';
+import LuxurySearchableSelect from '../common/LuxurySearchableSelect';
 
 const HIDDEN_SYSTEM_FIELD_KEYS = new Set([
   'summary',
@@ -21,16 +22,9 @@ function isSystemManagedField(field: JiraField): boolean {
   );
 }
 
-function getFieldOptionLabel(option: JiraFieldOption): string {
-  return option.value || option.name || option.label || option.id;
-}
-
-function isMultiValueField(field: JiraField): boolean {
-  return field.type === 'multi-select' || field.type === 'labels' || field.type === 'array';
-}
-
 function normalizeSavedFieldValue(field: JiraField, rawValue: unknown): unknown {
-  if (field.type === 'option' || field.type === 'priority') {
+  if (field.type === 'user' || field.type === 'multi-user' || field.type === 'option' || field.type === 'priority' || field.type === 'cascading-select') {
+    if (Array.isArray(rawValue)) return rawValue;
     return typeof rawValue === 'object' && rawValue !== null ? rawValue : null;
   }
   if (field.type === 'multi-select') {
@@ -43,7 +37,7 @@ function normalizeSavedFieldValue(field: JiraField, rawValue: unknown): unknown 
     return [];
   }
   if (field.type === 'number') {
-    return rawValue == null ? '' : String(rawValue);
+    return rawValue == null || rawValue === '' ? '' : String(rawValue);
   }
   if (field.type === 'boolean') {
     return Boolean(rawValue);
@@ -51,10 +45,366 @@ function normalizeSavedFieldValue(field: JiraField, rawValue: unknown): unknown 
   return rawValue == null ? '' : String(rawValue);
 }
 
+const FieldRow: React.FC<{
+  field: JiraField;
+  savedDefault: any;
+  updateFieldDefault: (field: JiraField, nextValue: unknown) => void;
+  searchUsers: (query: string, bugIndex?: number, fieldId?: string) => Promise<JiraUser[] | void>;
+  isVisible: boolean;
+  onToggleVisibility: () => void;
+}> = ({ field, savedDefault, updateFieldDefault, searchUsers, isVisible, onToggleVisibility }) => {
+  const [userSearchQuery, setUserSearchQuery] = useState('');
+  const [userSearchResults, setUserSearchResults] = useState<JiraUser[]>([]);
+  const [isSearchingUsers, setIsSearchingUsers] = useState(false);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [dropdownSearch, setDropdownSearch] = useState('');
+  const lastSearchedQueryRef = useRef('');
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+
+
+  useEffect(() => {
+    console.log('[BugMind] FieldRow initialized:', field.name, field.type);
+  }, [field.name, field.type]);
+
+  useEffect(() => {
+    if (userSearchQuery.length < 2) {
+      setUserSearchResults([]);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      if (userSearchQuery !== lastSearchedQueryRef.current) {
+        setIsSearchingUsers(true);
+        lastSearchedQueryRef.current = userSearchQuery;
+        try {
+          const results = await searchUsers(userSearchQuery, undefined, field.key);
+          if (results) {
+            setUserSearchResults(results as JiraUser[]);
+          }
+        } catch {
+          // Ignore abort errors
+        } finally {
+          setIsSearchingUsers(false);
+        }
+      }
+    }, 400);
+
+    return () => clearTimeout(timer);
+  }, [userSearchQuery, field.key, searchUsers]);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  return (
+    <div 
+      className={`group relative space-y-2.5 p-3 rounded-3xl transition-all duration-500 ${
+        isVisible 
+          ? 'bg-gradient-to-br from-[var(--bg-card)] to-[var(--bg-card)]/50 border-[var(--border-main)] shadow-[var(--shadow-sm)]' 
+          : 'bg-[var(--bg-card)]/20 border-dashed border-[var(--border-main)] opacity-70 grayscale-[0.3]'
+      } border hover:border-[var(--status-info)]/30 hover:shadow-xl hover:shadow-[var(--status-info)]/5 animate-in fade-in slide-in-from-bottom-2`}
+    >
+      {/* Luxury Header */}
+      <div className="flex justify-between items-center px-1">
+        <div className="flex flex-col">
+          <label className="text-[9px] font-black uppercase tracking-[0.2em] text-[var(--text-muted)] opacity-50 mb-0.5 flex items-center gap-1.5">
+            {field.type} 
+            {field.required && <span className="text-[var(--status-danger)] font-black text-[11px] leading-none mt-[-2px]">*</span>}
+          </label>
+          <h3 className={`text-xs font-black tracking-tight transition-colors duration-300 ${isVisible ? 'text-[var(--text-main)]' : 'text-[var(--text-muted)]'}`}>
+            {field.name}
+          </h3>
+        </div>
+
+        {/* Custom Luxury Toggle */}
+        <button 
+          onClick={(e) => { e.stopPropagation(); onToggleVisibility(); }}
+          disabled={field.required}
+          className={`relative w-9 h-5 rounded-full transition-all duration-500 border shadow-inner ${
+            isVisible 
+              ? 'bg-[var(--status-info)] border-[var(--status-info)] shadow-[0_0_12px_rgba(59,130,246,0.3)]' 
+              : 'bg-[var(--bg-input)] border-[var(--border-main)] hover:border-[var(--text-muted)]/30'
+          } ${field.required ? 'opacity-20 cursor-not-allowed' : 'cursor-pointer active:scale-90'}`}
+        >
+          <div className={`absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full shadow-lg transition-all duration-500 ${
+            isVisible ? 'left-[21px] bg-white' : 'left-[4px] bg-[var(--text-muted)] opacity-40'
+          }`} />
+        </button>
+      </div>
+
+      <div className="relative group/content" onClick={e => e.stopPropagation()}>
+        {/* Value Container */}
+        <div className={`relative transition-all duration-500 ${!isVisible ? 'pointer-events-none' : ''}`}>
+          { (field.type === 'user' || field.type === 'multi-user') ? (
+            <div className="relative z-[60]">
+              {savedDefault ? (
+                <div className="flex items-center justify-between bg-gradient-to-r from-blue-500/5 to-transparent border border-blue-500/10 rounded-none px-4 py-2 transition-all hover:bg-blue-500/10 shadow-inner group/val">
+                  <div className="flex items-center gap-3">
+                    {typeof savedDefault === 'object' && savedDefault !== null && !Array.isArray(savedDefault) && (savedDefault as any).avatar ? (
+                      <img src={(savedDefault as any).avatar} className="w-6 h-6 rounded-full ring-2 ring-blue-500/20 shadow-lg" alt="" />
+                    ) : (
+                      <div className="w-6 h-6 bg-blue-500/10 rounded-full flex items-center justify-center border border-blue-500/20">
+                        <User size={12} className="text-blue-500" />
+                      </div>
+                    )}
+                    <div className="flex flex-col">
+                      <span className="text-[11px] text-[var(--status-info)] font-black tracking-tight leading-none">
+                        {typeof savedDefault === 'object' && savedDefault !== null && !Array.isArray(savedDefault) ? ((savedDefault as any).name || 'Selected User') : 'Selected User'}
+                      </span>
+                      <span className="text-[9px] text-blue-500/40 uppercase font-bold tracking-tighter mt-1">Default Assignee</span>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => updateFieldDefault(field, null)}
+                    className="p-1.5 text-[var(--text-muted)] hover:text-[var(--status-danger)] transition-all rounded-none hover:bg-[var(--status-danger)]/10 group-hover/val:scale-110"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              ) : (
+                <div className="relative group/input">
+                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within/input:text-[var(--status-info)] transition-all duration-500" size={14} />
+                  <input 
+                    type="text"
+                    placeholder={`Assign a default ${field.name}...`}
+                    className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-none pl-11 pr-4 py-2 outline-none transition-all duration-500 text-[11px] placeholder:text-[var(--text-muted)] placeholder:opacity-30 focus:border-[var(--status-info)]/30 focus:ring-4 focus:ring-[var(--status-info)]/5 shadow-inner"
+                    value={userSearchQuery}
+                    onChange={e => setUserSearchQuery(e.target.value)}
+                  />
+                  {isSearchingUsers && (
+                    <div className="absolute right-4 top-1/2 -translate-y-1/2">
+                      <Loader2 size={14} className="animate-spin text-[var(--status-info)]" />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {!savedDefault && userSearchQuery.length >= 2 && (
+                <div className="absolute top-full left-0 w-full mt-3 bg-[var(--bg-card)]/80 backdrop-blur-2xl border border-[var(--border-main)] rounded-[2rem] overflow-hidden shadow-[0_20px_50px_rgba(0,0,0,0.3)] z-[999] animate-in fade-in slide-in-from-top-3 duration-500 divide-y divide-[var(--border-main)]">
+                  {isSearchingUsers ? (
+                    <div className="px-6 py-5 text-center">
+                      <Loader2 size={20} className="animate-spin text-[var(--status-info)] mx-auto mb-2 opacity-50" />
+                      <span className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest font-black opacity-60">Querying Jira...</span>
+                    </div>
+                  ) : userSearchResults.length > 0 ? (
+                    userSearchResults.map((u) => (
+                      <button 
+                        key={u.id}
+                        onClick={() => {
+                          updateFieldDefault(field, { id: u.id, name: u.name, avatar: u.avatar });
+                          setUserSearchQuery('');
+                          setUserSearchResults([]);
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-2 hover:bg-[var(--status-info)]/5 text-left transition-all group/item"
+                      >
+                        {u.avatar ? (
+                          <img src={u.avatar} className="w-8 h-8 rounded-full ring-2 ring-transparent group-hover/item:ring-[var(--status-info)]/20 transition-all" alt="" />
+                        ) : (
+                          <div className="w-8 h-8 bg-[var(--bg-input)] rounded-full flex items-center justify-center border border-[var(--border-main)]">
+                            <User size={16} className="text-[var(--text-muted)]" />
+                          </div>
+                        )}
+                        <div className="flex flex-col">
+                          <span className="text-[11px] text-[var(--text-main)] font-black group-hover:text-[var(--status-info)] transition-colors">{u.name}</span>
+                          <span className="text-[9px] text-[var(--text-muted)] uppercase tracking-tight font-bold opacity-40">{u.id}</span>
+                        </div>
+                      </button>
+                    ))
+                  ) : (
+                    <div className="px-6 py-6 text-center">
+                      <User size={24} className="mx-auto mb-2 text-[var(--text-muted)] opacity-20" />
+                      <span className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest font-black">No matches found</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : (field.allowed_values && field.allowed_values.length > 0) || field.type === 'labels' || field.type === 'array' ? (
+            <div className="space-y-3 relative" ref={dropdownRef}>
+              <button 
+                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                className={`w-full flex items-center justify-between bg-[var(--bg-input)] border rounded-none px-4 py-2 outline-none transition-all duration-500 shadow-inner group/trigger ${
+                  isDropdownOpen ? 'border-[var(--status-info)]/30 ring-4 ring-[var(--status-info)]/5' : 'border-[var(--border-main)]'
+                }`}
+              >
+                <div className="flex flex-wrap gap-2 items-center flex-1 min-w-0">
+                  {Array.isArray(savedDefault) && savedDefault.length > 0 ? (
+                    savedDefault.map((v: any, i: number) => (
+                      <div key={typeof v === 'object' ? (v.id || i) : v} className="bg-[var(--status-info)]/10 text-[var(--status-info)] px-2.5 py-1 rounded-none text-[10px] font-black uppercase tracking-tight flex items-center gap-2 border border-[var(--status-info)]/20 whitespace-nowrap overflow-hidden max-w-[120px]">
+                        <span className="truncate">{typeof v === 'object' ? (v.name || v.value || v.label || v.id) : v}</span>
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const next = (savedDefault as any[]).filter((x, idx) => {
+                              if (typeof v === 'object' && typeof x === 'object') return x.id !== v.id;
+                              return idx !== i;
+                            });
+                            updateFieldDefault(field, next);
+                          }}
+                          className="hover:text-[var(--status-danger)] transition-colors opacity-40 hover:opacity-100"
+                        >
+                          <Plus size={10} className="rotate-45" />
+                        </button>
+                      </div>
+                    ))
+                  ) : (
+                    <span className="text-[11px] text-[var(--text-muted)] opacity-40 font-medium">Click to select or type...</span>
+                  )}
+                </div>
+                <ChevronDown className={`text-[var(--text-muted)] opacity-40 transition-transform duration-500 shrink-0 ml-2 ${isDropdownOpen ? 'rotate-180' : ''}`} size={16} />
+              </button>
+
+              {isDropdownOpen && (
+                <div className="absolute top-full left-0 w-full mt-3 bg-[var(--bg-card)]/95 backdrop-blur-2xl border border-[var(--border-main)] rounded-[2rem] overflow-hidden shadow-[0_30px_60px_rgba(0,0,0,0.4)] z-[999] animate-in fade-in slide-in-from-top-3 duration-500 flex flex-col max-h-[350px]">
+                  <div className="p-3 border-b border-[var(--border-main)] sticky top-0 bg-[var(--bg-card)]/50 backdrop-blur-md z-10">
+                    <div className="relative group/search">
+                      <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] opacity-40 group-focus-within/search:text-[var(--status-info)] group-focus-within/search:opacity-100 transition-all" size={14} />
+                      <input 
+                        type="text"
+                        placeholder="Search or type new value..."
+                        autoFocus
+                        className="w-full bg-[var(--bg-app)] border border-[var(--border-main)] rounded-none pl-10 pr-4 py-2.5 text-[11px] outline-none focus:border-[var(--status-info)]/30 transition-all font-medium"
+                        value={dropdownSearch}
+                        onChange={e => setDropdownSearch(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter' && dropdownSearch.trim()) {
+                            e.preventDefault();
+                            const val = dropdownSearch.trim();
+                            const existing = Array.isArray(savedDefault) ? savedDefault : [];
+                            if (!existing.includes(val)) {
+                              updateFieldDefault(field, [...existing, val]);
+                            }
+                            setDropdownSearch("");
+                          }
+                        }}
+                        onClick={e => e.stopPropagation()}
+                      />
+                    </div>
+                  </div>
+                  
+                  <div className="overflow-y-auto custom-scrollbar flex-1">
+                    {(field.allowed_values || [])
+                      .filter(opt => {
+                        const s = dropdownSearch.toLowerCase().trim();
+                        if (!s) return true;
+                        const label = (opt.value || opt.name || opt.label || '').toLowerCase();
+                        return label.includes(s);
+                      })
+                      .map(opt => {
+                        const isSelected = Array.isArray(savedDefault) && savedDefault.some((v: any) => 
+                          (typeof v === 'object' ? v.id === opt.id : v === (opt.value || opt.name || opt.label))
+                        );
+
+                        return (
+                          <button 
+                            key={opt.id}
+                            onClick={() => {
+                              const item = { id: opt.id, value: opt.value, name: opt.name, label: opt.label };
+                              const existing = Array.isArray(savedDefault) ? savedDefault : [];
+                              if (isSelected) {
+                                updateFieldDefault(field, existing.filter((v: any) => (typeof v === 'object' ? v.id !== opt.id : v !== (opt.value || opt.name || opt.label))));
+                              } else {
+                                updateFieldDefault(field, [...existing, item]);
+                              }
+                            }}
+                            className={`w-full flex items-center justify-between px-5 py-2 text-left transition-all group/item border-b border-[var(--border-main)]/30 last:border-0 ${
+                              isSelected ? 'bg-[var(--status-info)]/5' : 'hover:bg-[var(--bg-app)]'
+                            }`}
+                          >
+                            <div className="flex flex-col">
+                              <span className={`text-[11px] font-black tracking-tight transition-colors ${isSelected ? 'text-[var(--status-info)]' : 'text-[var(--text-main)] group-hover/item:text-[var(--status-info)]'}`}>
+                                {opt.value || opt.name || opt.label || opt.id}
+                              </span>
+                              {opt.id && <span className="text-[9px] text-[var(--text-muted)] font-bold opacity-30 uppercase tracking-tighter">Option ID: {opt.id}</span>}
+                            </div>
+                            {isSelected && (
+                              <div className="bg-[var(--status-info)] p-1 rounded-lg shadow-[0_0_10px_rgba(59,130,246,0.4)] animate-in zoom-in-50 duration-300">
+                                <Check size={12} className="text-white" />
+                              </div>
+                            )}
+                          </button>
+                        );
+                      })}
+                    
+                    {dropdownSearch.trim() && !(field.allowed_values || []).some(o => (o.value || o.name || o.label || '').toLowerCase() === dropdownSearch.toLowerCase()) && (
+                      <button 
+                        onClick={() => {
+                          const val = dropdownSearch.trim();
+                          const existing = Array.isArray(savedDefault) ? savedDefault : [];
+                          if (!existing.includes(val)) {
+                            updateFieldDefault(field, [...existing, val]);
+                          }
+                          setDropdownSearch("");
+                        }}
+                        className="w-full flex items-center gap-3 px-5 py-2.5 hover:bg-[var(--status-info)]/5 text-left transition-all group/add"
+                      >
+                        <div className="p-1.5 bg-[var(--status-info)]/10 rounded-lg text-[var(--status-info)]">
+                          <Plus size={14} />
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-[11px] font-black text-[var(--text-main)]">Add custom value</span>
+                          <span className="text-[10px] text-[var(--status-info)] font-bold uppercase tracking-tight">"{dropdownSearch.trim()}"</span>
+                        </div>
+                      </button>
+                    )}
+
+                    {(field.allowed_values || []).length === 0 && !dropdownSearch.trim() && (
+                      <div className="px-6 py-10 text-center">
+                        <FolderOpen size={24} className="mx-auto mb-3 text-[var(--text-muted)] opacity-20" />
+                        <p className="text-[10px] text-[var(--text-muted)] font-black uppercase tracking-widest opacity-40 leading-relaxed">
+                          No predefined options.<br/>Type above to add manually.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : field.type === 'boolean' ? (
+            <div className="bg-[var(--bg-input)] border border-[var(--border-main)] rounded-none p-3 flex items-center justify-between shadow-inner group/bool">
+              <span className="text-[11px] font-black uppercase tracking-widest text-[var(--text-muted)] opacity-60">Enabled by Default</span>
+              <button
+                onClick={() => updateFieldDefault(field, !savedDefault)}
+                className={`relative w-10 h-6 rounded-full transition-all duration-500 border ${
+                  savedDefault ? 'bg-[var(--status-success)] border-[var(--status-success)] shadow-[0_0_12px_rgba(34,197,94,0.3)]' : 'bg-[var(--bg-card)] border-[var(--border-main)]'
+                }`}
+              >
+                <div className={`absolute top-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-white shadow-md transition-all duration-500 ${
+                  savedDefault ? 'left-[20px]' : 'left-[4px]'
+                }`} />
+              </button>
+            </div>
+          ) : (
+            <div className="relative group/text">
+              <input
+                type={field.type === 'number' ? 'number' : 'text'}
+                value={typeof savedDefault === 'string' || typeof savedDefault === 'number' ? String(savedDefault) : ''}
+                onChange={(e) => updateFieldDefault(field, field.type === 'number' ? (e.target.value === '' ? null : Number(e.target.value)) : e.target.value)}
+                className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-none px-4 py-2 outline-none transition-all duration-500 text-[11px] text-[var(--text-main)] shadow-inner focus:border-[var(--status-info)]/30 focus:ring-4 focus:ring-[var(--status-info)]/5 font-medium placeholder:opacity-20"
+                placeholder={field.type === 'number' ? "0" : "No default value set..."}
+              />
+              <div className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-[var(--text-muted)] opacity-20 uppercase tracking-tighter pointer-events-none group-focus-within/text:opacity-40 transition-opacity">
+                {field.type}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const SettingsView: React.FC = () => {
   const { 
     session, updateSession, handleSaveSettings, saveFieldSettings,
-    ai: { customKey, setCustomKey, hasCustomKeySaved, customModel, setCustomModel },
+    ai: { customKey, setCustomKey, hasCustomKeySaved, customModel, setCustomModel, searchUsers },
     jira, refreshIssue, currentTabId,
     auth: { apiBase, setApiBase },
     debug: { log }
@@ -150,44 +500,45 @@ const SettingsView: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6 pt-4 animate-in slide-in-from-right-4 duration-300">
-      <div className="flex items-center gap-3 mb-2">
-        <button onClick={() => updateSession({ view: 'main' })} className="p-2 hover:bg-[var(--bg-card)] rounded-xl text-[var(--text-muted)] hover:text-[var(--text-main)] transition-all">
-          <X size={20} />
+    <div className="space-y-4 pt-3 animate-in slide-in-from-right-4 duration-300">
+      <div className="flex items-center gap-2 mb-1">
+        <button onClick={() => updateSession({ view: 'main' })} className="p-1.5 hover:bg-[var(--bg-card)] rounded-lg text-[var(--text-muted)] hover:text-[var(--text-main)] transition-all">
+          <X size={18} />
         </button>
-        <h2 className="text-xl font-bold text-[var(--text-main)] leading-none">Settings</h2>
+        <h2 className="text-lg font-black text-[var(--text-main)] leading-none uppercase tracking-tight">Settings <span className="text-[var(--status-info)] opacity-50">v2</span></h2>
       </div>
       
-      <div className="flex bg-[var(--bg-input)] p-1 rounded-xl border border-[var(--border-main)] mb-6 shadow-[var(--shadow-sm)]">
+      <div className="flex bg-[var(--bg-input)] p-1 rounded-none border border-[var(--border-main)] mb-4 shadow-[var(--shadow-sm)]">
         <button 
           onClick={() => updateSession({ settingsTab: 'ai' })}
-          className={`flex-1 py-2 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${session.settingsTab === 'ai' ? 'bg-[var(--accent)] text-white shadow-lg' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}
+          className={`flex-1 py-1.5 text-[9px] font-black uppercase tracking-widest rounded-lg transition-all ${session.settingsTab === 'ai' ? 'bg-[var(--accent)] text-white shadow-lg' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}
         >
           AI
         </button>
         <button 
           onClick={() => updateSession({ settingsTab: 'jira' })}
-          className={`flex-1 py-2 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${session.settingsTab === 'jira' ? 'bg-[var(--accent)] text-white shadow-lg' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}
+          className={`flex-1 py-1.5 text-[9px] font-black uppercase tracking-widest rounded-lg transition-all ${session.settingsTab === 'jira' ? 'bg-[var(--accent)] text-white shadow-lg' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}
         >
           Field Mapping
         </button>
         <button 
           onClick={() => updateSession({ settingsTab: 'connections' })}
-          className={`flex-1 py-2 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${session.settingsTab === 'connections' ? 'bg-[var(--accent)] text-white shadow-lg' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}
+          className={`flex-1 py-1.5 text-[9px] font-black uppercase tracking-widest rounded-lg transition-all ${session.settingsTab === 'connections' ? 'bg-[var(--accent)] text-white shadow-lg' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}
         >
           Connections
         </button>
       </div>
 
       {session.settingsTab === 'ai' ? (
-        <>
-          <div className="bg-[var(--bg-card)] border border-[var(--border-main)] p-4 rounded-xl space-y-3 mb-6 shadow-[var(--shadow-sm)]">
+        <div className="space-y-6 animate-in slide-in-from-bottom-4 duration-500">
+          <div className="bg-[var(--bg-card)] border border-[var(--border-main)] p-5 rounded-[1.5rem] space-y-4 shadow-[var(--shadow-sm)] relative overflow-hidden group">
+            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-[var(--status-info)]/20 to-transparent"></div>
             <div className="flex items-center gap-2 mb-1">
-              <div className="h-1 w-1 bg-[var(--status-info)] rounded-full"></div>
-              <span className="text-[10px] font-black uppercase text-[var(--status-info)] tracking-widest">Platform Settings</span>
+              <div className="h-1.5 w-1.5 bg-[var(--status-info)] rounded-full animate-pulse"></div>
+              <span className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--status-info)]/70">Platform Settings</span>
             </div>
             <div className="space-y-1.5">
-              <label className="text-[11px] font-bold uppercase tracking-widest text-[var(--text-muted)] ml-1">BugMind API Endpoint</label>
+              <label className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)] opacity-60 ml-0.5">BugMind API Endpoint</label>
               <input 
                 type="url" 
                 value={apiBase} 
@@ -196,61 +547,70 @@ const SettingsView: React.FC = () => {
                   setApiBase(val);
                   chrome.storage.local.set({ 'bugmind_api_base': val.trim().replace(/\/+$/, '') });
                 }}
-                className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-4 py-3 outline-none focus:border-[var(--status-info)]/50 transition-all text-sm text-[var(--text-main)] placeholder:text-[var(--text-muted)] placeholder:opacity-50"
+                className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-none px-4 py-2 outline-none focus:border-[var(--status-info)]/30 focus:ring-1 focus:ring-[var(--status-info)]/10 transition-all text-xs text-[var(--text-main)] placeholder:text-[var(--text-muted)] placeholder:opacity-30 shadow-inner"
                 placeholder="https://api.bugmind.ai/api/v1"
               />
             </div>
           </div>
-          <div className="bg-[var(--status-info)]/5 border border-[var(--status-info)]/10 p-4 rounded-xl space-y-2 mb-6 shadow-inner">
-            <p className="text-[11px] text-[var(--status-info)] uppercase font-bold tracking-wider">Experimental Feature</p>
-            <p className="text-xs text-[var(--text-muted)] leading-normal">
+          
+          <div className="bg-[var(--status-info)]/5 border border-[var(--status-info)]/10 p-5 rounded-[1.5rem] space-y-3 shadow-inner">
+            <div className="flex items-center gap-2">
+              <Zap size={14} className="text-[var(--status-info)]" fill="currentColor" />
+              <p className="text-[11px] text-[var(--status-info)] uppercase font-black tracking-wider">Experimental Feature</p>
+            </div>
+            <p className="text-[11px] text-[var(--text-muted)] leading-relaxed opacity-80">
               Override the default BugMind AI configuration with your own OpenRouter credentials. Leave fields empty to use the system default.
             </p>
           </div>
 
-          <form onSubmit={handleSaveSettings} className="space-y-5">
+          <form onSubmit={handleSaveSettings} className="space-y-6">
             <div className="space-y-2">
-              <label className="text-[11px] font-bold uppercase tracking-widest text-[var(--text-muted)] ml-1">OpenRouter API Key</label>
+              <label className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)] opacity-60 ml-1">OpenRouter API Key</label>
               <input 
                 type="password" 
                 value={customKey} 
                 onChange={e => setCustomKey(e.target.value)}
-                className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-4 py-3 outline-none focus:border-blue-500/50 transition-all text-sm text-[var(--text-main)]"
+                className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-none px-4 py-2 outline-none focus:border-[var(--status-info)]/30 focus:ring-1 focus:ring-[var(--status-info)]/10 transition-all text-xs text-[var(--text-main)] shadow-inner"
                 placeholder={hasCustomKeySaved ? "••••••••••••••••" : "sk-or-v1-..."}
               />
-              {hasCustomKeySaved && <p className="text-[10px] text-[var(--status-success)] ml-1">✓ Custom key currently active</p>}
+              {hasCustomKeySaved && (
+                <div className="flex items-center gap-1.5 ml-1 mt-1">
+                  <Check size={12} className="text-[var(--status-success)]" />
+                  <p className="text-[10px] text-[var(--status-success)] font-bold uppercase tracking-tight">Custom key active</p>
+                </div>
+              )}
             </div>
 
             <div className="space-y-2">
-              <label className="text-[11px] font-bold uppercase tracking-widest text-[var(--text-muted)] ml-1">AI Model ID</label>
+              <label className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)] opacity-60 ml-1">AI Model ID</label>
               <input 
                 type="text" 
                 value={customModel} 
                 onChange={e => setCustomModel(e.target.value)}
-                className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-4 py-3 outline-none focus:border-blue-500/50 transition-all text-sm text-[var(--text-main)]"
+                className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-none px-4 py-2 outline-none focus:border-[var(--status-info)]/30 focus:ring-1 focus:ring-[var(--status-info)]/10 transition-all text-xs text-[var(--text-main)] shadow-inner"
                 placeholder="e.g. anthropic/claude-3-sonnet"
               />
-              <p className="text-[10px] text-[var(--text-muted)] ml-1 opacity-70">Format: vendor/model-name</p>
+              <p className="text-[10px] text-[var(--text-muted)] ml-1 opacity-50 italic">Format: vendor/model-name</p>
             </div>
 
-            <div className="pt-4 space-y-3">
+            <div className="pt-2">
               <button
                 type="submit"
                 disabled={session.loading}
-                className="w-full bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:bg-[var(--border-main)] disabled:text-[var(--text-muted)] disabled:shadow-none disabled:cursor-not-allowed text-white font-bold py-4 rounded-2xl transition-all shadow-lg shadow-[var(--accent)]/20"
+                className="w-full bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:bg-[var(--border-main)] disabled:text-[var(--text-muted)] disabled:shadow-none disabled:cursor-not-allowed text-white font-black py-2.5 rounded-none transition-all shadow-xl shadow-[var(--accent)]/20 active:scale-[0.98] btn-press"
               >
                 <span className="inline-flex items-center justify-center gap-2">
-                  {session.loading ? <Loader2 size={16} className="animate-spin" /> : null}
+                  {session.loading ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
                   {session.loading ? 'Applying Settings...' : 'Apply Custom Settings'}
                 </span>
               </button>
             </div>
           </form>
-        </>
+        </div>
       ) : session.settingsTab === 'connections' ? (
         <div className="space-y-4 animate-in fade-in duration-300">
           <div className="flex items-center justify-between mb-2">
-            <h3 className="text-xs font-black uppercase text-[var(--text-muted)] tracking-widest">Active Connections</h3>
+            <h3 className="text-[11px] font-black uppercase text-[var(--text-muted)] tracking-widest">Active Connections</h3>
             <button 
               onClick={() => {
                 setShowAddConnection(prev => !prev);
@@ -293,22 +653,25 @@ const SettingsView: React.FC = () => {
                   setIsCreatingConnection(false);
                 }
               }}
-              className="bg-[var(--bg-card)] border border-[var(--border-main)] rounded-2xl p-4 space-y-3 shadow-[var(--shadow-sm)]"
+              className="bg-[var(--bg-card)] border border-[var(--border-main)] rounded-none p-3 space-y-3 shadow-[var(--shadow-sm)]"
             >
               <div className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Add New Connection</div>
-              <select
-                value={newConnection.auth_type}
-                onChange={(e) => setNewConnection(prev => ({ ...prev, auth_type: e.target.value }))}
-                className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-3 py-2 text-xs text-[var(--text-main)]"
-              >
-                <option value="cloud">Jira Cloud</option>
-                <option value="server">Server / DC</option>
-              </select>
+              <div className="space-y-1">
+                <div className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)] ml-1">Authentication Protocol</div>
+                <LuxurySearchableSelect
+                  options={[
+                    { id: 'cloud', name: 'Atlassian Cloud (API Token)' },
+                    { id: 'server', name: 'Jira Data Center (PAT)' }
+                  ]}
+                  value={{ id: newConnection.auth_type }}
+                  onChange={(next: any) => setNewConnection(prev => ({ ...prev, auth_type: next.id }))}
+                />
+              </div>
               <input
                 type="url"
                 value={newConnection.host_url}
                 onChange={(e) => setNewConnection(prev => ({ ...prev, host_url: e.target.value }))}
-                className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-3 py-2 text-xs text-[var(--text-main)]"
+                className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-none px-3 py-2 text-[11px] text-[var(--text-main)]"
                 placeholder={newConnection.auth_type === 'cloud' ? 'https://company.atlassian.net' : 'http://jira.internal.com'}
                 required
               />
@@ -316,7 +679,7 @@ const SettingsView: React.FC = () => {
                 type="text"
                 value={newConnection.username}
                 onChange={(e) => setNewConnection(prev => ({ ...prev, username: e.target.value }))}
-                className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-3 py-2 text-xs text-[var(--text-main)]"
+                className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-none px-3 py-2 text-[11px] text-[var(--text-main)]"
                 placeholder="Email / username"
                 required
               />
@@ -324,11 +687,11 @@ const SettingsView: React.FC = () => {
                 type="password"
                 value={newConnection.token}
                 onChange={(e) => setNewConnection(prev => ({ ...prev, token: e.target.value }))}
-                className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-3 py-2 text-xs text-[var(--text-main)]"
+                className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-none px-3 py-2 text-[11px] text-[var(--text-main)]"
                 placeholder="API Token / PAT"
                 required
               />
-              <label className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
+              <label className="flex items-center gap-2 text-[11px] text-[var(--text-muted)]">
                 <input
                   type="checkbox"
                   checked={newConnection.verify_ssl}
@@ -340,7 +703,7 @@ const SettingsView: React.FC = () => {
                 <button
                   type="submit"
                   disabled={isCreatingConnection}
-                  className="flex-1 bg-[var(--accent)] text-white font-bold py-2 rounded-xl text-xs flex items-center justify-center gap-2 disabled:opacity-60"
+                  className="flex-1 bg-[var(--accent)] text-white font-bold py-2 rounded-none text-[11px] flex items-center justify-center gap-2 disabled:opacity-60"
                 >
                   <Save size={12} />
                   {isCreatingConnection ? 'Saving...' : 'Add New Connection'}
@@ -348,7 +711,7 @@ const SettingsView: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setShowAddConnection(false)}
-                  className="px-3 bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl text-xs"
+                  className="px-3 bg-[var(--bg-input)] border border-[var(--border-main)] rounded-none text-[11px]"
                 >
                   Cancel
                 </button>
@@ -358,14 +721,14 @@ const SettingsView: React.FC = () => {
 
           <div className="space-y-3">
             {(!session.connections || session.connections.length === 0) ? (
-              <div className="py-8 text-center bg-[var(--bg-input)] rounded-2xl border border-dashed border-[var(--border-main)]">
-                <p className="text-xs text-[var(--text-muted)]">No connections found.</p>
+              <div className="py-8 text-center bg-[var(--bg-input)] rounded-none border border-dashed border-[var(--border-main)]">
+                <p className="text-[11px] text-[var(--text-muted)]">No connections found.</p>
               </div>
             ) : (
               session.connections.map((conn) => (
                 <div 
                   key={conn.id} 
-                  className={`p-4 rounded-2xl border transition-all ${
+                  className={`p-3 rounded-none border transition-all ${
                     session.jiraConnectionId === conn.id 
                       ? 'bg-[var(--accent)]/5 border-[var(--accent)] shadow-md' 
                       : 'bg-[var(--bg-card)] border-[var(--border-main)]'
@@ -373,7 +736,7 @@ const SettingsView: React.FC = () => {
                 >
                   <div className="flex justify-between items-start mb-2">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-[var(--bg-input)] flex items-center justify-center border border-[var(--border-main)]">
+                      <div className="w-8 h-8 rounded-none bg-[var(--bg-input)] flex items-center justify-center border border-[var(--border-main)]">
                         {conn.icon_url ? (
                           <img src={conn.icon_url} className="w-6 h-6 rounded-md" alt="" />
                         ) : (
@@ -381,7 +744,7 @@ const SettingsView: React.FC = () => {
                         )}
                       </div>
                       <div>
-                        <p className="text-sm font-bold text-[var(--text-main)] leading-tight">{conn.username}</p>
+                        <p className="text-xs font-bold text-[var(--text-main)] leading-tight">{conn.username}</p>
                         <p className="text-[10px] text-[var(--text-muted)] truncate max-w-[150px]">{conn.host_url}</p>
                       </div>
                     </div>
@@ -471,36 +834,38 @@ const SettingsView: React.FC = () => {
                       }}
                       className="mt-3 pt-3 border-t border-[var(--border-main)] space-y-3"
                     >
-                      <select
-                        value={connectionDrafts[conn.id].auth_type}
-                        onChange={(e) => setConnectionDrafts(prev => ({ ...prev, [conn.id]: { ...prev[conn.id], auth_type: e.target.value } }))}
-                        className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-3 py-2 text-xs text-[var(--text-main)]"
-                      >
-                        <option value="cloud">Jira Cloud</option>
-                        <option value="server">Server / DC</option>
-                      </select>
+                      <div className="space-y-1">
+                        <LuxurySearchableSelect
+                          options={[
+                            { id: 'cloud', name: 'Jira Cloud' },
+                            { id: 'server', name: 'Server / DC' }
+                          ]}
+                          value={{ id: connectionDrafts[conn.id].auth_type }}
+                          onChange={(next: any) => setConnectionDrafts(prev => ({ ...prev, [conn.id]: { ...prev[conn.id], auth_type: next.id } }))}
+                        />
+                      </div>
                       <input
                         type="url"
                         value={connectionDrafts[conn.id].host_url}
                         onChange={(e) => setConnectionDrafts(prev => ({ ...prev, [conn.id]: { ...prev[conn.id], host_url: e.target.value } }))}
-                        className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-3 py-2 text-xs text-[var(--text-main)]"
+                        className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-none px-3 py-2 text-[11px] text-[var(--text-main)]"
                         placeholder="https://company.atlassian.net"
                       />
                       <input
                         type="text"
                         value={connectionDrafts[conn.id].username}
                         onChange={(e) => setConnectionDrafts(prev => ({ ...prev, [conn.id]: { ...prev[conn.id], username: e.target.value } }))}
-                        className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-3 py-2 text-xs text-[var(--text-main)]"
+                        className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-none px-3 py-2 text-[11px] text-[var(--text-main)]"
                         placeholder="Email / username"
                       />
                       <input
                         type="password"
                         value={connectionDrafts[conn.id].token}
                         onChange={(e) => setConnectionDrafts(prev => ({ ...prev, [conn.id]: { ...prev[conn.id], token: e.target.value } }))}
-                        className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-3 py-2 text-xs text-[var(--text-main)]"
+                        className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-none px-3 py-2 text-[11px] text-[var(--text-main)]"
                         placeholder="Leave blank to keep current token"
                       />
-                      <label className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
+                      <label className="flex items-center gap-2 text-[11px] text-[var(--text-muted)]">
                         <input
                           type="checkbox"
                           checked={connectionDrafts[conn.id].verify_ssl}
@@ -509,11 +874,11 @@ const SettingsView: React.FC = () => {
                         Verify SSL certificates
                       </label>
                       <div className="flex gap-2">
-                        <button type="submit" className="flex-1 bg-[var(--accent)] text-white font-bold py-2 rounded-xl text-xs flex items-center justify-center gap-2">
+                        <button type="submit" className="flex-1 bg-[var(--accent)] text-white font-bold py-2 rounded-none text-[11px] flex items-center justify-center gap-2">
                           <Save size={12} />
                           Save Connection
                         </button>
-                        <button type="button" onClick={() => setEditingConnectionId(null)} className="px-3 bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl text-xs">
+                        <button type="button" onClick={() => setEditingConnectionId(null)} className="px-3 bg-[var(--bg-input)] border border-[var(--border-main)] rounded-none text-[11px]">
                           Cancel
                         </button>
                       </div>
@@ -525,49 +890,50 @@ const SettingsView: React.FC = () => {
           </div>
         </div>
       ) : (
-        <div className="space-y-6 animate-in fade-in duration-300">
-          <div className="bg-[var(--status-success)]/5 border border-[var(--status-success)]/10 p-4 rounded-xl space-y-2 mb-2 shadow-inner">
-            <p className="text-[11px] text-[var(--status-success)] uppercase font-bold tracking-wider">Project Configuration</p>
-            <p className="text-xs text-[var(--text-muted)] leading-normal">
-              Configuration for project <strong>{session.issueData?.key.split('-')[0]}</strong>. Settings are saved per issue type.
+        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+          <div className="bg-[var(--status-success)]/5 border border-[var(--status-success)]/10 p-5 rounded-[1.5rem] space-y-2 mb-2 shadow-inner relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-[var(--status-success)]/20 to-transparent"></div>
+            <p className="text-[10px] text-[var(--status-success)] uppercase font-black tracking-[0.2em] opacity-80">Project Configuration</p>
+            <p className="text-[11px] text-[var(--text-muted)] leading-relaxed">
+              Target project: <strong className="text-[var(--text-main)]">{session.issueData?.key.split('-')[0]}</strong>. Settings are saved per issue type.
             </p>
           </div>
 
-          <div className="space-y-4">
+          <div className="space-y-5">
             <div className="space-y-2">
-              <label className="text-[11px] font-bold uppercase tracking-widest text-[var(--text-muted)] ml-1">Select Issue Type</label>
+              <label className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)] opacity-60 ml-1">Select Issue Type</label>
               <div className="relative flex items-center gap-3">
                 {session.selectedIssueType?.icon_url && (
-                  <div className="w-10 h-10 rounded-xl bg-[var(--bg-input)] flex items-center justify-center border border-[var(--border-main)] shrink-0">
-                    <img src={session.selectedIssueType.icon_url} className="w-6 h-6" alt="" />
+                  <div className="w-12 h-12 rounded-[1.2rem] bg-[var(--bg-input)] flex items-center justify-center border border-[var(--border-main)] shrink-0 shadow-inner group">
+                    <img src={session.selectedIssueType.icon_url} className="w-6 h-6 group-hover:scale-110 transition-transform" alt="" />
                   </div>
                 )}
-                <div className="relative flex-1">
-                  <select 
-                    value={session.selectedIssueType?.id || ''}
-                    onChange={(e) => {
-                      const type = session.issueTypes.find((t: IssueType) => t.id === e.target.value);
+                <div className="flex-1">
+                  <LuxurySearchableSelect 
+                    options={session.issueTypes.map((type: IssueType) => ({ id: type.id, name: type.name, avatar: type.icon_url }))}
+                    value={session.selectedIssueType}
+                    placeholder="Select issue type..."
+                    onChange={(type: any) => {
                       if (type && session.jiraConnectionId && session.issueData) {
                         updateSession({ selectedIssueType: type, jiraMetadata: null });
                         void bootstrapJiraConfig(type.id, { force: true, loading: true, logTag: 'SETTINGS-TYPE' });
                       }
                     }}
-                    className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-4 py-3 outline-none focus:border-[var(--status-info)]/50 transition-all text-sm appearance-none cursor-pointer pr-10 text-[var(--text-main)] shadow-[var(--shadow-sm)]"
-                  >
-                    {session.issueTypes.map((type: IssueType) => (
-                      <option key={type.id} value={type.id}>{type.name}</option>
-                    ))}
-                  </select>
-                  <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" size={16} />
+                  />
                 </div>
               </div>
             </div>
 
             {!session.jiraMetadata ? (
               session.error?.includes('Jira fields') || session.error?.includes('issue types') ? (
-                <div className="py-8 px-4 text-center bg-[var(--status-danger)]/5 border border-[var(--status-danger)]/20 rounded-2xl space-y-4 animate-in fade-in duration-300">
-                  <div className="text-[var(--status-danger)] text-xs font-bold uppercase tracking-tight">Configuration Error</div>
-                  <p className="text-[11px] text-[var(--text-muted)] leading-relaxed px-4">{session.error}</p>
+                <div className="py-10 px-6 text-center bg-[var(--status-danger)]/5 border border-[var(--status-danger)]/10 rounded-[2rem] space-y-4 animate-in zoom-in duration-500 shadow-inner">
+                  <div className="w-8 h-8 bg-[var(--status-danger)]/10 rounded-none flex items-center justify-center text-[var(--status-danger)] mx-auto shadow-inner border border-[var(--status-danger)]/10">
+                    <AlertCircle size={28} />
+                  </div>
+                  <div className="space-y-1">
+                    <div className="text-[var(--status-danger)] text-[10px] font-black uppercase tracking-widest">Configuration Error</div>
+                    <p className="text-[11px] text-[var(--text-muted)] leading-relaxed px-4">{session.error}</p>
+                  </div>
                   <button 
                     onClick={() => {
                       const pKey = session.issueData?.key.split('-')[0];
@@ -580,19 +946,19 @@ const SettingsView: React.FC = () => {
                         }
                       }
                     }}
-                    className="w-full bg-[var(--status-danger)]/10 hover:bg-[var(--status-danger)]/20 border border-[var(--status-danger)]/30 text-[var(--status-danger)] text-[10px] font-black py-3 rounded-xl transition-all uppercase tracking-widest"
+                    className="w-full bg-[var(--status-danger)]/10 hover:bg-[var(--status-danger)]/20 border border-[var(--status-danger)]/20 text-[var(--status-danger)] text-[10px] font-black py-2.5 rounded-none transition-all uppercase tracking-[0.2em] btn-press shadow-lg shadow-[var(--status-danger)]/5"
                   >
-                    Retry Fetch
+                    Retry Discovery
                   </button>
                 </div>
               ) : session.issueTypesFetched && session.issueTypes.length === 0 ? (
-                <div className="py-12 px-4 text-center bg-[var(--status-warning)]/5 border border-[var(--status-warning)]/20 rounded-2xl space-y-4 animate-in fade-in duration-300">
-                  <div className="w-12 h-12 bg-[var(--status-warning)]/10 rounded-2xl flex items-center justify-center text-[var(--status-warning)] mx-auto shadow-inner border border-[var(--status-warning)]/10">
-                    <AlertCircle size={24} />
+                <div className="py-12 px-6 text-center bg-[var(--status-warning)]/5 border border-[var(--status-warning)]/10 rounded-[2rem] space-y-5 animate-in zoom-in duration-500 shadow-inner">
+                  <div className="w-8 h-8 bg-[var(--status-warning)]/10 rounded-none flex items-center justify-center text-[var(--status-warning)] mx-auto shadow-inner border border-[var(--status-warning)]/10">
+                    <AlertCircle size={28} />
                   </div>
-                  <div className="space-y-1">
-                    <div className="text-[var(--text-main)] text-sm font-bold">No Issue Types Found</div>
-                    <p className="text-[11px] text-[var(--text-muted)] leading-tight px-4 italic">
+                  <div className="space-y-2">
+                    <div className="text-[var(--text-main)] text-base font-black tracking-tight">No Issue Types Found</div>
+                    <p className="text-[11px] text-[var(--text-muted)] leading-relaxed px-4 opacity-80 italic">
                       Verify your Jira account has "Browse Projects" permissions for project <strong>{session.issueData?.key.split('-')[0]}</strong>.
                     </p>
                   </div>
@@ -604,28 +970,29 @@ const SettingsView: React.FC = () => {
                         void bootstrapJiraConfig(undefined, { force: true, loading: true, logTag: 'SETTINGS-REFRESH', errorMessage: 'Failed to refresh issue types.' });
                       }
                     }}
-                    className="w-full bg-[var(--status-info)]/10 hover:bg-[var(--status-info)]/20 border border-[var(--status-info)]/30 text-[var(--status-info)] text-[10px] font-black py-3 rounded-xl transition-all uppercase tracking-widest"
+                    className="w-full bg-[var(--status-info)]/10 hover:bg-[var(--status-info)]/20 border border-[var(--status-info)]/20 text-[var(--status-info)] text-[10px] font-black py-2.5 rounded-none transition-all uppercase tracking-[0.2em] btn-press"
                   >
                     Refresh Project Config
                   </button>
                 </div>
               ) : (
-                <div className="py-12 text-center text-[var(--text-muted)] flex flex-col items-center gap-3">
+                <div className="py-16 text-center flex flex-col items-center gap-3 animate-in fade-in duration-700">
                   <div className="relative">
-                    <Loader2 className="animate-spin text-[var(--status-info)]/30" size={32} />
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <div className="h-1.5 w-1.5 bg-[var(--status-info)] rounded-full animate-pulse" />
-                    </div>
+                    <div className="absolute inset-0 bg-[var(--status-info)]/20 blur-2xl rounded-full animate-pulse"></div>
+                    <Loader2 className="animate-spin text-[var(--status-info)]/60 relative" size={40} />
                   </div>
-                  <div className="text-[10px] uppercase tracking-widest font-black text-[var(--text-muted)] opacity-60">Fetching Remote Schema...</div>
+                  <div className="text-[10px] uppercase tracking-[0.3em] font-black text-[var(--text-muted)] opacity-50">Syncing Schema...</div>
                 </div>
               )
             ) : (
-              <div className="space-y-6">
+              <div className="space-y-8">
                 <div className="flex justify-between items-center px-1">
-                  <div className="flex flex-col">
-                    <span className="text-[10px] font-black uppercase text-[var(--text-muted)] tracking-widest opacity-60">Schema Loaded</span>
-                    <span className="text-[9px] text-[var(--status-success)] font-bold">Synced with Jira</span>
+                  <div className="flex items-center gap-2">
+                    <div className="h-2 w-2 rounded-full bg-[var(--status-success)] animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
+                    <div className="flex flex-col">
+                      <span className="text-[10px] font-black uppercase text-[var(--text-muted)] tracking-widest opacity-60">Schema Loaded</span>
+                      <span className="text-[9px] text-[var(--status-success)] font-black uppercase tracking-tighter">Verified with Jira</span>
+                    </div>
                   </div>
                   <button 
                     onClick={() => {
@@ -634,54 +1001,55 @@ const SettingsView: React.FC = () => {
                         void bootstrapJiraConfig(session.selectedIssueType.id, { force: true, loading: true, logTag: 'SETTINGS-FORCE', errorMessage: 'Failed to refresh Jira fields.' });
                       }
                     }}
-                    className="text-[10px] font-bold text-blue-500 hover:underline flex items-center gap-1"
+                    className="text-[10px] font-black uppercase tracking-widest text-blue-500 hover:text-blue-400 transition-colors flex items-center gap-1.5 p-1 px-2 rounded-lg hover:bg-blue-500/5"
                   >
                     <RefreshCw size={10} />
                     Force Refresh
                   </button>
                 </div>
+
                 {/* AI Property Mapping Section */}
-                <div className="bg-[var(--status-info)]/5 border border-[var(--status-info)]/10 p-4 rounded-xl space-y-4 shadow-inner">
-                  <div className="flex items-center gap-2 mb-1">
-                    <div className="h-1 w-1 bg-[var(--status-info)] rounded-full"></div>
-                    <span className="text-[10px] font-black uppercase text-[var(--status-info)] tracking-widest">AI Property Mapping</span>
-                  </div>
-                  <p className="text-[10px] text-[var(--text-muted)] opacity-80 leading-normal uppercase font-bold tracking-tight">
-                    Route AI data to specific custom fields
-                  </p>
-                  
-                  {[
-                    { id: 'steps_to_reproduce', label: 'Steps to Reproduce' },
-                    { id: 'expected_result', label: 'Expected Result' },
-                    { id: 'actual_result', label: 'Actual Result' }
-                  ].map(prop => (
-                    <div key={prop.id} className="space-y-1.5">
-                      <label className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)] ml-1">{prop.label}</label>
-                      <div className="relative">
-                        <select 
-                          value={(session.aiMapping?.[prop.id]) || 'description'}
-                          onChange={(e) => {
-                            const nextMapping = { ...(session.aiMapping || {}), [prop.id]: e.target.value };
-                            saveFieldSettings(undefined, nextMapping);
-                          }}
-                          className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-3 py-2.5 outline-none focus:border-[var(--status-info)]/50 transition-all text-xs appearance-none cursor-pointer pr-10 text-[var(--text-main)] shadow-inner"
-                        >
-                          <option value="description">Description (Default)</option>
-                          {editableJiraFields.map((f: JiraField) => (
-                            <option key={f.key} value={f.key}>{f.name} ({f.key})</option>
-                          ))}
-                        </select>
-                        <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none opacity-60" size={14} />
-                      </div>
+                <div className="bg-gradient-to-br from-[var(--bg-card)] to-[var(--bg-card)]/30 border border-[var(--border-main)] p-7 rounded-none space-y-7 shadow-[0_15px_40px_rgba(0,0,0,0.2)] relative overflow-hidden group">
+                  <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-transparent via-[var(--status-info)]/30 to-transparent"></div>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-3">
+                      <div className="h-2 w-2 bg-[var(--status-info)] rounded-full shadow-[0_0_15px_rgba(59,130,246,0.8)]"></div>
+                      <span className="text-[11px] font-black uppercase tracking-[0.3em] text-[var(--status-info)]">Property Intelligence</span>
                     </div>
-                  ))}
+                    <Zap size={14} className="text-[var(--status-info)] opacity-40" />
+                  </div>
+                  
+                  <div className="space-y-6">
+                    {[
+                      { id: 'steps_to_reproduce', label: 'Steps to Reproduce' },
+                      { id: 'expected_result', label: 'Expected Result' },
+                      { id: 'actual_result', label: 'Actual Result' }
+                    ].map(prop => (
+                      <div key={prop.id} className="space-y-2.5">
+                        <label className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--text-muted)] opacity-50 ml-1">{prop.label}</label>
+                        <div className="relative group/select">
+                          <LuxurySearchableSelect 
+                            options={[
+                              { id: 'description', name: 'Description (System Default)' },
+                              ...editableJiraFields.map((f: JiraField) => ({ id: f.key, name: `${f.name} — ${f.key}` }))
+                            ]}
+                            value={{ id: (session.aiMapping?.[prop.id]) || 'description' }}
+                            onChange={(next: any) => {
+                              const nextMapping = { ...(session.aiMapping || {}), [prop.id]: next.id };
+                              saveFieldSettings(undefined, nextMapping);
+                            }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
 
                 {/* Visible Fields Section */}
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="flex items-center gap-2">
-                      <label className="text-[11px] font-bold uppercase tracking-widest text-[var(--text-muted)] ml-1">Available Fields</label>
+                <div className="space-y-5">
+                  <div className="flex items-center justify-between mb-2 px-1">
+                    <div className="flex items-center gap-3">
+                      <label className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)] opacity-60">Available Fields</label>
                       <button 
                         onClick={() => {
                           if (session.issueData && session.selectedIssueType) {
@@ -689,151 +1057,79 @@ const SettingsView: React.FC = () => {
                           }
                         }}
                         disabled={session.loading}
-                        className={`p-1 rounded-md hover:bg-[var(--accent)]/10 text-[var(--accent)] transition-all ${session.loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        className={`p-1.5 rounded-lg hover:bg-[var(--status-info)]/10 text-[var(--status-info)] transition-all ${session.loading ? 'opacity-50 cursor-not-allowed' : ''} border border-transparent hover:border-[var(--status-info)]/20`}
                         title="Force refresh available fields"
                       >
                         <RefreshCw size={12} className={session.loading ? 'animate-spin' : ''} />
                       </button>
                     </div>
-                    <span className="text-[10px] text-[var(--status-info)] font-bold bg-[var(--status-info)]/10 px-2 py-0.5 rounded-full shadow-sm">{editableJiraFields.length} Found</span>
+                    <span className="text-[9px] text-[var(--status-info)] font-black uppercase tracking-widest bg-[var(--status-info)]/10 px-2.5 py-1 rounded-full shadow-sm border border-[var(--status-info)]/10">{editableJiraFields.length} Available</span>
                   </div>
-                  <div className="max-h-[250px] overflow-y-auto pr-2 custom-scrollbar space-y-2">
+                  <div className="max-h-[550px] overflow-y-auto pr-2 custom-scrollbar space-y-4 pb-12">
                     {editableJiraFields.length === 0 ? (
-                      <div className="py-8 text-center bg-[var(--bg-input)] rounded-xl border border-dashed border-[var(--border-main)] shadow-inner">
-                        <p className="text-xs text-[var(--text-muted)] opacity-60">No extra fields found for this type.</p>
+                      <div className="py-20 text-center bg-gradient-to-b from-[var(--bg-input)] to-transparent rounded-none border border-dashed border-[var(--border-main)] shadow-inner">
+                        <p className="text-[10px] uppercase tracking-widest font-black text-[var(--text-muted)] opacity-40 italic">Discovery in progress or no fields found</p>
                       </div>
                     ) : (
-                      editableJiraFields.map((field: JiraField) => {
-                        const savedDefault = normalizeSavedFieldValue(field, session.fieldDefaults?.[field.key]);
-                        return (
-                        <div 
-                          key={field.key}
-                          className={`flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer ${
-                            session.visibleFields.includes(field.key) || field.required
-                              ? 'bg-[var(--status-info)]/10 border-[var(--status-info)]/30' 
-                              : 'bg-[var(--bg-card)] border-[var(--border-main)] hover:border-[var(--status-info)]/30 shadow-[var(--shadow-sm)]'
-                          } ${field.required ? 'opacity-80' : ''}`}
-                        >
-                          <div className="flex flex-col gap-2 flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs font-bold text-[var(--text-main)]">{field.name}</span>
-                              {field.required && <span className="text-[10px] font-black text-[var(--status-info)] bg-[var(--status-info)]/20 px-1.5 py-0.5 rounded uppercase tracking-tighter">Locked</span>}
-                            </div>
-                            <span className="text-[9px] text-[var(--text-muted)] opacity-70 uppercase tracking-tighter">{field.type} {field.required && '• REQUIRED'}</span>
-                            <div className="space-y-1">
-                              <span className="text-[9px] text-[var(--text-muted)] opacity-70 uppercase tracking-tighter">Saved Default Value</span>
-                              {field.allowed_values && field.allowed_values.length > 0 ? (
-                                field.type === 'multi-select' ? (
-                                  <select
-                                    multiple
-                                    value={Array.isArray(savedDefault) ? (savedDefault as JiraFieldOption[]).map((item) => item.id) : []}
-                                    onChange={(e) => {
-                                      const selectedIds = Array.from(e.target.selectedOptions).map((option) => option.value);
-                                      const nextValue = (field.allowed_values || []).filter((option) => selectedIds.includes(option.id));
-                                      updateFieldDefault(field, nextValue);
-                                    }}
-                                    className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-3 py-2 outline-none focus:border-[var(--status-info)]/50 transition-all text-xs text-[var(--text-main)] min-h-[88px]"
-                                  >
-                                    {(field.allowed_values || []).map((option) => (
-                                      <option key={option.id} value={option.id}>
-                                        {getFieldOptionLabel(option)}
-                                      </option>
-                                    ))}
-                                  </select>
-                                ) : (
-                                  <div className="relative">
-                                    <select
-                                      value={!Array.isArray(savedDefault) && typeof savedDefault === 'object' && savedDefault !== null ? String((savedDefault as JiraFieldOption).id || '') : ''}
-                                      onChange={(e) => {
-                                        const nextOption = (field.allowed_values || []).find((option) => option.id === e.target.value) || null;
-                                        updateFieldDefault(field, nextOption);
-                                      }}
-                                      className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-3 py-2 outline-none focus:border-[var(--status-info)]/50 transition-all text-xs appearance-none cursor-pointer pr-10 text-[var(--text-main)]"
-                                    >
-                                      <option value="">No saved default</option>
-                                      {(field.allowed_values || []).map((option) => (
-                                        <option key={option.id} value={option.id}>
-                                          {getFieldOptionLabel(option)}
-                                        </option>
-                                      ))}
-                                    </select>
-                                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none opacity-60" size={14} />
-                                  </div>
-                                )
-                              ) : field.type === 'boolean' ? (
-                                <label className="flex items-center gap-2 text-xs text-[var(--text-main)]">
-                                  <input
-                                    type="checkbox"
-                                    checked={Boolean(savedDefault)}
-                                    onChange={(e) => updateFieldDefault(field, e.target.checked ? true : null)}
-                                    className="w-4 h-4 rounded border-[var(--border-main)] bg-[var(--bg-input)] text-[var(--status-info)] focus:ring-[var(--status-info)]/50"
-                                  />
-                                  <span>Enabled</span>
-                                </label>
-                              ) : isMultiValueField(field) ? (
-                                <input
-                                  type="text"
-                                  value={Array.isArray(savedDefault) ? (savedDefault as string[]).join(', ') : ''}
-                                  onChange={(e) => {
-                                    const nextValue = e.target.value
-                                      .split(',')
-                                      .map((item) => item.trim())
-                                      .filter(Boolean);
-                                    updateFieldDefault(field, nextValue);
-                                  }}
-                                  className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-3 py-2 outline-none focus:border-[var(--status-info)]/50 transition-all text-xs text-[var(--text-main)]"
-                                  placeholder="Comma-separated values"
-                                />
-                              ) : (
-                                <input
-                                  type={field.type === 'number' ? 'number' : 'text'}
-                                  value={typeof savedDefault === 'string' || typeof savedDefault === 'number' ? String(savedDefault) : ''}
-                                  onChange={(e) => updateFieldDefault(field, field.type === 'number' ? (e.target.value === '' ? null : Number(e.target.value)) : e.target.value)}
-                                  className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-3 py-2 outline-none focus:border-[var(--status-info)]/50 transition-all text-xs text-[var(--text-main)]"
-                                  placeholder="No saved default"
-                                />
-                              )}
-                            </div>
-                          </div>
-                          <input 
-                            type="checkbox"
-                            checked={session.visibleFields.includes(field.key) || field.required}
-                            disabled={field.required}
-                            onChange={() => {
+                      [...editableJiraFields]
+                        .sort((a, b) => {
+                          const aVis = (session.visibleFields.includes(a.key) || a.required) ? 1 : 0;
+                          const bVis = (session.visibleFields.includes(b.key) || b.required) ? 1 : 0;
+                          if (aVis !== bVis) return bVis - aVis;
+                          return a.name.localeCompare(b.name);
+                        })
+                        .map((field: JiraField) => (
+                          <FieldRow 
+                            key={field.key}
+                            field={field}
+                            savedDefault={normalizeSavedFieldValue(field, session.fieldDefaults?.[field.key])}
+                            updateFieldDefault={updateFieldDefault}
+                            searchUsers={searchUsers}
+                            isVisible={session.visibleFields.includes(field.key) || field.required}
+                            onToggleVisibility={() => {
                               if (field.required) return;
                               const next = session.visibleFields.includes(field.key)
                                 ? session.visibleFields.filter((f: string) => f !== field.key)
                                 : [...session.visibleFields, field.key];
                               saveFieldSettings(next);
                             }}
-                            className="w-4 h-4 rounded border-[var(--border-main)] bg-[var(--bg-input)] text-[var(--status-info)] focus:ring-[var(--status-info)]/50 disabled:opacity-50"
                           />
-                        </div>
-                      )})
+                        ))
                     )}
                   </div>
                 </div>
 
-                {/* SSL Toggle in Settings */}
-                <div className="bg-[var(--bg-card)] border border-[var(--border-main)] p-4 rounded-xl space-y-3 shadow-[var(--shadow-sm)]">
-                  <div className="flex items-center gap-2 mb-1">
-                    <div className="h-1 w-1 bg-[var(--status-success)] rounded-full"></div>
-                    <span className="text-[10px] font-black uppercase text-[var(--status-success)] tracking-widest">Security Configuration</span>
-                  </div>
+                {/* Security Section */}
+                <div className="bg-gradient-to-br from-[var(--bg-card)] to-[var(--bg-card)]/40 border border-[var(--border-main)] p-7 rounded-[2rem] space-y-5 shadow-[var(--shadow-sm)] relative group overflow-hidden">
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-[var(--status-success)]/5 blur-3xl rounded-full -mr-12 -mt-12"></div>
                   <div className="flex items-center gap-3">
-                    <input 
-                      type="checkbox" 
-                      id="verify-ssl-settings"
-                      checked={jira.verifySsl} 
-                      onChange={e => {
-                        const val = e.target.checked;
-                        jira.setVerifySsl(val);
-                      }}
-                      className="w-4 h-4 rounded border-[var(--border-main)] bg-[var(--bg-input)] text-blue-600 focus:ring-blue-500/50"
-                    />
-                    <label htmlFor="verify-ssl-settings" className="text-xs text-[var(--text-muted)] cursor-pointer">Verify SSL Certificates</label>
+                    <div className="h-2 w-2 bg-[var(--status-success)] rounded-full shadow-[0_0_10px_rgba(34,197,94,0.6)]"></div>
+                    <span className="text-[11px] font-black uppercase tracking-[0.3em] text-[var(--status-success)]">Protocol Hardening</span>
                   </div>
-                  <p className="text-[10px] text-[var(--text-muted)] opacity-70 italic">Note: Changing this requires re-verifying the connection.</p>
+                  
+                  <div className="flex items-center justify-between bg-[var(--bg-input)]/50 p-3 rounded-none border border-[var(--border-main)]/50">
+                    <div className="flex flex-col">
+                      <span className="text-[11px] font-black tracking-tight text-[var(--text-main)]">SSL Certificate Verification</span>
+                      <span className="text-[9px] text-[var(--text-muted)] uppercase font-bold tracking-tighter mt-0.5">TLS Enforcement</span>
+                    </div>
+                    <button
+                      onClick={() => jira.setVerifySsl(!jira.verifySsl)}
+                      className={`relative w-10 h-6 rounded-full transition-all duration-500 border ${
+                        jira.verifySsl ? 'bg-[var(--status-success)] border-[var(--status-success)] shadow-[0_0_15px_rgba(34,197,94,0.3)]' : 'bg-[var(--bg-card)] border-[var(--border-main)]'
+                      }`}
+                    >
+                      <div className={`absolute top-1/2 -translate-y-1/2 w-4.5 h-4.5 rounded-full bg-white shadow-md transition-all duration-500 ${
+                        jira.verifySsl ? 'left-[19px]' : 'left-[3px]'
+                      }`} />
+                    </button>
+                  </div>
+                  
+                  <div className="flex gap-3 px-1">
+                    <div className="w-1 bg-[var(--border-main)] rounded-full opacity-30"></div>
+                    <p className="text-[10px] text-[var(--text-muted)] opacity-60 leading-relaxed font-medium">
+                      Standard protocol for Jira Data Center. Disable only if using self-signed certificates in a controlled environment.
+                    </p>
+                  </div>
                 </div>
               </div>
             )}

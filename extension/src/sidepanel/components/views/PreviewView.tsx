@@ -91,7 +91,7 @@ const PreviewView: React.FC = () => {
       </div>
 
       <div className="space-y-4">
-        <h2 className="text-2xl font-black text-[var(--text-main)] tracking-tight">Jira Preview</h2>
+        <h2 className="text-lg font-black text-[var(--text-main)] tracking-tight">Jira Preview</h2>
         <p className="text-[11px] text-[var(--text-muted)] leading-relaxed">
           This is exactly how your bug will look in <span className="font-bold text-[var(--status-info)]">Jira {session.issueData?.key.split('-')[0]}</span>. 
           Use the <span className="font-bold">Edit Manually</span> button below to change individual fields.
@@ -100,7 +100,7 @@ const PreviewView: React.FC = () => {
 
       {/* Validation Panel */}
       {!isValid && (
-        <div className="bg-[var(--status-danger)]/5 border border-[var(--status-danger)]/20 rounded-2xl p-4 space-y-3">
+        <div className="bg-[var(--status-danger)]/5 border border-[var(--status-danger)]/20 rounded-none p-4 space-y-3">
           <div className="flex items-center gap-2 text-[var(--status-danger)] font-black text-[10px] uppercase tracking-widest">
             <AlertTriangle size={14} />
             Mandatory Fields Missing
@@ -114,7 +114,7 @@ const PreviewView: React.FC = () => {
       )}
 
       {/* High Fidelity Preview Card */}
-      <div className="space-y-6 bg-[var(--bg-card)] border border-[var(--border-main)] rounded-[2.5rem] p-8 pb-16 shadow-2xl relative overflow-hidden">
+      <div className="space-y-6 bg-[var(--bg-card)] border border-[var(--border-main)] rounded-none p-8 pb-16 shadow-2xl relative overflow-hidden">
         <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-transparent via-[var(--status-info)]/30 to-transparent"></div>
         
         {/* Issue Type Header */}
@@ -140,7 +140,7 @@ const PreviewView: React.FC = () => {
             <AlignLeft size={12} />
             <span className="text-[9px] font-black uppercase tracking-[0.2em]">Core Description</span>
           </div>
-          <div className="prose prose-invert max-w-none bg-[var(--bg-app)]/20 rounded-2xl p-4 border border-dashed border-[var(--border-main)]/50">
+          <div className="prose prose-invert max-w-none bg-[var(--bg-app)]/20 rounded-none p-4 border border-dashed border-[var(--border-main)]/50">
             <JiraMarkdown content={previewDescription} />
           </div>
         </div>
@@ -151,7 +151,7 @@ const PreviewView: React.FC = () => {
         <div className="grid grid-cols-1 gap-6 mb-8">
           <div className="space-y-2">
             <span className="text-[9px] font-black uppercase tracking-[0.2em] text-[var(--status-success)]/80">Steps to Reproduce</span>
-            <div className="bg-[var(--bg-app)]/40 rounded-2xl p-4 border border-[var(--border-main)]/50">
+            <div className="bg-[var(--bg-app)]/40 rounded-none p-4 border border-[var(--border-main)]/50">
               <JiraMarkdown content={previewSteps} />
             </div>
           </div>
@@ -159,13 +159,13 @@ const PreviewView: React.FC = () => {
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <span className="text-[9px] font-black uppercase tracking-[0.2em] text-[var(--status-info)]/80">Expected Result</span>
-              <div className="bg-[var(--bg-app)]/40 rounded-2xl p-4 border border-[var(--border-main)]/50 h-full">
+              <div className="bg-[var(--bg-app)]/40 rounded-none p-4 border border-[var(--border-main)]/50 h-full">
                 <JiraMarkdown content={bug.expected_result} />
               </div>
             </div>
             <div className="space-y-2">
               <span className="text-[9px] font-black uppercase tracking-[0.2em] text-[var(--status-danger)]/80">Actual Result</span>
-              <div className="bg-[var(--bg-app)]/40 rounded-2xl p-4 border border-[var(--border-main)]/50 h-full">
+              <div className="bg-[var(--bg-app)]/40 rounded-none p-4 border border-[var(--border-main)]/50 h-full">
                 <JiraMarkdown content={bug.actual_result} />
               </div>
             </div>
@@ -187,7 +187,7 @@ const PreviewView: React.FC = () => {
                 const displayVal = formatResolvedFieldValue(val);
 
                 return (
-                  <div key={key} className="flex flex-col gap-1 bg-[var(--bg-app)]/40 p-3 rounded-2xl border border-[var(--border-main)]/30">
+                  <div key={key} className="flex flex-col gap-1 bg-[var(--bg-app)]/40 p-3 rounded-none border border-[var(--border-main)]/30">
                     <span className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-wider">{field?.name || key}</span>
                     <span className="text-[10px] font-bold text-[var(--status-info)] truncate">{displayVal}</span>
                   </div>
