@@ -202,7 +202,12 @@ export const JiraProvider: React.FC<{
 
     const promise = performFetch();
     bootstrapPromiseRef.current.set(cacheKey, promise);
-    return promise;
+    return promise.finally(() => {
+      const currentPromise = bootstrapPromiseRef.current.get(cacheKey);
+      if (currentPromise === promise) {
+        bootstrapPromiseRef.current.delete(cacheKey);
+      }
+    });
   }, [apiBase, applyBootstrapContext, authToken, logDebug, refreshAuthToken, updateSession]);
 
   useEffect(() => {

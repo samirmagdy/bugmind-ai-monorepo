@@ -54,6 +54,7 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
   const hydratedTabRef = useRef<number | null>(null);
   const lastBootstrapSignatureRef = useRef<string>('');
   const lastContextMessageSignatureRef = useRef<string>('');
+  const staleRecoveryAttemptedRef = useRef<number | null>(null);
   const loginInFlightRef = useRef(false);
   const registerInFlightRef = useRef(false);
   const saveSettingsInFlightRef = useRef(false);
@@ -189,7 +190,7 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
         chrome.runtime.sendMessage({
           type: 'GET_CURRENT_CONTEXT',
           tabId: currentTabId,
-          force: true
+          force: false
         }, (response) => {
           if (response) {
             if (response.error) {
@@ -211,6 +212,7 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
     hydratedTabRef.current = null;
     lastBootstrapSignatureRef.current = '';
     lastContextMessageSignatureRef.current = '';
+    staleRecoveryAttemptedRef.current = null;
   }, [currentTabId]);
 
   // 2. Listen for Background Events (Phase 1)
@@ -257,17 +259,18 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
       if (!lastStaleCheck.current) { lastStaleCheck.current = Date.now(); }
       const staleTime = Date.now() - lastStaleCheck.current;
       
-      if (staleTime > 2000) { // 2 seconds without context
-        logDebug('SYNC-STALE', 'Still no context after 2s. Re-requesting background scan...');
-        chrome.runtime.sendMessage({ 
-          type: 'GET_CURRENT_CONTEXT', 
+      if (staleTime > 4000 && staleRecoveryAttemptedRef.current !== currentTabId) {
+        staleRecoveryAttemptedRef.current = currentTabId;
+        logDebug('SYNC-STALE', 'Still no context after 4s. Re-requesting background scan once...');
+        chrome.runtime.sendMessage({
+          type: 'GET_CURRENT_CONTEXT',
           tabId: currentTabId,
-          force: true 
+          force: true
         });
-        lastStaleCheck.current = Date.now();
       }
     } else {
       lastStaleCheck.current = null;
+      staleRecoveryAttemptedRef.current = null;
     }
 
     if (isMain && hasContext) {

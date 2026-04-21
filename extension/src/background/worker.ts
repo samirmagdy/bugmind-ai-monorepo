@@ -45,6 +45,10 @@ function isInjectableUrl(url: string): boolean {
 
 // In-memory cache for active tab context
 const tabContextCache: Record<number, TabContext> = {};
+const tabRefreshInFlight = new Map<number, Promise<TabContext | null>>();
+const tabLastRefreshAt = new Map<number, number>();
+const tabLastUrl = new Map<number, string>();
+const REFRESH_DEBOUNCE_MS = 1200;
 
 chrome.runtime.onInstalled.addListener(() => {
   console.log('[BugMind-BG] Extension installed. Ready for context discovery.');
@@ -76,74 +80,101 @@ async function ensureContentScript(tabId: number): Promise<boolean> {
     if (response?.type === 'PONG' && response?.version === VERSION) {
       return true;
     }
-    console.log(`[BugMind-BG] Version mismatch or script missing on tab ${tabId}. Healing...`);
+    console.log(`[BugMind-BG] Content script not ready on tab ${tabId}. Waiting for manifest-injected script.`);
   } catch (e) {
-    // Expected if script is not injected
+    // Expected if script is not injected yet
   }
-
-  try {
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      files: ['assets/content.js']
-    });
-    return true;
-  } catch (err) {
-    console.error(`[BugMind-BG] Failed to inject content script into tab ${tabId}:`, err);
-    return false;
-  }
+  return false;
 }
 
 /**
  * Orchestrates context extraction for a specific tab.
  */
-async function refreshTabContext(tabId: number, url?: string) {
+function sameContext(a: TabContext | undefined, b: TabContext): boolean {
+  return JSON.stringify(a || null) === JSON.stringify(b);
+}
+
+async function refreshTabContext(tabId: number, url?: string, force: boolean = false): Promise<TabContext | null> {
+  if (!force) {
+    const existing = tabRefreshInFlight.get(tabId);
+    if (existing) {
+      return existing;
+    }
+  }
+
+  const run = (async (): Promise<TabContext | null> => {
   if (!url) {
     try {
       const tab = await chrome.tabs.get(tabId);
       url = tab.url;
     } catch (e) {
-      return;
+      return null;
     }
   }
 
-  if (!url) return;
-  if (!isInjectableUrl(url)) return;
+  if (!url) return null;
+  if (!isInjectableUrl(url)) return null;
+
+  const now = Date.now();
+  const lastRefresh = tabLastRefreshAt.get(tabId) || 0;
+  const lastUrl = tabLastUrl.get(tabId);
+  if (!force && lastUrl === url && now - lastRefresh < REFRESH_DEBOUNCE_MS) {
+    return tabContextCache[tabId] || null;
+  }
+  tabLastRefreshAt.set(tabId, now);
+  tabLastUrl.set(tabId, url);
 
   // Domain Filter
   const isJira = url.includes(DOMAINS.JIRA_CLOUD) || url.includes(DOMAINS.BROWSE_PATH) || url.includes(DOMAINS.ISSUES_PATH);
   if (!isJira) {
-    tabContextCache[tabId] = { error: 'NOT_A_JIRA_PAGE', issueData: null, instanceUrl: null };
-    chrome.runtime.sendMessage({ type: 'CONTEXT_UPDATED', tabId, context: tabContextCache[tabId] }).catch(() => {});
-    return;
+    const nextContext = { error: 'NOT_A_JIRA_PAGE', issueData: null, instanceUrl: null };
+    const changed = !sameContext(tabContextCache[tabId], nextContext);
+    tabContextCache[tabId] = nextContext;
+    if (changed) {
+      chrome.runtime.sendMessage({ type: 'CONTEXT_UPDATED', tabId, context: nextContext }).catch(() => {});
+    }
+    return nextContext;
   }
 
   const ready = await ensureContentScript(tabId);
-  if (!ready) return;
+  if (!ready) return null;
 
   try {
     const response = await chrome.tabs.sendMessage(tabId, { type: 'GET_ISSUE_DATA' });
     if (response?.type === 'ISSUE_DATA_SUCCESS') {
       const data = response.data;
       const detectedInstance = url.split('/browse/')[0].split('/issues/')[0];
-      
-      tabContextCache[tabId] = {
+
+      const nextContext: TabContext = {
         issueData: data,
         instanceUrl: detectedInstance,
         error: data ? null : 'NOT_A_JIRA_PAGE'
       };
-      
-      // Notify sidepanel if open
-      chrome.runtime.sendMessage({ 
-        type: 'CONTEXT_UPDATED', 
-        tabId, 
-        context: tabContextCache[tabId] 
-      }).catch(() => {
-        // Catch "Could not establish connection" if sidepanel is closed (normal)
-      });
+      const changed = !sameContext(tabContextCache[tabId], nextContext);
+      tabContextCache[tabId] = nextContext;
+
+      if (changed) {
+        chrome.runtime.sendMessage({
+          type: 'CONTEXT_UPDATED',
+          tabId,
+          context: nextContext
+        }).catch(() => {
+          // Catch "Could not establish connection" if sidepanel is closed (normal)
+        });
+      }
+      return nextContext;
     }
   } catch (err) {
     console.error('[BugMind-BG] Context extraction failed:', err);
+    return tabContextCache[tabId] || null;
+  } finally {
+    tabRefreshInFlight.delete(tabId);
   }
+  return tabContextCache[tabId] || null;
+  })();
+
+  tabRefreshInFlight.set(tabId, run);
+  return run;
 }
 
 refreshExistingTabs();
@@ -169,8 +200,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (tabContextCache[tabId] && !force) {
       sendResponse(tabContextCache[tabId]);
     } else {
-      refreshTabContext(tabId).then(() => {
-        sendResponse(tabContextCache[tabId] || { error: 'STALE_PAGE' });
+      refreshTabContext(tabId, undefined, Boolean(force)).then((context) => {
+        sendResponse(context || tabContextCache[tabId] || { error: 'STALE_PAGE' });
       });
     }
     return true; // Keep channel open for async response
