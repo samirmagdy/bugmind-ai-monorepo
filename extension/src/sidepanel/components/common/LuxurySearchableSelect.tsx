@@ -94,12 +94,20 @@ const LuxurySearchableSelect: React.FC<LuxurySearchableSelectProps> = ({
   
   // Helper to resolve a value (object or ID) to a full option for display
   const resolveValueToOption = (v: any): Option => {
-    if (typeof v === 'object' && v !== null) return v;
-    const found = options.find(opt => opt.id === v);
+    const findById = (id: string | number | undefined) => {
+      if (id === undefined || id === null) return null;
+      return options.find(opt => opt.id === id) || asyncResults.find(opt => opt.id === id) || null;
+    };
+
+    if (typeof v === 'object' && v !== null) {
+      if (v.name || v.value || v.label || v.avatar) return v;
+      const matched = findById(v.id);
+      if (matched) return { ...matched, ...v };
+      return { ...v, name: v.id ? String(v.id) : 'Unknown value' };
+    }
+
+    const found = findById(v);
     if (found) return found;
-    // Special case for async results if they aren't in 'options' yet
-    const asyncFound = asyncResults.find(opt => opt.id === v);
-    if (asyncFound) return asyncFound;
     return { id: v, name: String(v) };
   };
 

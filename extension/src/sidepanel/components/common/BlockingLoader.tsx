@@ -1,5 +1,6 @@
 import React from 'react';
 import { Loader2, Zap } from 'lucide-react';
+import { SurfaceCard } from './DesignSystem';
 
 interface BlockingLoaderProps {
   message?: string;
@@ -13,12 +14,12 @@ const BlockingLoader: React.FC<BlockingLoaderProps> = ({ message = "Synthesizing
 
       <div className="relative group mb-10">
         <div className="absolute inset-0 blur-3xl rounded-full animate-pulse bg-[var(--status-info)]/30 group-hover:bg-[var(--status-info)]/40 transition-all duration-1000"></div>
-        <div className="relative z-10 bp-panel p-10 rounded-[3rem] border border-[var(--border-main)] shadow-2xl animate-bp-flicker">
+        <SurfaceCard className="relative z-10 p-10 rounded-[3rem] border border-[var(--border-main)] shadow-2xl animate-bp-flicker">
           <Loader2 className="w-16 h-16 text-[var(--status-info)] animate-spin-slow" />
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
             <Zap size={24} className="text-[var(--status-info)] animate-pulse" fill="currentColor" />
           </div>
-        </div>
+        </SurfaceCard>
       </div>
       
       <div className="text-center space-y-6 px-12 max-w-sm animate-bp-flicker stagger-1">
@@ -26,7 +27,7 @@ const BlockingLoader: React.FC<BlockingLoaderProps> = ({ message = "Synthesizing
           <h3 className="text-lg font-black text-[var(--text-main)] tracking-tight leading-tight">{message}</h3>
           <div className="flex items-center justify-center gap-3">
             <div className="h-px w-6 bg-gradient-to-r from-transparent to-[var(--border-main)]"></div>
-            <p className="bp-subheading text-[10px] opacity-40 lowercase font-bold tracking-tight italic">BugMind Engine Active</p>
+            <p className="bp-subheading text-[10px] normal-case font-bold tracking-tight italic opacity-80">BugMind Engine Active</p>
             <div className="h-px w-6 bg-gradient-to-l from-transparent to-[var(--border-main)]"></div>
           </div>
         </div>

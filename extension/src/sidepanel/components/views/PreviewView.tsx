@@ -1,10 +1,11 @@
 import React from 'react';
 import { useBugMind } from '../../hooks/useBugMind';
-import { 
+import {
   ArrowLeft, AlertTriangle, Send,
   Layout, AlignLeft, ShieldAlert
 } from 'lucide-react';
 import JiraMarkdown from '../common/JiraMarkdown';
+import { ActionButton, StatusPanel, SurfaceCard } from '../common/DesignSystem';
 import { ResolvedFieldValue } from '../../types';
 
 function hasResolvedField(
@@ -100,21 +101,17 @@ const PreviewView: React.FC = () => {
 
       {/* Validation Panel */}
       {!isValid && (
-        <div className="bg-[var(--status-danger)]/5 border border-[var(--status-danger)]/20 rounded-none p-4 space-y-3">
-          <div className="flex items-center gap-2 text-[var(--status-danger)] font-black text-[10px] uppercase tracking-widest">
-            <AlertTriangle size={14} />
-            Mandatory Fields Missing
-          </div>
+        <StatusPanel icon={AlertTriangle} title="Mandatory Fields Missing" tone="danger" className="rounded-none">
           <ul className="space-y-1">
             {session.validationErrors.map((err, i) => (
               <li key={i} className="text-[11px] text-[var(--status-danger)] font-medium">• {err}</li>
             ))}
           </ul>
-        </div>
+        </StatusPanel>
       )}
 
       {/* High Fidelity Preview Card */}
-      <div className="space-y-6 bg-[var(--bg-card)] border border-[var(--border-main)] rounded-none p-8 pb-16 shadow-2xl relative overflow-hidden">
+      <SurfaceCard className="space-y-6 rounded-none p-8 pb-16 shadow-2xl relative overflow-hidden">
         <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-transparent via-[var(--status-info)]/30 to-transparent"></div>
         
         {/* Issue Type Header */}
@@ -196,21 +193,24 @@ const PreviewView: React.FC = () => {
             </div>
           </div>
         )}
-      </div>
+      </SurfaceCard>
 
       {/* Action Bar */}
       <div className="fixed bottom-10 left-0 w-full p-6 bg-gradient-to-t from-[var(--bg-app)] via-[var(--bg-app)] to-transparent pt-10 z-[60]">
         <div className="flex gap-3">
-          <button 
+          <ActionButton
             onClick={() => updateSession({ view: 'main', expandedBug: bugIndex })}
-            className="flex-1 bg-[var(--bg-card)] border border-[var(--border-main)] text-[var(--text-main)] font-black py-4 rounded-[1.5rem] shadow-lg hover:shadow-xl transition-all active:scale-95 uppercase text-[10px] tracking-widest"
+            variant="secondary"
+            tone="neutral"
+            className="flex-1 py-4 rounded-[1.5rem] text-[10px]"
           >
             Edit Manually
-          </button>
-          <button 
+          </ActionButton>
+          <ActionButton
             onClick={() => submitBugs(bugIndex!)}
             disabled={!isValid || session.loading}
-            className="flex-[2] bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-black py-4 rounded-[1.5rem] shadow-xl shadow-[var(--accent)]/20 transition-all enabled:hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:grayscale flex items-center justify-center gap-3 uppercase text-[10px] tracking-widest"
+            variant="primary"
+            className="flex-[2] py-4 rounded-[1.5rem] text-[10px]"
           >
             {session.loading ? (
               <span className="flex items-center gap-2">
@@ -223,7 +223,7 @@ const PreviewView: React.FC = () => {
                 Publish to Jira
               </>
             )}
-          </button>
+          </ActionButton>
         </div>
       </div>
     </div>

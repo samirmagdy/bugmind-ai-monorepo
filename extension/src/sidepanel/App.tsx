@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Loader2, AlertCircle, Plus } from 'lucide-react';
+import { Loader2, AlertCircle, Plus, CheckCircle2 } from 'lucide-react';
 
 // Context
 import { useBugMind } from './hooks/useBugMind';
@@ -16,6 +16,7 @@ import PreviewView from './components/views/PreviewView';
 import DebugConsole from './components/layout/DebugConsole';
 import BlockingLoader from './components/common/BlockingLoader';
 import OnboardingTour from './components/common/OnboardingTour';
+import { ActionButton, StatusPanel } from './components/common/DesignSystem';
 import { APP_VERSION } from './constants';
 
 export default function App() {
@@ -98,42 +99,43 @@ export default function App() {
       <main className="flex-1 overflow-y-auto overflow-x-hidden relative custom-scrollbar">
         <div className="p-4 pb-24 max-w-4xl mx-auto">
           {session.error && !['NOT_A_JIRA_PAGE', 'UNSUPPORTED_ISSUE_TYPE', 'NO_ISSUE_TYPES_FOUND', 'STALE_PAGE'].includes(session.error) && (
-            <div className="mb-6 p-5 bp-panel border-[var(--status-danger)]/20 rounded-[2rem] flex items-start gap-4 animate-bp-flicker shadow-2xl shadow-[var(--status-danger)]/5 relative overflow-hidden group">
-              <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-transparent via-[var(--status-danger)]/30 to-transparent"></div>
-              <div className="w-10 h-10 bg-[var(--status-danger)]/10 rounded-none flex items-center justify-center shrink-0 border border-[var(--status-danger)]/20">
-                <AlertCircle className="w-5 h-5 text-[var(--status-danger)]" />
-              </div>
-              <div className="flex-1">
-                <p className="text-xs font-black text-[var(--text-main)] tracking-tight uppercase">{translateError(session.error).title}</p>
-                <p className="text-[11px] font-medium text-[var(--text-muted)] leading-relaxed mt-1">{translateError(session.error).description}</p>
-                <button 
+            <StatusPanel
+              icon={AlertCircle}
+              tone="danger"
+              title={translateError(session.error).title}
+              description={translateError(session.error).description}
+              action={(
+                <ActionButton
                   onClick={() => updateSession({ error: null })}
-                  className="mt-3 text-[10px] font-black text-[var(--status-danger)] hover:opacity-70 transition-all uppercase tracking-widest flex items-center gap-2"
+                  variant="ghost"
+                  tone="danger"
+                  className="w-auto px-1 py-1"
                 >
-                  <Plus size={12} className="rotate-45" />
-                  Dismiss Warning
-                </button>
-              </div>
-            </div>
+                  <Plus size={14} className="rotate-45" />
+                </ActionButton>
+              )}
+              className="mb-6 animate-bp-flicker"
+            />
           )}
           
           {session.success && (
-            <div className="mb-6 p-5 bp-panel border-[var(--status-success)]/20 rounded-[2rem] flex items-center gap-4 animate-bp-flicker shadow-2xl shadow-[var(--status-success)]/5 relative overflow-hidden group">
-              <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-transparent via-[var(--status-success)]/30 to-transparent"></div>
-              <div className="w-10 h-10 bg-[var(--status-success)]/10 rounded-none flex items-center justify-center shrink-0 border border-[var(--status-success)]/20">
-                <div className="w-1.5 h-1.5 bg-[var(--status-success)] rounded-full animate-pulse shadow-[0_0_10px_var(--status-success)]" />
-              </div>
-              <div className="flex-1">
-                <p className="text-xs font-black text-[var(--text-main)] tracking-tight uppercase leading-tight">{session.success}</p>
-                <p className="text-[9px] text-[var(--status-success)]/70 font-black uppercase tracking-[0.2em] mt-1">Operation Finalized</p>
-              </div>
-              <button 
-                onClick={() => updateSession({ success: null })}
-                className="p-2 hover:bg-[var(--status-success)]/10 rounded-none transition-all text-[var(--status-success)] hover:text-[var(--text-main)]"
-              >
-                <Plus size={16} className="rotate-45" />
-              </button>
-            </div>
+            <StatusPanel
+              icon={CheckCircle2}
+              tone="success"
+              title={session.success}
+              description={<span className="text-[9px] font-black uppercase tracking-[0.2em] text-[var(--status-success)]/70">Operation Finalized</span>}
+              action={(
+                <ActionButton
+                  onClick={() => updateSession({ success: null })}
+                  variant="ghost"
+                  tone="success"
+                  className="w-auto px-1 py-1"
+                >
+                  <Plus size={16} className="rotate-45" />
+                </ActionButton>
+              )}
+              className="mb-6 animate-bp-flicker"
+            />
           )}
 
           {activeView === 'auth' && <AuthView />}

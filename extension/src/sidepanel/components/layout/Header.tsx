@@ -1,6 +1,7 @@
 import React from 'react';
 import { Bug, Settings, LogOut, Sun, Moon } from 'lucide-react';
 import { useBugMind } from '../../hooks/useBugMind';
+import { StatusBadge } from '../common/DesignSystem';
 
 const Header: React.FC = () => {
   const { session: { theme }, auth: { globalView }, ai: { fetchAISettings, usage }, updateSession, handleLogout } = useBugMind();
@@ -19,11 +20,10 @@ const Header: React.FC = () => {
       {globalView !== 'auth' && (
         <div className="flex items-center gap-2">
           {usage && (
-            <div className="hidden sm:flex px-3 py-1.5 rounded-full border border-[var(--border-main)] bg-[var(--bg-card)]/50 backdrop-blur-md shadow-inner items-center gap-2">
-              <div className="h-1 w-1 bg-[var(--status-success)] rounded-full shadow-[0_0_5px_var(--status-success)]"></div>
-              <span className="text-[9px] font-black uppercase tracking-[0.2em] text-[var(--text-muted)]">
+            <div className="hidden sm:flex items-center">
+              <StatusBadge tone="success" className="shadow-inner">
                 {usage.plan}: {usage.remaining}
-              </span>
+              </StatusBadge>
             </div>
           )}
           
@@ -64,4 +64,3 @@ const Header: React.FC = () => {
 };
 
 export default Header;
-

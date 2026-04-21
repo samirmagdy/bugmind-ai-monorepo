@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useBugMind } from '../../hooks/useBugMind';
 import { ExternalLink, ArrowLeft, RefreshCw, Globe, ShieldCheck } from 'lucide-react';
+import { ActionButton, FieldLabel, SectionTitle, SurfaceCard } from '../common/DesignSystem';
 
 const SetupView: React.FC = () => {
   const { 
@@ -74,17 +75,13 @@ const SetupView: React.FC = () => {
           </button>
         )}
         <div className="space-y-1">
-          <h2 className="text-xl font-black bp-heading">Instance Config</h2>
-          <div className="flex items-center gap-2">
-            <div className="h-1 w-6 bg-[var(--status-info)]/30 rounded-full"></div>
-            <p className="bp-subheading lowercase font-bold tracking-tight opacity-40">Link your Jira workspace</p>
-          </div>
+          <SectionTitle title="Instance Config" subtitle="Link your Jira workspace" />
         </div>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-8">
         {/* Global Orchestrator Settings */}
-        <div className="bp-panel p-6 rounded-none relative overflow-hidden group">
+        <SurfaceCard className="p-6 rounded-none relative overflow-hidden group">
           <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-[var(--status-info)]/20 to-transparent"></div>
           <div className="flex items-center gap-3 mb-5">
             <div className="p-2 bg-[var(--status-info)]/10 rounded-none border border-[var(--status-info)]/20 shadow-inner">
@@ -93,7 +90,7 @@ const SetupView: React.FC = () => {
             <span className="bp-subheading text-[var(--status-info)]">BugMind Engine</span>
           </div>
           <div className="space-y-2">
-            <label className="bp-subheading ml-1 opacity-40 lowercase">Control Plane Endpoint</label>
+            <FieldLabel className="normal-case tracking-tight opacity-40">Control Plane Endpoint</FieldLabel>
             <input 
               type="url" 
               value={apiBase} 
@@ -107,11 +104,11 @@ const SetupView: React.FC = () => {
               required
             />
           </div>
-        </div>
+        </SurfaceCard>
 
         {/* Platform Selection */}
         <div className="space-y-3">
-          <label className="bp-subheading ml-2 opacity-40 lowercase">Deployment Architecture</label>
+          <FieldLabel className="ml-2 normal-case tracking-tight opacity-40">Deployment Architecture</FieldLabel>
           <div className="flex bg-[var(--bg-input)] p-1.5 rounded-none border border-[var(--border-main)] shadow-inner">
             <button 
               type="button" 
@@ -131,9 +128,9 @@ const SetupView: React.FC = () => {
         </div>
 
         {/* Credentials Section */}
-        <div className="bp-card rounded-none p-8 space-y-6 shadow-2xl relative overflow-hidden border border-[var(--border-main)]">
+        <SurfaceCard className="rounded-none p-8 space-y-6 shadow-2xl relative overflow-hidden">
           <div className="space-y-2">
-            <label className="bp-subheading ml-1 opacity-40 lowercase">Workspace URL</label>
+            <FieldLabel className="normal-case tracking-tight opacity-40">Workspace URL</FieldLabel>
             <input 
               type="url" 
               value={url} 
@@ -145,7 +142,7 @@ const SetupView: React.FC = () => {
           </div>
 
           <div className="space-y-2">
-            <label className="bp-subheading ml-1 opacity-40 lowercase">Administrative Identity</label>
+            <FieldLabel className="normal-case tracking-tight opacity-40">Administrative Identity</FieldLabel>
             <input 
               type="text" 
               value={username} 
@@ -158,7 +155,7 @@ const SetupView: React.FC = () => {
 
           <div className="space-y-2">
             <div className="flex justify-between items-center px-2">
-              <label className="bp-subheading opacity-40 lowercase">Secure Access Key</label>
+              <FieldLabel className="m-0 normal-case tracking-tight opacity-40">Secure Access Key</FieldLabel>
               <a 
                 href={platform === 'cloud' ? "https://id.atlassian.com/manage-profile/security/api-tokens" : "https://confluence.atlassian.com/x/8Y9XN"} 
                 target="_blank" 
@@ -188,12 +185,13 @@ const SetupView: React.FC = () => {
               <span className="text-[8px] font-bold text-[var(--text-muted)] opacity-40 uppercase tracking-tight">Verify SSL certificates during sync</span>
             </div>
           </div>
-        </div>
+        </SurfaceCard>
 
-        <button 
+        <ActionButton 
           type="submit" 
           disabled={isSubmitting}
-          className="group relative w-full overflow-hidden bg-gradient-to-br from-[var(--accent)] to-[var(--accent-hover)] text-white font-black py-5 rounded-[2rem] transition-all shadow-2xl shadow-[var(--accent)]/30 enabled:hover:scale-[1.02] enabled:hover:shadow-[var(--accent)]/50 active:scale-[0.98] disabled:opacity-40 disabled:grayscale cursor-pointer"
+          variant="primary"
+          className="group relative overflow-hidden py-5 rounded-[2rem] shadow-2xl shadow-[var(--accent)]/30"
         >
           {/* Shimmer Effect */}
           <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000 ease-in-out"></div>
@@ -206,11 +204,10 @@ const SetupView: React.FC = () => {
             )}
             <span className="text-sm uppercase tracking-[0.15em]">{isSubmitting ? 'Synchronizing Environment...' : 'Authenticate & Save Cluster'}</span>
           </div>
-        </button>
+        </ActionButton>
       </form>
     </div>
   );
 };
 
 export default SetupView;
-

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useBugMind } from '../../hooks/useBugMind';
 import { ChevronRight, X, Info, ShieldCheck, Zap } from 'lucide-react';
+import { ActionButton, SurfaceCard } from './DesignSystem';
 
 const OnboardingTour: React.FC = () => {
   const { session, completeOnboarding } = useBugMind();
@@ -30,7 +31,7 @@ const OnboardingTour: React.FC = () => {
 
   return (
     <div className="fixed inset-0 z-[2000] flex items-center justify-center p-8 bg-[var(--bg-overlay)] backdrop-blur-[15px] animate-bp-flicker">
-      <div className="w-full max-w-md bp-panel rounded-[3rem] shadow-2xl relative group overflow-hidden border border-[var(--border-main)]">
+      <SurfaceCard className="w-full max-w-md rounded-[3rem] shadow-2xl relative group overflow-hidden border border-[var(--border-main)]">
         {/* Animated Progress Track */}
         <div className="absolute top-0 left-0 w-full h-1.5 bg-[var(--bg-input)]">
           <div 
@@ -58,7 +59,7 @@ const OnboardingTour: React.FC = () => {
             <h3 className="text-xl font-black text-[var(--text-main)] tracking-tight leading-tight bp-heading">
               {currentStep.title}
             </h3>
-            <p className="bp-subheading text-base leading-relaxed opacity-60">
+            <p className="bp-subheading text-base leading-relaxed opacity-90 normal-case tracking-normal text-[var(--text-soft)]">
               {currentStep.content}
             </p>
           </div>
@@ -73,22 +74,23 @@ const OnboardingTour: React.FC = () => {
               ))}
             </div>
 
-            <button 
+            <ActionButton 
               onClick={() => {
                 if (step < steps.length - 1) setStep(step + 1);
                 else completeOnboarding();
               }}
-              className="group relative overflow-hidden bg-gradient-to-br from-[var(--accent)] to-[var(--accent-hover)] text-white font-black px-10 py-5 rounded-[1.8rem] flex items-center gap-3 transition-all shadow-2xl shadow-[var(--accent)]/30 enabled:hover:scale-[1.05] active:scale-95"
+              variant="primary"
+              className="group relative overflow-hidden w-auto px-10 py-5 rounded-[1.8rem] shadow-2xl shadow-[var(--accent)]/30"
             >
               <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000"></div>
               <span className="relative text-xs uppercase tracking-[0.2em]">
                 {step < steps.length - 1 ? 'Continue' : 'Initialize'}
               </span>
               <ChevronRight size={18} className="relative group-hover:translate-x-1 transition-transform" />
-            </button>
+            </ActionButton>
           </div>
         </div>
-      </div>
+      </SurfaceCard>
     </div>
   );
 };

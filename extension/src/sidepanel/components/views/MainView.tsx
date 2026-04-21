@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { BugReport, JiraField, TestCase } from '../../types';
 import AutoResizeTextarea from '../common/AutoResizeTextarea';
+import { ActionButton, StatusBadge, SurfaceCard } from '../common/DesignSystem';
 import LuxurySearchableSelect from '../common/LuxurySearchableSelect';
 import { TIMEOUTS } from '../../constants';
 
@@ -151,7 +152,7 @@ const MainView: React.FC = () => {
     <div className="space-y-6 animate-in fade-in duration-500">
       {/* Issue Context Card */}
       {/* Issue Context Card */}
-      <section className="luxury-panel p-3 rounded-[2.5rem] relative group overflow-hidden animate-luxury">
+      <SurfaceCard className="p-3 rounded-[2.5rem] relative group overflow-hidden animate-luxury">
         {/* Animated Accent Line */}
         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-[var(--status-info)]/40 to-transparent"></div>
         
@@ -173,7 +174,7 @@ const MainView: React.FC = () => {
                   <img src={session.issueData.iconUrl} className="w-4 h-4 rounded-sm" alt="" />
                 </div>
               ) : (
-                <span className="px-2 py-0.5 bg-blue-500/10 text-blue-400 text-[9px] font-black rounded-lg border border-blue-500/20 shadow-[0_0_10px_rgba(59,130,246,0.1)]">{session.issueData.key}</span>
+                <StatusBadge tone="info" className="rounded-lg px-2 py-0.5 shadow-[0_0_10px_rgba(59,130,246,0.1)]">{session.issueData.key}</StatusBadge>
               )}
               {session.issueData.iconUrl && <span className="text-[10px] font-black text-blue-400/90 tracking-tight">{session.issueData.key}</span>}
               <div className="h-px flex-1 bg-gradient-to-r from-[var(--border-main)] to-transparent"></div>
@@ -204,18 +205,22 @@ const MainView: React.FC = () => {
               </p>
             </div>
             <div className="flex gap-2">
-              <button 
+              <ActionButton 
                 onClick={() => refreshIssue(true)}
-                className="flex-1 luxury-input bg-[var(--status-info)]/5 hover:bg-[var(--status-info)]/10 border-[var(--status-info)]/30 text-[var(--status-info)] text-[9px] font-black py-2.5 rounded-xl transition-all uppercase tracking-widest shadow-lg shadow-[var(--status-info)]/5"
+                variant="secondary"
+                tone="info"
+                className="flex-1 py-2.5 rounded-xl text-[9px]"
               >
                 Retry Now
-              </button>
-              <button 
+              </ActionButton>
+              <ActionButton 
                 onClick={() => handleTabReload()} 
-                className="flex-1 luxury-input bg-[var(--status-warning)]/5 hover:bg-[var(--status-warning)]/10 border-[var(--status-warning)]/30 text-[var(--status-warning)] text-[9px] font-black py-2.5 rounded-xl transition-all uppercase tracking-widest shadow-lg shadow-[var(--status-warning)]/5"
+                variant="secondary"
+                tone="warning"
+                className="flex-1 py-2.5 rounded-xl text-[9px]"
               >
                 Reload Tab
-              </button>
+              </ActionButton>
             </div>
           </div>
         ) : session.error === 'NOT_A_JIRA_PAGE' ? (
@@ -246,13 +251,15 @@ const MainView: React.FC = () => {
               </div>
             </div>
 
-            <button 
+            <ActionButton 
               onClick={() => window.open('https://atlassian.net', '_blank')}
-              className="w-full bg-[var(--status-info)]/10 hover:bg-[var(--status-info)]/20 border border-[var(--status-info)]/30 text-[var(--status-info)] text-[9px] font-black py-2.5 rounded-xl transition-all uppercase tracking-widest flex items-center justify-center gap-1.5 group"
+              variant="secondary"
+              tone="info"
+              className="py-2.5 rounded-xl text-[9px] group"
             >
               Open Jira 
               <ArrowRight size={10} className="group-hover:translate-x-0.5 transition-transform" />
-            </button>
+            </ActionButton>
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center gap-2 py-3 animate-in fade-in duration-300">
@@ -268,7 +275,7 @@ const MainView: React.FC = () => {
             </div>
           </div>
         )}
-      </section>
+      </SurfaceCard>
 
       {/* Action/List Section */}
       {session.error === 'NOT_A_JIRA_PAGE' ? null : (
@@ -747,13 +754,26 @@ const MainView: React.FC = () => {
                                          const results = await searchUsers(q, undefined, field.key);
                                          return (results || []) as any[];
                                        } : undefined}
-                                       onChange={(next) => {
+                                      onChange={(next) => {
                                          let finalVal = next;
                                          if (field.type === 'option' || field.type === 'multi-select' || field.type === 'priority' || field.type === 'user' || field.type === 'multi-user') {
+                                           const toStoredOption = (value: any) => {
+                                             if (typeof value === 'object' && value !== null) {
+                                               return {
+                                                 id: value.id,
+                                                 name: value.name,
+                                                 value: value.value,
+                                                 label: value.label,
+                                                 avatar: value.avatar
+                                               };
+                                             }
+                                             return { id: value };
+                                           };
+
                                            if (isMulti) {
-                                             finalVal = (next as any[]).map(v => typeof v === 'object' ? { id: v.id } : { id: v });
+                                             finalVal = (next as any[]).map(toStoredOption);
                                            } else {
-                                             finalVal = typeof next === 'object' ? { id: next.id } : { id: next };
+                                             finalVal = toStoredOption(next);
                                            }
                                          }
                                          handleUpdateBug(idx, { 

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Plus } from 'lucide-react';
 import { useBugMind } from '../../hooks/useBugMind';
+import { ActionButton, StatusBadge, SurfaceCard } from '../common/DesignSystem';
 
 const DebugConsole: React.FC = () => {
   const { debug: { show: showDebug, setShow: setShowDebug, logs: debugLogs, clear: clearLogs } } = useBugMind();
@@ -10,21 +11,25 @@ const DebugConsole: React.FC = () => {
   return (
     <div className="fixed bottom-0 left-0 right-0 h-1/2 bg-[var(--bg-app)] border-t border-[var(--status-info)]/30 z-[200] flex flex-col animate-in slide-in-from-bottom-full duration-300 shadow-[0_-20px_50px_rgba(0,0,0,0.5)]">
       <div className="flex justify-between items-center px-4 py-2 bg-[var(--bg-card)] border-b border-[var(--border-main)]">
-        <h3 className="text-[11px] font-bold text-[var(--status-info)] uppercase tracking-widest">Detailed Debugger</h3>
+        <StatusBadge tone="info" className="border-none bg-transparent px-0 py-0">Detailed Debugger</StatusBadge>
         <div className="flex items-center gap-3">
-          <button 
+          <ActionButton
             onClick={() => { navigator.clipboard.writeText(JSON.stringify(debugLogs, null, 2)) }}
-            className="text-[10px] text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors"
+            variant="ghost"
+            tone="neutral"
+            className="w-auto px-0 py-0 text-[10px] normal-case tracking-normal font-bold"
           >
             Copy Logs
-          </button>
+          </ActionButton>
           <div className="w-[1px] h-3 bg-[var(--border-main)]" />
-          <button 
+          <ActionButton
             onClick={clearLogs}
-            className="text-[10px] text-[var(--text-muted)] hover:text-[var(--status-danger)] transition-colors"
+            variant="ghost"
+            tone="danger"
+            className="w-auto px-0 py-0 text-[10px] normal-case tracking-normal font-bold"
           >
             Clear
-          </button>
+          </ActionButton>
           <div className="w-[1px] h-3 bg-[var(--border-main)]" />
           <button onClick={() => setShowDebug(false)} className="text-[var(--text-muted)] hover:text-[var(--text-main)] p-1">
             <Plus className="rotate-45" size={18} />
@@ -36,7 +41,7 @@ const DebugConsole: React.FC = () => {
           <div className="text-[var(--text-muted)] opacity-50 italic">No logs yet. Trigger an action to see telemetry...</div>
         ) : (
           debugLogs.map((log, i) => (
-            <div key={i} className="border-l-2 border-[var(--border-main)] pl-2 py-1 hover:bg-[var(--text-main)]/[0.02]">
+            <SurfaceCard key={i} className="border-l-2 rounded-none border-y-0 border-r-0 border-l-[var(--border-main)] bg-transparent px-2 py-1 hover:bg-[var(--text-main)]/[0.02] shadow-none">
               <span className="text-[var(--text-muted)] opacity-60">[{log.timestamp}]</span>{' '}
               <span className={`font-bold ${
                 log.tag.includes('ERROR') || log.tag.includes('FAIL') || log.tag.includes('CRASH') ? 'text-[var(--status-danger)]' : 
@@ -45,7 +50,7 @@ const DebugConsole: React.FC = () => {
                 {log.tag}
               </span>{' '}
               <span className="text-[var(--text-main)]">{log.msg}</span>
-            </div>
+            </SurfaceCard>
           ))
         )}
       </div>

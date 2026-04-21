@@ -15,6 +15,7 @@
   --bg-input: rgba(7, 10, 18, 0.6); /* Near black for contrast */
   --text-main: #f8fafc; /* Slate 50 */
   --text-muted: #94a3b8; /* Slate 400 */
+  --text-soft: #cbd5e1; /* Slate 300 */
   --border-main: rgba(255, 255, 255, 0.08);
   --bg-overlay: rgba(2, 6, 23, 0.8);
   
@@ -44,6 +45,7 @@
   --bg-input: #ffffff;
   --text-main: #0f172a;
   --text-muted: #64748b;
+  --text-soft: #334155;
   --border-main: rgba(15, 23, 42, 0.08);
   --bg-overlay: rgba(15, 23, 42, 0.1);
   --accent: #4f46e5;
@@ -101,12 +103,23 @@ body {
   border-radius: 0.75rem;
   padding: 0.75rem 1rem;
   font-size: 0.8125rem;
+  color: var(--text-main);
 }
 
 .luxury-input:focus {
   border-color: var(--accent);
   box-shadow: inset 0 1px 2px 0 rgba(0, 0, 0, 0.2), 0 0 10px var(--accent-glow);
   background: rgba(15, 23, 42, 0.8);
+}
+
+.theme-light .luxury-input:focus {
+  background: #ffffff;
+}
+
+.luxury-input::placeholder,
+.bp-input::placeholder {
+  color: var(--text-muted);
+  opacity: 0.65;
 }
 
 .btn-ai-audit {
@@ -174,7 +187,7 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.15em;
   color: var(--text-muted);
-  opacity: 0.5;
+  opacity: 0.72;
 }
 
 /* Animations */
@@ -210,6 +223,42 @@ body {
   backdrop-filter: blur(16px) saturate(180%);
   -webkit-backdrop-filter: blur(16px) saturate(180%);
   border: 1px solid var(--border-main);
+}
+
+.bp-panel,
+.bp-card {
+  background: var(--bg-card);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border: 1px solid var(--border-main);
+  box-shadow: var(--shadow-md);
+}
+
+.bp-input {
+  background: var(--bg-input);
+  border: 1px solid var(--border-main);
+  color: var(--text-main);
+  box-shadow: inset 0 1px 2px 0 rgba(0, 0, 0, 0.2);
+}
+
+.bp-input:focus {
+  border-color: var(--accent);
+  box-shadow: inset 0 1px 2px 0 rgba(0, 0, 0, 0.2), 0 0 10px var(--accent-glow);
+}
+
+.bp-heading {
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  color: var(--text-main);
+}
+
+.bp-subheading {
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  opacity: 0.82;
 }
 
 .blur-overlay {
@@ -259,6 +308,39 @@ body {
   font-size: 0.65rem;
   font-weight: 800;
   color: var(--text-muted);
+}
+
+.ds-field-label {
+  display: block;
+  margin-left: 0.25rem;
+  color: var(--text-muted);
+  font-size: 0.625rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  opacity: 0.55;
+}
+
+.ds-action-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.625rem;
+  width: 100%;
+  border: 1px solid var(--border-main);
+  border-radius: 0.9rem;
+  padding: 0.75rem 1rem;
+  font-size: 0.625rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.ds-action-button:disabled {
+  opacity: 0.5;
+  filter: grayscale(1);
+  cursor: not-allowed;
 }
 
 /* Custom Animations */
@@ -314,5 +396,3 @@ body {
 .stagger-6 { animation-delay: 600ms; }
 .stagger-7 { animation-delay: 700ms; }
 .stagger-8 { animation-delay: 800ms; }
-
-
