@@ -80,6 +80,8 @@ export interface AISubmitRequestPayload extends ProjectRequestParams {
 export interface JiraUserSearchRequestPayload extends ProjectRequestParams {
   jira_connection_id: number;
   query: string;
+  issue_type_id?: string | null;
+  field_id?: string | null;
 }
 
 export interface JiraSettingsRequestPayload extends ProjectRequestParams {

@@ -279,7 +279,11 @@ class JiraCloudAdapter(JiraAdapter):
             raise HTTPException(status_code=400, detail="Failed to link issues")
 
     def _normalize_user_search_results(self, payload: Any) -> List[Dict[str, Any]]:
-        users_raw = payload.get("users") if isinstance(payload, dict) else payload
+        users_raw: Any = payload
+        if isinstance(payload, dict):
+            users_raw = payload.get("users", payload)
+            if isinstance(users_raw, dict):
+                users_raw = users_raw.get("users", [])
         if not isinstance(users_raw, list):
             return []
 
@@ -314,7 +318,14 @@ class JiraCloudAdapter(JiraAdapter):
 
         return normalized
 
-    def search_users(self, query: str, project_id: Optional[str] = None, project_key: Optional[str] = None) -> List[Dict[str, Any]]:
+    def search_users(
+        self,
+        query: str,
+        project_id: Optional[str] = None,
+        project_key: Optional[str] = None,
+        issue_type_id: Optional[str] = None,
+        field_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         base_params: Dict[str, Any] = {"query": query, "maxResults": 20}
         attempts: List[tuple[str, Dict[str, Any]]] = []
 
@@ -341,7 +352,19 @@ class JiraCloudAdapter(JiraAdapter):
                 )
             )
 
-        # Picker is the best general-purpose typeahead endpoint for user fields.
+        if field_id:
+            picker_params: Dict[str, Any] = {
+                **base_params,
+                "fieldId": field_id,
+                "showAvatar": "true",
+            }
+            if project_id:
+                picker_params["projectId"] = project_id
+            if issue_type_id:
+                picker_params["issueTypeId"] = issue_type_id
+            attempts.append(("/rest/api/3/groupuserpicker", picker_params))
+
+        # Picker endpoints are the best general-purpose typeahead fallback for Cloud.
         attempts.append(("/rest/api/3/user/picker", dict(base_params)))
         attempts.append(("/rest/api/3/user/search", dict(base_params)))
 

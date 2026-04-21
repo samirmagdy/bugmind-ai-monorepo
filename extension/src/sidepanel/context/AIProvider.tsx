@@ -521,7 +521,9 @@ export const AIProvider: React.FC<{
         jira_connection_id: session.jiraConnectionId,
         query,
         project_id: getProjectRequestParams().projectId,
-        project_key: getProjectRequestParams().projectKey
+        project_key: getProjectRequestParams().projectKey,
+        issue_type_id: session.selectedIssueType?.id ?? null,
+        field_id: bugIndex !== undefined ? session.bugs[bugIndex]?.activeUserSearchField ?? null : null,
       };
       const res = await apiRequest(`${apiBase}/jira/users/search`, {
         method: 'POST',
@@ -547,7 +549,7 @@ export const AIProvider: React.FC<{
     } catch (err) {
       if (bugIndex !== undefined) handleUpdateBug(bugIndex, { userSearchResults: [], isSearchingUsers: false });
     }
-  }, [apiBase, authToken, getProjectRequestParams, refreshAuthToken, handleUpdateBug, session.jiraConnectionId]);
+  }, [apiBase, authToken, getProjectRequestParams, refreshAuthToken, handleUpdateBug, session.bugs, session.jiraConnectionId, session.selectedIssueType]);
 
   const value = useMemo(() => ({
     usage, fetchUsage,

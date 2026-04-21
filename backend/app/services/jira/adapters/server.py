@@ -183,7 +183,14 @@ class JiraServerAdapter(JiraAdapter):
         if response.status_code not in [200, 201]:
             raise HTTPException(status_code=400, detail="Failed to link issues")
 
-    def search_users(self, query: str, project_id: Optional[str] = None, project_key: Optional[str] = None) -> List[Dict[str, Any]]:
+    def search_users(
+        self,
+        query: str,
+        project_id: Optional[str] = None,
+        project_key: Optional[str] = None,
+        issue_type_id: Optional[str] = None,
+        field_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         # Use httpx params to ensure safe URL encoding for spaces/special chars
         # For Jira Server/DC, 'username' is the traditional search parameter.
         params: Dict[str, Any] = {"username": query, "maxResults": 20}

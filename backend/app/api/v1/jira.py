@@ -433,7 +433,9 @@ def search_jira_users(
     results = adapter.search_users(
         query,
         project_id=request.project_id,
-        project_key=request.project_key
+        project_key=request.project_key,
+        issue_type_id=request.issue_type_id,
+        field_id=request.field_id,
     )
     log_audit(
         "jira.user_search",
