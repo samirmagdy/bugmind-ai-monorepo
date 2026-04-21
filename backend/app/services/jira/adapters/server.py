@@ -127,6 +127,23 @@ class JiraServerAdapter(JiraAdapter):
         data = response.json()
         return data.get("issueTypes", [])
 
+    def get_issue_context(self, issue_key: str) -> Dict[str, Any]:
+        response = self._request("GET", f"/rest/api/2/issue/{issue_key}?fields=project,issuetype")
+        if response.status_code != 200:
+            raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to fetch Jira issue context"))
+
+        data = response.json()
+        fields = data.get("fields", {}) if isinstance(data, dict) else {}
+        project = fields.get("project", {}) if isinstance(fields, dict) else {}
+        issue_type = fields.get("issuetype", {}) if isinstance(fields, dict) else {}
+
+        return {
+            "issue_key": str(data.get("key") or issue_key),
+            "project_id": str(project.get("id") or "").strip() or None,
+            "project_key": str(project.get("key") or "").strip() or None,
+            "issue_type_id": str(issue_type.get("id") or "").strip() or None,
+        }
+
     def get_fields(self, project_id: str, issue_type_id: str) -> List[Dict[str, Any]]:
         # Try Jira Server 9.0+ specific endpoint first
         url = f"/rest/api/2/issue/createmeta/{project_id}/issuetypes/{issue_type_id}?expand=allowedValues"

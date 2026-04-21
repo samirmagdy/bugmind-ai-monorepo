@@ -19,6 +19,11 @@ class JiraAdapter(ABC):
     @abstractmethod
     def get_fields(self, project_id: str, issue_type_id: str) -> List[Dict[str, Any]]:
         pass
+
+    @abstractmethod
+    def get_issue_context(self, issue_key: str) -> Dict[str, Any]:
+        """Returns canonical project and issue type context for an issue key."""
+        pass
         
     @abstractmethod
     def create_issue(self, issue_data: Dict[str, Any]) -> str:

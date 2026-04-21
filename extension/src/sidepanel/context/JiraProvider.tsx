@@ -110,6 +110,7 @@ export const JiraProvider: React.FC<{
 
   const bootstrapContext = useCallback(async ({
     instanceUrl,
+    issueKey,
     projectKey,
     projectId,
     issueTypeId,
@@ -118,6 +119,7 @@ export const JiraProvider: React.FC<{
     tokenOverride
   }: {
     instanceUrl: string;
+    issueKey?: string;
     projectKey?: string;
     projectId?: string;
     issueTypeId?: string;
@@ -155,6 +157,7 @@ export const JiraProvider: React.FC<{
 
     const payload: JiraBootstrapRequestPayload = {
       instance_url: normalizedUrl,
+      issue_key: issueKey,
       project_key: projectKey,
       project_id: projectId,
       issue_type_id: requestIssueTypeId

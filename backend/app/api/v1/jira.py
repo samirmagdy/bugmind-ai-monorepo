@@ -192,27 +192,41 @@ def resolve_jira_bootstrap_context(
 
     adapter = get_adapter(conn)
     engine = JiraMetadataEngine(adapter)
+    issue_context: dict = {}
+    if req.issue_key:
+        try:
+            issue_context = adapter.get_issue_context(req.issue_key)
+        except HTTPException:
+            issue_context = {}
 
-    resolved_project_id = req.project_id or req.project_key
+    canonical_project_id = issue_context.get("project_id") or req.project_id
+    canonical_project_key = issue_context.get("project_key") or req.project_key
+    canonical_issue_type_id = req.issue_type_id or issue_context.get("issue_type_id")
+
     issue_types_raw: list[dict] = []
     selected_issue_type_raw: Optional[dict] = None
     visible_fields: list[str] = []
     ai_mapping: dict = {}
     field_defaults: dict = {}
-    metadata_response: Optional[JiraMetadataResponse] = None
-    resolved_project_ref: Optional[str] = None
+    metadata_fields: list[dict] = []
 
-    if resolved_project_id:
-        project_candidates: list[str] = []
-        for candidate in [req.project_id, req.project_key, resolved_project_id]:
-            if candidate and str(candidate) not in project_candidates:
-                project_candidates.append(str(candidate))
+    project_candidates: list[str] = []
+    for candidate in [
+        canonical_project_id,
+        canonical_project_key,
+        req.project_id,
+        req.project_key,
+    ]:
+        if candidate and str(candidate) not in project_candidates:
+            project_candidates.append(str(candidate))
 
+    if project_candidates:
         last_project_error: Optional[HTTPException] = None
+        resolved_issue_type_project_ref: Optional[str] = None
         for project_candidate in project_candidates:
             try:
                 issue_types_raw = engine.get_project_metadata(project_candidate)
-                resolved_project_ref = project_candidate
+                resolved_issue_type_project_ref = project_candidate
                 break
             except HTTPException as exc:
                 last_project_error = exc
@@ -221,15 +235,15 @@ def resolve_jira_bootstrap_context(
         if not issue_types_raw and last_project_error:
             raise last_project_error
 
-        selected_issue_type_raw = _select_issue_type(issue_types_raw, req.issue_type_id)
+        selected_issue_type_raw = _select_issue_type(issue_types_raw, canonical_issue_type_id)
 
-        if selected_issue_type_raw and resolved_project_ref:
+        if selected_issue_type_raw:
             selected_issue_type_id = str(selected_issue_type_raw.get("id", ""))
             mapping = db.query(JiraFieldMapping).filter(
                 JiraFieldMapping.user_id == current_user.id,
                 or_(
-                    JiraFieldMapping.project_key == (req.project_key or resolved_project_ref),
-                    JiraFieldMapping.project_id == req.project_id
+                    JiraFieldMapping.project_key == (canonical_project_key or resolved_issue_type_project_ref),
+                    JiraFieldMapping.project_id == canonical_project_id,
                 ),
                 JiraFieldMapping.issue_type_id == selected_issue_type_id
             ).first()
@@ -237,26 +251,25 @@ def resolve_jira_bootstrap_context(
             ai_mapping = mapping.field_mappings if mapping else {}
             field_defaults = mapping.field_defaults if mapping else {}
 
-            metadata_fields = []
-            last_metadata_error: Optional[HTTPException] = None
             for project_candidate in project_candidates:
                 try:
                     metadata_fields = engine.get_field_schema(project_candidate, selected_issue_type_id)
-                    resolved_project_ref = project_candidate
+                    if str(project_candidate).isdigit():
+                        canonical_project_id = canonical_project_id or project_candidate
+                    else:
+                        canonical_project_key = canonical_project_key or project_candidate
                     break
-                except HTTPException as exc:
-                    last_metadata_error = exc
+                except HTTPException:
                     continue
 
-            if not metadata_fields and last_metadata_error:
-                raise last_metadata_error
-
-            metadata_response = JiraMetadataResponse(
-                project_key=req.project_key or str(resolved_project_ref),
-                project_id=req.project_id or str(resolved_project_ref),
-                issue_type_id=selected_issue_type_id,
-                fields=[JiraFieldResponse(**field) for field in metadata_fields]
-            )
+    metadata_response: Optional[JiraMetadataResponse] = None
+    if canonical_project_id or canonical_project_key:
+        metadata_response = JiraMetadataResponse(
+            project_key=canonical_project_key or str(canonical_project_id),
+            project_id=canonical_project_id or canonical_project_key,
+            issue_type_id=str(selected_issue_type_raw.get("id", "")) if selected_issue_type_raw else canonical_issue_type_id,
+            fields=[JiraFieldResponse(**field) for field in metadata_fields]
+        )
 
     response = JiraBootstrapContextResponse(
         connection_id=conn.id,

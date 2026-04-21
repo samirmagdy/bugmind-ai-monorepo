@@ -130,8 +130,9 @@ const SettingsView: React.FC = () => {
     try {
       return await jira.bootstrapContext({
         instanceUrl: session.instanceUrl,
+        issueKey: session.issueData.key,
         projectKey,
-        projectId: session.issueData.projectId,
+        projectId: session.jiraMetadata?.project_id || session.issueData.projectId,
         issueTypeId,
         tabId: currentTabId,
         force

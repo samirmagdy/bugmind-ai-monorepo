@@ -143,6 +143,7 @@ def bootstrap_authenticated_session(
             bootstrap_context = resolve_jira_bootstrap_context(
                 JiraBootstrapContextRequest(
                     instance_url=request.instance_url,
+                    issue_key=request.issue_key,
                     project_key=request.project_key,
                     project_id=request.project_id,
                     issue_type_id=request.issue_type_id,

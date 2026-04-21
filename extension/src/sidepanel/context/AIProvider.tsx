@@ -118,10 +118,10 @@ export const AIProvider: React.FC<{
   const getProjectRequestParams = useCallback(() => {
     const { project_key, project_id } = buildProjectRequestParams(session.issueData);
     return {
-      projectKey: project_key,
-      projectId: project_id
+      projectKey: session.jiraMetadata?.project_key || project_key,
+      projectId: session.jiraMetadata?.project_id || project_id
     };
-  }, [session.issueData]);
+  }, [session.issueData, session.jiraMetadata]);
 
   const fetchUsage = useCallback(async () => {
     if (!authToken) return;

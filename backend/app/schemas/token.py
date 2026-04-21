@@ -19,6 +19,7 @@ class TokenPayload(BaseModel):
 
 class AuthBootstrapRequest(BaseModel):
     instance_url: Optional[str] = None
+    issue_key: Optional[str] = None
     project_key: Optional[str] = None
     project_id: Optional[str] = None
     issue_type_id: Optional[str] = None

@@ -30,6 +30,7 @@ export interface JiraContextType {
   }) => Promise<boolean>;
   bootstrapContext: (params: {
     instanceUrl: string;
+    issueKey?: string;
     projectKey?: string;
     projectId?: string;
     issueTypeId?: string;

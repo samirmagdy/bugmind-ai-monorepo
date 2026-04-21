@@ -236,6 +236,23 @@ class JiraCloudAdapter(JiraAdapter):
         # Standardize for frontend (ensure id and name are present)
         return [{"id": str(t["id"]), "name": t["name"]} for t in issue_types]
 
+    def get_issue_context(self, issue_key: str) -> Dict[str, Any]:
+        response = self._request("GET", f"/rest/api/3/issue/{issue_key}?fields=project,issuetype")
+        if response.status_code != 200:
+            raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to fetch Jira issue context"))
+
+        data = response.json()
+        fields = data.get("fields", {}) if isinstance(data, dict) else {}
+        project = fields.get("project", {}) if isinstance(fields, dict) else {}
+        issue_type = fields.get("issuetype", {}) if isinstance(fields, dict) else {}
+
+        return {
+            "issue_key": str(data.get("key") or issue_key),
+            "project_id": str(project.get("id") or "").strip() or None,
+            "project_key": str(project.get("key") or "").strip() or None,
+            "issue_type_id": str(issue_type.get("id") or "").strip() or None,
+        }
+
     def get_fields(self, project_id: str, issue_type_id: str) -> List[Dict[str, Any]]:
         # Use the official Jira Cloud v3 createmeta endpoint with query filters
         # Note: The path-based version is for Server/DC only.

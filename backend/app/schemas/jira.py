@@ -29,6 +29,7 @@ class JiraConnectionResponse(JiraConnectionBase):
 
 class JiraBootstrapContextRequest(BaseModel):
     instance_url: str
+    issue_key: Optional[str] = None
     project_key: Optional[str] = None
     project_id: Optional[str] = None
     issue_type_id: Optional[str] = None

@@ -96,6 +96,7 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
     logDebug('SYNC-CONN-CONTEXT', `Bootstrapping Jira context for ${context.instanceUrl}`);
     return jira.bootstrapContext({
       instanceUrl: context.instanceUrl,
+      issueKey: context.issueData?.key,
       projectKey,
       projectId: context.issueData?.projectId,
       issueTypeId: selectedIssueTypeIdRef.current,
@@ -142,6 +143,7 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
     const { project_key, project_id } = buildProjectRequestParams(currentContext?.issueData || null);
     const payload: AuthBootstrapRequestPayload = {
       instance_url: currentContext?.instanceUrl || undefined,
+      issue_key: currentContext?.issueData?.key || undefined,
       project_key,
       project_id,
       issue_type_id: session.selectedIssueType?.id || undefined
@@ -480,7 +482,7 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
         const synced = await jira.saveFieldSettings({
           jiraConnectionId: sessionData.session.jiraConnectionId,
           projectKey: pKey,
-          projectId: sessionData.session.issueData?.projectId,
+          projectId: sessionData.session.jiraMetadata?.project_id || sessionData.session.issueData?.projectId,
           issueTypeId: sessionData.session.selectedIssueType.id,
           visibleFields: nf || sessionData.session.visibleFields,
           aiMapping: nm || sessionData.session.aiMapping,

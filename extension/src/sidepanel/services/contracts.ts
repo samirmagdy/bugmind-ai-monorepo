@@ -20,6 +20,7 @@ export interface ProjectRequestParams {
 
 export interface AuthBootstrapRequestPayload extends ProjectRequestParams {
   instance_url?: string;
+  issue_key?: string;
   issue_type_id?: string;
 }
 
@@ -39,6 +40,7 @@ export interface AuthRefreshRequestPayload {
 
 export interface JiraBootstrapRequestPayload extends ProjectRequestParams {
   instance_url: string;
+  issue_key?: string;
   issue_type_id?: string;
 }
 
