@@ -530,11 +530,22 @@ export const AIProvider: React.FC<{
         signal: searchControllerRef.current.signal,
         body: JSON.stringify(payload)
       });
-      if (res.ok && bugIndex !== undefined) {
-        handleUpdateBug(bugIndex, { userSearchResults: await readJsonResponse<JiraUsersSearchResponsePayload>(res), isSearchingUsers: false });
+
+      if (bugIndex === undefined) {
+        return;
       }
+
+      if (res.ok) {
+        handleUpdateBug(bugIndex, {
+          userSearchResults: await readJsonResponse<JiraUsersSearchResponsePayload>(res),
+          isSearchingUsers: false
+        });
+        return;
+      }
+
+      handleUpdateBug(bugIndex, { userSearchResults: [], isSearchingUsers: false });
     } catch (err) {
-      if (bugIndex !== undefined) handleUpdateBug(bugIndex, { isSearchingUsers: false });
+      if (bugIndex !== undefined) handleUpdateBug(bugIndex, { userSearchResults: [], isSearchingUsers: false });
     }
   }, [apiBase, authToken, getProjectRequestParams, refreshAuthToken, handleUpdateBug, session.jiraConnectionId]);
 

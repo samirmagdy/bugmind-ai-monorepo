@@ -278,39 +278,107 @@ class JiraCloudAdapter(JiraAdapter):
         if response.status_code not in [200, 201]:
             raise HTTPException(status_code=400, detail="Failed to link issues")
 
+    def _normalize_user_search_results(self, payload: Any) -> List[Dict[str, Any]]:
+        users_raw = payload.get("users") if isinstance(payload, dict) else payload
+        if not isinstance(users_raw, list):
+            return []
+
+        normalized: List[Dict[str, Any]] = []
+        for user in users_raw:
+            if not isinstance(user, dict):
+                continue
+
+            account_id = user.get("accountId")
+            display_name = user.get("displayName")
+            if not account_id or not display_name:
+                continue
+
+            avatar_urls = user.get("avatarUrls")
+            avatar = user.get("avatarUrl")
+            if not avatar and isinstance(avatar_urls, dict):
+                avatar = (
+                    avatar_urls.get("16x16")
+                    or avatar_urls.get("24x24")
+                    or avatar_urls.get("32x32")
+                    or avatar_urls.get("48x48")
+                )
+
+            normalized.append(
+                {
+                    "id": account_id,
+                    "name": display_name,
+                    "email": user.get("emailAddress"),
+                    "avatar": avatar,
+                }
+            )
+
+        return normalized
+
     def search_users(self, query: str, project_id: Optional[str] = None, project_key: Optional[str] = None) -> List[Dict[str, Any]]:
-        # Use httpx params to ensure safe URL encoding for spaces/special chars
-        params: Dict[str, Any] = {"query": query}
-        
-        # Determine the best endpoint based on project context
-        # Official docs: /user/assignable/search handles project scoping, /user/search is global.
-        endpoint = "/rest/api/3/user/search"
-        use_fallback = False
-        
-        if project_id or project_key:
-            endpoint = "/rest/api/3/user/assignable/search"
-            params["project"] = project_id or project_key
-            use_fallback = True
+        base_params: Dict[str, Any] = {"query": query, "maxResults": 20}
+        attempts: List[tuple[str, Dict[str, Any]]] = []
 
-        try:
-            response = self.client.get(endpoint, params=params)
-            
-            # Fallback for 404s (e.g. invalid project context or restricted API)
-            if response.status_code == 404 and use_fallback:
-                logger.info("jira_cloud_search_users_404_fallback", extra={"project": params.get("project"), "query": query})
-                endpoint = "/rest/api/3/user/search"
-                params.pop("project", None)
+        # Prefer project-scoped search first for assignee-style fields. On Cloud, the
+        # multi-project endpoint is more reliable when a project key is available.
+        if project_key:
+            attempts.append(
+                (
+                    "/rest/api/3/user/assignable/multiProjectSearch",
+                    {**base_params, "projectKeys": project_key},
+                )
+            )
+            attempts.append(
+                (
+                    "/rest/api/3/user/assignable/search",
+                    {**base_params, "project": project_key},
+                )
+            )
+        elif project_id:
+            attempts.append(
+                (
+                    "/rest/api/3/user/assignable/search",
+                    {**base_params, "project": project_id},
+                )
+            )
+
+        # Picker is the best general-purpose typeahead endpoint for user fields.
+        attempts.append(("/rest/api/3/user/picker", dict(base_params)))
+        attempts.append(("/rest/api/3/user/search", dict(base_params)))
+
+        last_status: Optional[int] = None
+        for endpoint, params in attempts:
+            try:
                 response = self.client.get(endpoint, params=params)
+            except httpx.HTTPError as exc:
+                logger.warning(
+                    "jira_cloud_search_users_exception",
+                    extra={"error": str(exc), "endpoint": endpoint, "query": query},
+                )
+                continue
 
+            last_status = response.status_code
+            if response.status_code in (401, 403):
+                raise HTTPException(
+                    status_code=400,
+                    detail=self._extract_error_message(response, "Failed to search Jira users"),
+                )
             if response.status_code != 200:
-                logger.warning("jira_cloud_search_users_failed", extra={"status": response.status_code, "endpoint": endpoint, "query": query})
-                raise HTTPException(status_code=400, detail="Failed to search users")
-            
-            users = response.json()
-            return [{"id": u.get("accountId"), "name": u.get("displayName"), "email": u.get("emailAddress")} for u in users]
-        except httpx.HTTPError as exc:
-            logger.error("jira_cloud_search_users_exception", extra={"error": str(exc), "endpoint": endpoint, "query": query})
-            raise HTTPException(status_code=502, detail="Failed to reach Jira Cloud for user search")
+                logger.info(
+                    "jira_cloud_search_users_fallback",
+                    extra={"status": response.status_code, "endpoint": endpoint, "query": query},
+                )
+                continue
+
+            users = self._normalize_user_search_results(response.json())
+            if users:
+                return users
+
+        if last_status is not None:
+            logger.warning(
+                "jira_cloud_search_users_failed",
+                extra={"status": last_status, "query": query, "project_id": project_id, "project_key": project_key},
+            )
+        return []
 
 
 

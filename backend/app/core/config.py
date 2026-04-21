@@ -1,13 +1,15 @@
-from pydantic_settings import BaseSettings
-from typing import Optional, Any
+import os
 from pathlib import Path
+from typing import Any, Optional
+
 from pydantic import field_validator
+from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "BugMind AI API"
     VERSION: str = "1.0.0"
     API_V1_STR: str = "/api/v1"
-    ENVIRONMENT: str = "development"
+    ENVIRONMENT: str = "production" if os.getenv("RENDER") else "development"
     
     SECRET_KEY: str = "CHANGE_THIS_IN_PRODUCTION_b8m9k2n3m4n5b6g7v8a9c0d1e2f3a4b"
     ENCRYPTION_KEY: str = "CHANGE_THIS_IN_PRODUCTION_MUST_BE_32_BYTES_!"
@@ -62,7 +64,7 @@ class Settings(BaseSettings):
     @property
     def cors_origins_list(self) -> list[str]:
         origins = []
-        if self.FRONTEND_URL:
+        if self.FRONTEND_URL and not self.is_production:
             origins.append(self.FRONTEND_URL.strip().rstrip("/"))
             
         raw = (self.CORS_ORIGINS or "").strip()

@@ -1,17 +1,18 @@
 import logging
-import time
 import traceback
+import time
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import Response, JSONResponse, RedirectResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from sqlalchemy import text, inspect
 from sqlalchemy.exc import SQLAlchemyError
-from app.core.config import settings
+
 from app.core.api_errors import http_exception_handler, validation_exception_handler
+from app.core.config import settings
 from app.core.database import engine
 from app.core.logging import configure_logging
 
@@ -46,7 +47,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 # Standard CORS behavior for Chrome Extension
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins_list or ["*"],
+    allow_origins=settings.cors_origins_list or (["*"] if not settings.is_production else []),
     allow_credentials=bool(settings.cors_origins_list) or not settings.is_production,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -81,7 +82,7 @@ async def add_security_headers(request: Request, call_next):
              logger.warning("security_alert unauthorized_origin_attempt origin=%s request_id=%s", origin, request_id)
              return JSONResponse(
                  status_code=403, 
-                 content={"detail": "Unauthorized request origin", "origin": origin, "method": request.method}
+                 content={"detail": "Unauthorized request origin"}
              )
 
     started_at = time.perf_counter()
@@ -128,7 +129,8 @@ async def startup_event():
 
     # 2. Perform mandatory connection check
     try:
-        from app.core.database import engine
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
         inspector = inspect(engine)
         tables = inspector.get_table_names()
         logger.info("DATABASE TABLES FOUND: %s", ", ".join(tables) if tables else "NONE")
