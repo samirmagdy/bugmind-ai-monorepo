@@ -21,7 +21,7 @@ class JiraCloudAdapter(JiraAdapter):
         self.client = httpx.Client(
             base_url=self.host_url,
             headers=self.headers,
-            timeout=httpx.Timeout(20.0, connect=5.0),
+            timeout=httpx.Timeout(60.0, connect=10.0),
             trust_env=False,
             verify=self.verify_ssl,
         )
@@ -41,16 +41,11 @@ class JiraCloudAdapter(JiraAdapter):
                 )
             return response
         except httpx.TimeoutException:
-            raise HTTPException(
-                status_code=504,
-                detail=f"Timed out connecting to Jira at {self.host_url}. Verify the Jira URL, network access, and credentials."
-            )
+            logger.error("jira_cloud_request_timeout", extra={"path": path})
+            raise HTTPException(status_code=504, detail="Connection to Jira Cloud timed out. Please try again.")
         except httpx.HTTPError as exc:
-            logger.warning("jira_cloud_request_failed", extra={"host": self.host_url, "path": path, "method": method, "error": str(exc)})
-            raise HTTPException(
-                status_code=502,
-                detail="Failed to reach Jira Cloud"
-            )
+            logger.error("jira_cloud_request_error", extra={"error": str(exc), "path": path})
+            raise HTTPException(status_code=502, detail=f"Failed to reach Jira Cloud: {str(exc)}")
 
     def _extract_error_message(self, response: httpx.Response, fallback: str) -> str:
         try:
@@ -230,6 +225,9 @@ class JiraCloudAdapter(JiraAdapter):
         
         try:
             response = self.client.get(url, params=params)
+        except httpx.TimeoutException:
+            logger.error("jira_cloud_get_fields_timeout", extra={"project": project_id})
+            raise HTTPException(status_code=504, detail="Jira metadata request timed out. High project complexity detected.")
         except httpx.HTTPError as exc:
             logger.error("jira_cloud_get_fields_network_error", extra={"error": str(exc), "project": project_id})
             raise HTTPException(status_code=502, detail=f"Failed to connect to Jira: {str(exc)}")

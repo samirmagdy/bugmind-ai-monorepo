@@ -29,7 +29,7 @@ class JiraServerAdapter(JiraAdapter):
         self.client = httpx.Client(
             base_url=self.host_url,
             headers=self.headers,
-            timeout=httpx.Timeout(20.0, connect=5.0),
+            timeout=httpx.Timeout(60.0, connect=10.0),
             trust_env=False,
             verify=self.verify_ssl,
         )
@@ -45,25 +45,20 @@ class JiraServerAdapter(JiraAdapter):
             if response.status_code == 401:
                 raise HTTPException(
                     status_code=400,
-                    detail="Jira Server authentication failed. Verify the username and token/password."
+                    detail="Jira Server authentication failed. Verify the PAT or Basic credentials."
                 )
             if response.status_code == 403:
                 raise HTTPException(
                     status_code=400,
-                    detail="Jira Server access denied. The account may be locked or require CAPTCHA."
+                    detail="Jira Server access denied. Verify the account permissions."
                 )
             return response
         except httpx.TimeoutException:
-            raise HTTPException(
-                status_code=504,
-                detail=f"Timed out connecting to Jira at {self.host_url}. Verify the Jira URL, network access, and credentials."
-            )
+            logger.error("jira_server_request_timeout", extra={"path": path})
+            raise HTTPException(status_code=504, detail="Connection to Jira Server timed out. Please try again.")
         except httpx.HTTPError as exc:
-            logger.warning("jira_server_request_failed", extra={"host": self.host_url, "path": path, "method": method, "error": str(exc)})
-            raise HTTPException(
-                status_code=502,
-                detail="Failed to reach Jira Server"
-            )
+            logger.error("jira_server_request_error", extra={"error": str(exc), "path": path})
+            raise HTTPException(status_code=502, detail=f"Failed to reach Jira Server: {str(exc)}")
 
     def _extract_error_message(self, response: httpx.Response, fallback: str) -> str:
         try:
@@ -134,7 +129,16 @@ class JiraServerAdapter(JiraAdapter):
 
     def get_fields(self, project_id: str, issue_type_id: str) -> List[Dict[str, Any]]:
         # Try Jira Server 9.0+ specific endpoint first
-        response = self._request("GET", f"/rest/api/2/issue/createmeta/{project_id}/issuetypes/{issue_type_id}?expand=allowedValues")
+        url = f"/rest/api/2/issue/createmeta/{project_id}/issuetypes/{issue_type_id}?expand=allowedValues"
+        
+        try:
+            response = self.client.get(url)
+        except httpx.TimeoutException:
+            logger.error("jira_server_get_fields_timeout", extra={"project": project_id})
+            raise HTTPException(status_code=504, detail="Jira metadata request timed out. Large on-premise instances may respond slowly.")
+        except httpx.HTTPError as exc:
+            logger.error("jira_server_get_fields_network_error", extra={"error": str(exc), "project": project_id})
+            raise HTTPException(status_code=502, detail=f"Failed to connect to Jira Server: {str(exc)}")
 
         if response.status_code == 404 or (response.status_code == 400 and "Issue Does Not Exist" in response.text):
             is_numeric_id = str(project_id).isdigit()
@@ -218,9 +222,6 @@ class JiraServerAdapter(JiraAdapter):
         except httpx.HTTPError as exc:
             logger.error("jira_server_search_users_exception", extra={"error": str(exc), "endpoint": endpoint, "query": query})
             raise HTTPException(status_code=502, detail="Failed to reach Jira Server for user search")
-
-
-
 
     def get_issue_link_types(self) -> List[str]:
         response = self._request("GET", "/rest/api/2/issueLinkType")
