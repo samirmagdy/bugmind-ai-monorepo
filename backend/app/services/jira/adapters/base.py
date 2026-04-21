@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 class JiraAdapter(ABC):
     def __init__(self, host_url: str, username: str, token: str, verify_ssl: bool = True):

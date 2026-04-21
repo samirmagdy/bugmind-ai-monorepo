@@ -1,7 +1,7 @@
 import httpx
 import base64
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from fastapi import HTTPException
 from app.services.jira.adapters.base import JiraAdapter
 
