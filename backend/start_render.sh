@@ -9,8 +9,8 @@ fi
 # On Render, the DATABASE_URL is provided by the Blueprint
 # No manual override to SQLite is needed anymore.
 
-# If DATABASE_URL not set, usesqlite fallback for local development
-if [ -z "$DATABASE_URL" ]; then
+# If DATABASE_URL not set, use sqlite fallback for local development
+if [ -z "${DATABASE_URL:-}" ]; then
     export DATABASE_URL="sqlite:///./bugmind.db"
     echo "WARNING: DATABASE_URL not set, using SQLite fallback"
 fi
