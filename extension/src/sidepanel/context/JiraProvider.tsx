@@ -94,6 +94,13 @@ export const JiraProvider: React.FC<{
       verifySsl: data.verify_ssl ?? true
     });
 
+    // Synchronize the session's project identity with the backend's resolved data
+    const resolvedProjectId = data.jira_metadata?.project_id || data.jira_metadata?.project_key;
+    const currentIssueData = session.issueData;
+    const nextIssueData = (currentIssueData && resolvedProjectId) 
+      ? { ...currentIssueData, projectId: resolvedProjectId } 
+      : currentIssueData;
+
     updateSession({
       instanceUrl: normalizedBase,
       jiraConnectionId: data.connection_id,
@@ -104,6 +111,7 @@ export const JiraProvider: React.FC<{
       aiMapping: data.ai_mapping || {},
       fieldDefaults: data.field_defaults || {},
       jiraMetadata: data.jira_metadata || null,
+      issueData: nextIssueData,
       error: null
     }, tabId);
   }, [saveJiraConfig, updateSession]);

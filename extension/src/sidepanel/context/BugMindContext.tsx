@@ -80,11 +80,24 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
     if (!context?.instanceUrl) return null;
 
     const projectKey = context.issueData?.key?.split('-')[0];
+    const projectId = context.issueData?.projectId;
+    
+    // Skip if we already have this exact metadata resolved in session
+    if (session.jiraMetadata && session.instanceUrl === context.instanceUrl) {
+      const matchKey = session.jiraMetadata.project_key === projectKey;
+      const matchId = session.jiraMetadata.project_id === projectId;
+      if ((projectKey && matchKey) || (projectId && matchId)) {
+        if (session.selectedIssueType?.id === selectedIssueTypeIdRef.current) {
+          return null; 
+        }
+      }
+    }
+
     const signature = JSON.stringify({
       tabId: tabId || currentTabId || null,
       instanceUrl: context.instanceUrl,
       projectKey: projectKey || null,
-      projectId: context.issueData?.projectId || null,
+      projectId: projectId || null,
       issueTypeId: selectedIssueTypeIdRef.current || null
     });
 
