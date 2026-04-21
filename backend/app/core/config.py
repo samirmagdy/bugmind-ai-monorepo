@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     JWT_ISSUER: str = "bugmind-api"
     JWT_AUDIENCE: str = "bugmind-clients"
     DATABASE_URL: str = ""
+    REDIS_URL: str = "redis://localhost:6379/0"
     ALGORITHM: str = "HS256"
     FRONTEND_URL: str = "http://localhost:3000"
     CORS_ORIGINS: str = ""
