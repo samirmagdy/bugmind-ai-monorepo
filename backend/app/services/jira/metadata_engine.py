@@ -31,29 +31,21 @@ class JiraMetadataEngine:
             # Cache is best-effort; metadata fetches should still succeed without Redis.
             return
 
-    def get_project_metadata(self, project_id: str, force_refresh: bool = False) -> List[Dict[str, Any]]:
+    def get_project_metadata(self, project_id: str) -> List[Dict[str, Any]]:
         cache_key = f"jira:issue_types:{self.adapter.host_url}:{project_id}"
-        
-        if not force_refresh:
-            cached = self._get_cached_json(cache_key)
-            if cached is not None:
-                return cached
+        cached = self._get_cached_json(cache_key)
+        if cached:
+            return cached
             
         issue_types = self.adapter.get_issue_types(project_id)
-        
-        # Only cache if we actually got results back
-        if issue_types:
-            self._set_cached_json(cache_key, issue_types)
-            
+        self._set_cached_json(cache_key, issue_types)
         return issue_types
 
-    def get_field_schema(self, project_id: str, issue_type_id: str, force_refresh: bool = False) -> List[Dict[str, Any]]:
+    def get_field_schema(self, project_id: str, issue_type_id: str) -> List[Dict[str, Any]]:
         cache_key = f"jira:fields:{self.FIELD_SCHEMA_CACHE_VERSION}:{self.adapter.host_url}:{project_id}:{issue_type_id}"
-        
-        if not force_refresh:
-            cached = self._get_cached_json(cache_key)
-            if cached is not None:
-                return cached
+        cached = self._get_cached_json(cache_key)
+        if cached:
+            return cached
             
         fields = self.adapter.get_fields(project_id, issue_type_id)
         

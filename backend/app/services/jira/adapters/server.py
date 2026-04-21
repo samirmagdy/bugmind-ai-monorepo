@@ -74,35 +74,15 @@ class JiraServerAdapter(JiraAdapter):
             messages.extend(f"{key}: {value}" for key, value in errors.items() if value)
         return "; ".join(messages) if messages else fallback
 
-    def _normalize_fields_payload(self, data: Dict[str, Any], project_ref: str, issue_type_id: str) -> List[Dict[str, Any]]:
+    def _normalize_fields_payload(self, data: Dict[str, Any]) -> List[Dict[str, Any]]:
         fields_raw = data.get("fields") or data.get("values")
 
         if not fields_raw:
             projects = data.get("projects")
             if isinstance(projects, list) and projects:
-                # Find matching project if multiple returned, otherwise fallback to first
-                target_project = None
-                ref_str = str(project_ref).lower()
-                for p in projects:
-                    if str(p.get("id")).lower() == ref_str or str(p.get("key")).lower() == ref_str:
-                        target_project = p
-                        break
-                if not target_project:
-                    target_project = projects[0]
-
-                issuetypes = target_project.get("issuetypes", [])
-                if isinstance(issuetypes, list) and issuetypes:
-                    # Find matching issue type, otherwise fallback to first
-                    target_it = None
-                    it_id_str = str(issue_type_id).lower()
-                    for it in issuetypes:
-                        if str(it.get("id")).lower() == it_id_str or str(it.get("name")).lower() == it_id_str:
-                            target_it = it
-                            break
-                    if not target_it:
-                        target_it = issuetypes[0]
-
-                    fields_raw = target_it.get("fields")
+                issuetypes = projects[0].get("issuetypes", [])
+                if issuetypes:
+                    fields_raw = issuetypes[0].get("fields")
 
         if isinstance(fields_raw, dict):
             return [{"fieldId": key, **value} for key, value in fields_raw.items()]
@@ -119,6 +99,16 @@ class JiraServerAdapter(JiraAdapter):
                 else:
                     normalized.append(field)
             return normalized
+
+        projects = data.get("projects")
+        if isinstance(projects, list) and projects:
+            issuetypes = projects[0].get("issuetypes", [])
+            if isinstance(issuetypes, list) and issuetypes:
+                nested_fields = issuetypes[0].get("fields", {})
+                if isinstance(nested_fields, dict):
+                    return [{"fieldId": key, **value} for key, value in nested_fields.items()]
+                if isinstance(nested_fields, list):
+                    return [field if "fieldId" in field else {"fieldId": field.get("key"), **field} for field in nested_fields]
 
         return []
 
@@ -167,10 +157,6 @@ class JiraServerAdapter(JiraAdapter):
             logger.error("jira_server_get_fields_network_error", extra={"error": str(exc), "project": project_id})
             raise HTTPException(status_code=502, detail=f"Failed to connect to Jira Server: {str(exc)}")
 
-        if response.status_code == 200:
-            data = response.json()
-            return self._normalize_fields_payload(data, project_id, issue_type_id)
-
         if response.status_code == 404 or (response.status_code == 400 and "Issue Does Not Exist" in response.text):
             is_numeric_id = str(project_id).isdigit()
             proj_param = f"projectIds={project_id}" if is_numeric_id else f"projectKeys={project_id}"
@@ -179,13 +165,13 @@ class JiraServerAdapter(JiraAdapter):
             if response.status_code != 200:
                 raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to fetch Jira field metadata"))
             data = response.json()
-            return self._normalize_fields_payload(data, project_id, issue_type_id)
+            return self._normalize_fields_payload(data)
 
         if response.status_code != 200:
             raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to fetch Jira field metadata"))
 
         data = response.json()
-        return self._normalize_fields_payload(data, project_id, issue_type_id)
+        return self._normalize_fields_payload(data)
 
     def create_issue(self, issue_data: Dict[str, Any]) -> str:
         try:
@@ -239,8 +225,8 @@ class JiraServerAdapter(JiraAdapter):
             response = self.client.get(endpoint, params=params)
             
             # Fallback for 404s (e.g. invalid project context or restricted API)
-            if (response.status_code == 404 or response.status_code == 403) and use_fallback:
-                logger.info("jira_server_search_users_fallback", extra={"status": response.status_code, "project": params.get("project"), "query": query})
+            if response.status_code == 404 and use_fallback:
+                logger.info("jira_server_search_users_404_fallback", extra={"project": params.get("project"), "query": query})
                 endpoint = "/rest/api/2/user/search"
                 params.pop("project", None)
                 response = self.client.get(endpoint, params=params)
@@ -251,20 +237,8 @@ class JiraServerAdapter(JiraAdapter):
                 response = self.client.get(endpoint, params=params)
 
             if response.status_code != 200:
-                # One last fallback: try /rest/api/2/user/picker
-                picker_endpoint = "/rest/api/2/user/picker"
-                picker_params = {"query": query, "maxResults": 20}
-                if project_id or project_key:
-                    picker_params["projectKey"] = project_key or project_id
-                
-                response = self.client.get(picker_endpoint, params=picker_params)
-                if response.status_code == 200:
-                    data = response.json()
-                    users = data.get("users", [])
-                    return [{"id": u.get("name") or u.get("key"), "name": u.get("displayName"), "email": u.get("emailAddress")} for u in users]
-
                 logger.warning("jira_server_search_users_failed", extra={"status": response.status_code, "endpoint": endpoint, "query": query, "msg": response.text[:100]})
-                return [] # Return empty instead of raising to allow non-blocking UI
+                raise HTTPException(status_code=400, detail="Failed to search users")
             
             users = response.json()
             # Jira Server returns 'name' (username) and 'key', Cloud returns 'accountId'

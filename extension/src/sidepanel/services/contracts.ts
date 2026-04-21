@@ -42,7 +42,6 @@ export interface JiraBootstrapRequestPayload extends ProjectRequestParams {
   instance_url: string;
   issue_key?: string;
   issue_type_id?: string;
-  force_refresh?: boolean;
 }
 
 export interface JiraConnectionCreateRequestPayload {

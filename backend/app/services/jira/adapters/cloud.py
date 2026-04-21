@@ -61,7 +61,7 @@ class JiraCloudAdapter(JiraAdapter):
             messages.extend(f"{key}: {value}" for key, value in errors.items() if value)
         return "; ".join(messages) if messages else fallback
 
-    def _normalize_fields_payload(self, data: Dict[str, Any], project_ref: str, issue_type_id: str) -> List[Dict[str, Any]]:
+    def _normalize_fields_payload(self, data: Dict[str, Any]) -> List[Dict[str, Any]]:
         fields_raw = data.get("fields")
 
         if isinstance(fields_raw, dict):
@@ -72,29 +72,9 @@ class JiraCloudAdapter(JiraAdapter):
 
         projects = data.get("projects")
         if isinstance(projects, list) and projects:
-            # Find matching project if multiple returned, otherwise fallback to first
-            target_project = None
-            ref_str = str(project_ref).lower()
-            for p in projects:
-                if str(p.get("id")).lower() == ref_str or str(p.get("key")).lower() == ref_str:
-                    target_project = p
-                    break
-            if not target_project:
-                target_project = projects[0]
-
-            issuetypes = target_project.get("issuetypes", [])
+            issuetypes = projects[0].get("issuetypes", [])
             if isinstance(issuetypes, list) and issuetypes:
-                # Find matching issue type, otherwise fallback to first
-                target_it = None
-                it_id_str = str(issue_type_id).lower()
-                for it in issuetypes:
-                    if str(it.get("id")).lower() == it_id_str or str(it.get("name")).lower() == it_id_str:
-                        target_it = it
-                        break
-                if not target_it:
-                    target_it = issuetypes[0]
-
-                nested_fields = target_it.get("fields", {})
+                nested_fields = issuetypes[0].get("fields", {})
                 if isinstance(nested_fields, dict):
                     return [{"fieldId": key, **value} for key, value in nested_fields.items()]
                 if isinstance(nested_fields, list):
@@ -248,7 +228,7 @@ class JiraCloudAdapter(JiraAdapter):
                 response = self._request("GET", f"/rest/api/3/project/{resolved_project_ref}")
 
         if response.status_code != 200:
-            return [] # Soft fail: return empty and let fallback loop continue
+            raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to fetch Jira issue types"))
         
         data = response.json()
         issue_types = data.get("issueTypes", [])
@@ -286,8 +266,6 @@ class JiraCloudAdapter(JiraAdapter):
 
         if project_ref.isdigit():
             param_sets.append({**base_params, "projectIds": project_ref})
-            # Also try projectKeys even if it looks like an ID, some instances are weird
-            param_sets.append({**base_params, "projectKeys": project_ref})
         else:
             param_sets.append({**base_params, "projectKeys": project_ref})
             resolved_project_ref = self._resolve_project_ref(project_ref)
@@ -307,12 +285,7 @@ class JiraCloudAdapter(JiraAdapter):
 
             if response.status_code == 200:
                 data = response.json()
-                # Check if the response actually contains the project we asked for
-                # If 'projects' list is empty, treat as a failure to trigger next fallback
-                if not data.get("projects") and not data.get("fields"):
-                     last_error_response = response
-                     continue
-                return self._normalize_fields_payload(data, project_id, issue_type_id)
+                return self._normalize_fields_payload(data)
 
             last_error_response = response
             logger.info(
@@ -320,15 +293,16 @@ class JiraCloudAdapter(JiraAdapter):
                 extra={"status": response.status_code, "project": project_id, "params": params},
             )
 
-        logger.warning(
-            "jira_cloud_get_fields_all_failed_returning_empty",
-            extra={
-                "status": last_error_response.status_code if last_error_response is not None else "unknown",
-                "project": project_id,
-                "type": issue_type_id,
-            }
+        logger.error("jira_cloud_get_fields_failed", extra={
+            "status": last_error_response.status_code if last_error_response is not None else "unknown",
+            "project": project_id,
+            "type": issue_type_id,
+            "response": last_error_response.text[:200] if last_error_response is not None else "",
+        })
+        raise HTTPException(
+            status_code=400,
+            detail=self._extract_error_message(last_error_response, "Failed to fetch Jira field metadata") if last_error_response is not None else "Failed to fetch Jira field metadata",
         )
-        return [] # Soft fail: return empty to avoid breaking bootstrap flow
 
 
 
@@ -425,16 +399,6 @@ class JiraCloudAdapter(JiraAdapter):
         base_params: Dict[str, Any] = {"query": query, "maxResults": 20}
         attempts: List[tuple[str, Dict[str, Any]]] = []
 
-        # Proactively resolve missing project components if the other is available
-        if not project_key and project_id:
-            resolved = self._resolve_project_ref(project_id)
-            if resolved and not resolved.isdigit():
-                project_key = resolved
-        elif not project_id and project_key:
-            resolved = self._resolve_project_ref(project_key)
-            if resolved and resolved.isdigit():
-                project_id = resolved
-
         # Prefer project-scoped search first for assignee-style fields. On Cloud, the
         # multi-project endpoint is more reliable when a project key is available.
         if project_key:
@@ -450,28 +414,13 @@ class JiraCloudAdapter(JiraAdapter):
                     {**base_params, "project": project_key},
                 )
             )
-            # Some instances vary on singular vs plural or parameter naming
-            attempts.append(
-                (
-                    "/rest/api/3/user/assignable/search",
-                    {**base_params, "projectKey": project_key},
-                )
-            )
-
-        if project_id:
+        elif project_id:
             attempts.append(
                 (
                     "/rest/api/3/user/assignable/search",
                     {**base_params, "project": project_id},
                 )
             )
-            if project_id != project_key:
-                attempts.append(
-                    (
-                        "/rest/api/3/user/assignable/multiProjectSearch",
-                        {**base_params, "projectKeys": project_id},
-                    )
-                )
 
         picker_params: Dict[str, Any] = {
             **base_params,

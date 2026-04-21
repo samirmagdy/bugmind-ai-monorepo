@@ -183,8 +183,7 @@ def resolve_jira_bootstrap_context(
         if normalized_host and (
             target_url == normalized_host or
             target_url.startswith(f"{normalized_host}/") or
-            target_url.startswith(normalized_host) or
-            normalized_host.startswith(target_url)  # Added loose bidirectional match
+            target_url.startswith(normalized_host)
         ):
             ranked_matches.append((len(normalized_host), connection))
 
@@ -226,16 +225,14 @@ def resolve_jira_bootstrap_context(
         resolved_issue_type_project_ref: Optional[str] = None
         for project_candidate in project_candidates:
             try:
-                issue_types_raw = engine.get_project_metadata(project_candidate, force_refresh=req.force_refresh)
+                issue_types_raw = engine.get_project_metadata(project_candidate)
                 resolved_issue_type_project_ref = project_candidate
-                last_project_error = None # Clear any errors from previous candidates
                 break
             except HTTPException as exc:
                 last_project_error = exc
                 continue
 
         if not issue_types_raw and last_project_error:
-            # Only raise if we didn't get a successful response from ANY candidate
             raise last_project_error
 
         selected_issue_type_raw = _select_issue_type(issue_types_raw, canonical_issue_type_id)
@@ -256,7 +253,7 @@ def resolve_jira_bootstrap_context(
 
             for project_candidate in project_candidates:
                 try:
-                    metadata_fields = engine.get_field_schema(project_candidate, selected_issue_type_id, force_refresh=req.force_refresh)
+                    metadata_fields = engine.get_field_schema(project_candidate, selected_issue_type_id)
                     if str(project_candidate).isdigit():
                         canonical_project_id = canonical_project_id or project_candidate
                     else:
@@ -264,19 +261,6 @@ def resolve_jira_bootstrap_context(
                     break
                 except HTTPException:
                     continue
-
-            # Identity Backfill: If we found a mapping but it was missing an ID or Key,
-            # and we just resolved them, backfill the record to prevent future desync.
-            if mapping and (canonical_project_id or canonical_project_key):
-                updated = False
-                if not mapping.project_id and canonical_project_id:
-                    mapping.project_id = str(canonical_project_id)
-                    updated = True
-                if not mapping.project_key and canonical_project_key:
-                    mapping.project_key = str(canonical_project_key)
-                    updated = True
-                if updated:
-                    db.commit()
 
     metadata_response: Optional[JiraMetadataResponse] = None
     if canonical_project_id or canonical_project_key:

@@ -33,7 +33,6 @@ class JiraBootstrapContextRequest(BaseModel):
     project_key: Optional[str] = None
     project_id: Optional[str] = None
     issue_type_id: Optional[str] = None
-    force_refresh: bool = False
 
 
 class JiraIssueTypeResponse(BaseModel):
