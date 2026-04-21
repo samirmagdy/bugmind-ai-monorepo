@@ -289,12 +289,23 @@ class JiraCloudAdapter(JiraAdapter):
         # Determine the best endpoint based on project context
         # Official docs: /user/assignable/search handles project scoping, /user/search is global.
         endpoint = "/rest/api/3/user/search"
+        use_fallback = False
+        
         if project_id or project_key:
             endpoint = "/rest/api/3/user/assignable/search"
             params["project"] = project_id or project_key
+            use_fallback = True
 
         try:
             response = self.client.get(endpoint, params=params)
+            
+            # Fallback for 404s (e.g. invalid project context or restricted API)
+            if response.status_code == 404 and use_fallback:
+                logger.info("jira_cloud_search_users_404_fallback", extra={"project": params.get("project"), "query": query})
+                endpoint = "/rest/api/3/user/search"
+                params.pop("project", None)
+                response = self.client.get(endpoint, params=params)
+
             if response.status_code != 200:
                 logger.warning("jira_cloud_search_users_failed", extra={"status": response.status_code, "endpoint": endpoint, "query": query})
                 raise HTTPException(status_code=400, detail="Failed to search users")
@@ -304,6 +315,7 @@ class JiraCloudAdapter(JiraAdapter):
         except httpx.HTTPError as exc:
             logger.error("jira_cloud_search_users_exception", extra={"error": str(exc), "endpoint": endpoint, "query": query})
             raise HTTPException(status_code=502, detail="Failed to reach Jira Cloud for user search")
+
 
 
     def get_issue_link_types(self) -> List[str]:

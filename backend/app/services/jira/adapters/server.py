@@ -186,13 +186,23 @@ class JiraServerAdapter(JiraAdapter):
         
         # Determine endpoint and parameters based on project context
         endpoint = "/rest/api/2/user/search"
+        use_fallback = False
+
         if project_id or project_key:
             endpoint = "/rest/api/2/user/assignable/search"
             params["project"] = project_id or project_key
+            use_fallback = True
 
         try:
             response = self.client.get(endpoint, params=params)
             
+            # Fallback for 404s (e.g. invalid project context or restricted API)
+            if response.status_code == 404 and use_fallback:
+                logger.info("jira_server_search_users_404_fallback", extra={"project": params.get("project"), "query": query})
+                endpoint = "/rest/api/2/user/search"
+                params.pop("project", None)
+                response = self.client.get(endpoint, params=params)
+
             # Fallback for newer Server/DC versions that might prefer 'query' parameter
             if response.status_code == 400 and "username" in response.text:
                 params["query"] = params.pop("username")
@@ -208,6 +218,7 @@ class JiraServerAdapter(JiraAdapter):
         except httpx.HTTPError as exc:
             logger.error("jira_server_search_users_exception", extra={"error": str(exc), "endpoint": endpoint, "query": query})
             raise HTTPException(status_code=502, detail="Failed to reach Jira Server for user search")
+
 
 
 
