@@ -6,12 +6,8 @@ if [ -f "$(dirname "$0")/..\.env" ]; then
     export $(cat "$(dirname "$0")/..\.env" | grep -v '^#' | xargs)
 fi
 
-# On Render, always use SQLite to avoid database connection issues
-# Environment variables from .env file will be loaded first, then we override DATABASE_URL
-if [ -n "$RENDER" ] || [ -n "$IS_RENDER" ]; then
-    export DATABASE_URL="sqlite:///./bugmind.db"
-    echo "INFO: Running on Render, using SQLite database"
-fi
+# On Render, the DATABASE_URL is provided by the Blueprint
+# No manual override to SQLite is needed anymore.
 
 # If DATABASE_URL not set, usesqlite fallback for local development
 if [ -z "$DATABASE_URL" ]; then

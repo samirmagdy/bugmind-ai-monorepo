@@ -44,7 +44,7 @@ class Settings(BaseSettings):
                 v = v.replace("postgresql://", "postgresql+psycopg://", 1)
             
             # Ensure SSL mode for production postgres connections
-            if v.startswith("postgresql") and "sslmode" not in v:
+            if v.startswith("postgresql") and "sslmode=" not in v:
                 separator = "&" if "?" in v else "?"
                 v = f"{v}{separator}sslmode=require"
         
@@ -52,10 +52,10 @@ class Settings(BaseSettings):
         if not v:
             import os
             env = os.getenv("ENVIRONMENT", "development")
-            if env.lower() == "development":
+            if env.lower() == "development" or env.lower() == "test":
                 v = "sqlite:///./bugmind.db"
             else:
-                raise ValueError("DATABASE_URL must be set in production")
+                raise ValueError("DATABASE_URL must be set when ENVIRONMENT is 'production' or handled via Blueprint.")
         return v
 
     @property

@@ -90,7 +90,7 @@ def main():
         print("Note: Using PostgreSQL database")
         if "supabase" in db_url_lower:
             print("✓ Using Supabase database")
-        elif "render.com" in db_url_lower:
+        elif "render.com" in db_url_lower or "dpg-" in db_url_lower:
             print("✓ Using Render managed database")
         elif "localhost" in db_url_lower or "127.0.0.1" in db_url_lower:
             print("⚠ Using local database - ensure PostgreSQL is running")
