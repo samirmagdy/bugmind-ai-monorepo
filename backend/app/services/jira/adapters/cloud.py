@@ -352,17 +352,17 @@ class JiraCloudAdapter(JiraAdapter):
                 )
             )
 
+        picker_params: Dict[str, Any] = {
+            **base_params,
+            "showAvatar": "true",
+        }
         if field_id:
-            picker_params: Dict[str, Any] = {
-                **base_params,
-                "fieldId": field_id,
-                "showAvatar": "true",
-            }
-            if project_id:
-                picker_params["projectId"] = project_id
-            if issue_type_id:
-                picker_params["issueTypeId"] = issue_type_id
-            attempts.append(("/rest/api/3/groupuserpicker", picker_params))
+            picker_params["fieldId"] = field_id
+        if project_id:
+            picker_params["projectId"] = project_id
+        if issue_type_id:
+            picker_params["issueTypeId"] = issue_type_id
+        attempts.append(("/rest/api/3/groupuserpicker", picker_params))
 
         # Picker endpoints are the best general-purpose typeahead fallback for Cloud.
         attempts.append(("/rest/api/3/user/picker", dict(base_params)))
