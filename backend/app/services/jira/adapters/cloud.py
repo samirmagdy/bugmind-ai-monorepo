@@ -292,8 +292,18 @@ class JiraCloudAdapter(JiraAdapter):
             if not isinstance(user, dict):
                 continue
 
-            account_id = user.get("accountId")
-            display_name = user.get("displayName")
+            account_id = (
+                user.get("accountId")
+                or user.get("id")
+                or user.get("key")
+                or user.get("name")
+            )
+            display_name = (
+                user.get("displayName")
+                or user.get("name")
+                or user.get("displayNameHtml")
+                or user.get("html")
+            )
             if not account_id or not display_name:
                 continue
 
@@ -380,7 +390,7 @@ class JiraCloudAdapter(JiraAdapter):
                 continue
 
             last_status = response.status_code
-            if response.status_code in (401, 403):
+            if response.status_code == 401:
                 raise HTTPException(
                     status_code=400,
                     detail=self._extract_error_message(response, "Failed to search Jira users"),
