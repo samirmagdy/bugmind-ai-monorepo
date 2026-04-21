@@ -200,17 +200,35 @@ def resolve_jira_bootstrap_context(
     ai_mapping: dict = {}
     field_defaults: dict = {}
     metadata_response: Optional[JiraMetadataResponse] = None
+    resolved_project_ref: Optional[str] = None
 
     if resolved_project_id:
-        issue_types_raw = engine.get_project_metadata(resolved_project_id)
+        project_candidates: list[str] = []
+        for candidate in [req.project_id, req.project_key, resolved_project_id]:
+            if candidate and str(candidate) not in project_candidates:
+                project_candidates.append(str(candidate))
+
+        last_project_error: Optional[HTTPException] = None
+        for project_candidate in project_candidates:
+            try:
+                issue_types_raw = engine.get_project_metadata(project_candidate)
+                resolved_project_ref = project_candidate
+                break
+            except HTTPException as exc:
+                last_project_error = exc
+                continue
+
+        if not issue_types_raw and last_project_error:
+            raise last_project_error
+
         selected_issue_type_raw = _select_issue_type(issue_types_raw, req.issue_type_id)
 
-        if selected_issue_type_raw:
+        if selected_issue_type_raw and resolved_project_ref:
             selected_issue_type_id = str(selected_issue_type_raw.get("id", ""))
             mapping = db.query(JiraFieldMapping).filter(
                 JiraFieldMapping.user_id == current_user.id,
                 or_(
-                    JiraFieldMapping.project_key == (req.project_key or resolved_project_id),
+                    JiraFieldMapping.project_key == (req.project_key or resolved_project_ref),
                     JiraFieldMapping.project_id == req.project_id
                 ),
                 JiraFieldMapping.issue_type_id == selected_issue_type_id
@@ -219,10 +237,23 @@ def resolve_jira_bootstrap_context(
             ai_mapping = mapping.field_mappings if mapping else {}
             field_defaults = mapping.field_defaults if mapping else {}
 
-            metadata_fields = engine.get_field_schema(resolved_project_id, selected_issue_type_id)
+            metadata_fields = []
+            last_metadata_error: Optional[HTTPException] = None
+            for project_candidate in project_candidates:
+                try:
+                    metadata_fields = engine.get_field_schema(project_candidate, selected_issue_type_id)
+                    resolved_project_ref = project_candidate
+                    break
+                except HTTPException as exc:
+                    last_metadata_error = exc
+                    continue
+
+            if not metadata_fields and last_metadata_error:
+                raise last_metadata_error
+
             metadata_response = JiraMetadataResponse(
-                project_key=req.project_key or str(resolved_project_id),
-                project_id=req.project_id or str(resolved_project_id),
+                project_key=req.project_key or str(resolved_project_ref),
+                project_id=req.project_id or str(resolved_project_ref),
                 issue_type_id=selected_issue_type_id,
                 fields=[JiraFieldResponse(**field) for field in metadata_fields]
             )
