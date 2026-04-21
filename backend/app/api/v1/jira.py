@@ -183,7 +183,8 @@ def resolve_jira_bootstrap_context(
         if normalized_host and (
             target_url == normalized_host or
             target_url.startswith(f"{normalized_host}/") or
-            target_url.startswith(normalized_host)
+            target_url.startswith(normalized_host) or
+            normalized_host.startswith(target_url)  # Added loose bidirectional match
         ):
             ranked_matches.append((len(normalized_host), connection))
 

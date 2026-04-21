@@ -248,7 +248,7 @@ class JiraCloudAdapter(JiraAdapter):
                 response = self._request("GET", f"/rest/api/3/project/{resolved_project_ref}")
 
         if response.status_code != 200:
-            raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to fetch Jira issue types"))
+            return [] # Soft fail: return empty and let fallback loop continue
         
         data = response.json()
         issue_types = data.get("issueTypes", [])
@@ -320,16 +320,15 @@ class JiraCloudAdapter(JiraAdapter):
                 extra={"status": response.status_code, "project": project_id, "params": params},
             )
 
-        logger.error("jira_cloud_get_fields_failed", extra={
-            "status": last_error_response.status_code if last_error_response is not None else "unknown",
-            "project": project_id,
-            "type": issue_type_id,
-            "response": last_error_response.text[:200] if last_error_response is not None else "",
-        })
-        raise HTTPException(
-            status_code=400,
-            detail=self._extract_error_message(last_error_response, "Failed to fetch Jira field metadata") if last_error_response is not None else "Failed to fetch Jira field metadata",
+        logger.warning(
+            "jira_cloud_get_fields_all_failed_returning_empty",
+            extra={
+                "status": last_error_response.status_code if last_error_response is not None else "unknown",
+                "project": project_id,
+                "type": issue_type_id,
+            }
         )
+        return [] # Soft fail: return empty to avoid breaking bootstrap flow
 
 
 

@@ -36,7 +36,7 @@ class JiraMetadataEngine:
         
         if not force_refresh:
             cached = self._get_cached_json(cache_key)
-            if cached:
+            if cached is not None:
                 return cached
             
         issue_types = self.adapter.get_issue_types(project_id)
@@ -52,7 +52,7 @@ class JiraMetadataEngine:
         
         if not force_refresh:
             cached = self._get_cached_json(cache_key)
-            if cached:
+            if cached is not None:
                 return cached
             
         fields = self.adapter.get_fields(project_id, issue_type_id)
