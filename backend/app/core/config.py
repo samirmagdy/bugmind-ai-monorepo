@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     OPENROUTER_MAX_TOKENS: int = 1800
     STRIPE_SECRET_KEY: Optional[str] = None
     STRIPE_WEBHOOK_SECRET: Optional[str] = None
+    XRAY_CLOUD_CLIENT_ID: Optional[str] = None
+    XRAY_CLOUD_CLIENT_SECRET: Optional[str] = None
 
     @field_validator("DATABASE_URL", mode="before")
     @classmethod

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from typing import Optional
+import httpx
 from app.api import deps
 from app.models.user import User
 from app.models.jira import JiraConnection, JiraAuthType, JiraFieldMapping
@@ -28,6 +29,7 @@ from app.core.audit import log_audit
 from app.core.idempotency import idempotency_store
 from app.core.rate_limit import rate_limiter
 from app.core.request_security import enforce_secure_jira_ssl, validate_connection_host
+from app.core.config import settings
 
 router = APIRouter()
 
@@ -97,6 +99,8 @@ def _normalize_folder_path(folder_path: Optional[str], story_issue_key: str) -> 
 
 
 def _resolve_test_issue_type_id(issue_types: list[dict], test_issue_type_id: Optional[str], test_issue_type_name: Optional[str]) -> str:
+    if isinstance(issue_types, dict):
+        issue_types = issue_types.get("issue_types", []) or []
     if test_issue_type_id:
         return str(test_issue_type_id)
 
@@ -129,7 +133,7 @@ def _detect_repository_path_field_id(fields: list[dict], repository_path_field_i
     for field in fields:
         name = str(field.get("name", "")).strip().lower()
         if any(candidate in name for candidate in preferred_names):
-            return field.get("id")
+            return field.get("key") or field.get("id")
     return None
 
 
@@ -194,14 +198,14 @@ def resolve_jira_bootstrap_context(
     engine = JiraMetadataEngine(adapter)
     issue_context: dict = {}
     if req.issue_key:
-        try:
-            issue_context = adapter.get_issue_context(req.issue_key)
-        except HTTPException:
-            issue_context = {}
+        issue_context = adapter.get_issue_context(req.issue_key)
 
     canonical_project_id = issue_context.get("project_id") or req.project_id
     canonical_project_key = issue_context.get("project_key") or req.project_key
     canonical_issue_type_id = req.issue_type_id or issue_context.get("issue_type_id")
+
+    if not (canonical_project_id or canonical_project_key):
+        raise HTTPException(status_code=400, detail="Could not resolve Jira project context from the current page")
 
     project_context: Optional[dict] = None
     issue_types_raw: list[dict] = []
@@ -234,38 +238,37 @@ def resolve_jira_bootstrap_context(
             last_project_error = exc
             continue
 
-    # Fallback Case: No candidate worked or no candidate provided
-    if not issue_types_raw:
-        try:
-            projects = adapter.get_projects()
-            if projects:
-                # Default to the first available project to bootstrap the UI
-                default_project = projects[0]
-                p_ref = str(default_project.get("id") or default_project.get("key"))
-                project_context = engine.get_project_metadata(p_ref)
-                issue_types_raw = project_context.get("issue_types", [])
-                canonical_project_id = project_context.get("project_id")
-                canonical_project_key = project_context.get("project_key")
-        except HTTPException:
-            pass
-
     if not issue_types_raw and last_project_error:
         raise last_project_error
+    if not issue_types_raw:
+        raise HTTPException(status_code=400, detail="No Jira issue types could be resolved for the selected project")
 
     # Phase 2: Resolve Fields & Metadata
     if issue_types_raw:
         selected_issue_type_raw = _select_issue_type(issue_types_raw, canonical_issue_type_id)
+        if not selected_issue_type_raw:
+            raise HTTPException(status_code=400, detail="Could not resolve a Jira issue type for the selected project")
 
         if selected_issue_type_raw:
             selected_issue_type_id = str(selected_issue_type_raw.get("id", ""))
             
-            # Fetch Field Schema using the most specific project reference available
-            # (Prefers numeric ID if captured to avoid 404s on certain Cloud configurations)
-            field_resolution_ref = canonical_project_id or canonical_project_key
-            try:
-                metadata_fields = engine.get_field_schema(field_resolution_ref, selected_issue_type_id)
-            except HTTPException:
-                metadata_fields = []
+            field_resolution_candidates = []
+            for candidate in [canonical_project_id, canonical_project_key, req.project_id, req.project_key]:
+                if candidate and str(candidate) not in field_resolution_candidates:
+                    field_resolution_candidates.append(str(candidate))
+
+            last_field_error: Optional[HTTPException] = None
+            for field_resolution_ref in field_resolution_candidates:
+                try:
+                    metadata_fields = engine.get_field_schema(field_resolution_ref, selected_issue_type_id)
+                    if metadata_fields:
+                        break
+                except HTTPException as exc:
+                    last_field_error = exc
+                    continue
+
+            if not metadata_fields and last_field_error:
+                raise last_field_error
 
             mapping = db.query(JiraFieldMapping).filter(
                 JiraFieldMapping.user_id == current_user.id,
@@ -508,30 +511,56 @@ def search_jira_users(
     )
     return results
 
-@router.post("/connections/{conn_id}/xray/test-suite", response_model=XrayTestSuitePublishResponse)
-def publish_xray_test_suite(
-    conn_id: int,
-    request: Request,
+
+def _get_xray_cloud_access_token() -> str:
+    if not settings.XRAY_CLOUD_CLIENT_ID or not settings.XRAY_CLOUD_CLIENT_SECRET:
+        raise HTTPException(
+            status_code=501,
+            detail="Xray Cloud requires XRAY_CLOUD_CLIENT_ID and XRAY_CLOUD_CLIENT_SECRET to be configured",
+        )
+
+    try:
+        response = httpx.post(
+            "https://xray.cloud.getxray.app/api/v2/authenticate",
+            json={
+                "client_id": settings.XRAY_CLOUD_CLIENT_ID,
+                "client_secret": settings.XRAY_CLOUD_CLIENT_SECRET,
+            },
+            timeout=httpx.Timeout(30.0, connect=10.0),
+            trust_env=False,
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to authenticate to Xray Cloud: {str(exc)}")
+
+    if response.status_code != 200:
+        raise HTTPException(status_code=400, detail="Failed to authenticate to Xray Cloud")
+
+    token = response.text.strip().strip('"')
+    if not token:
+        raise HTTPException(status_code=400, detail="Xray Cloud authentication returned an empty token")
+    return token
+
+
+def _publish_xray_cloud_test_suite(
     req: XrayTestSuitePublishRequest,
-    db: Session = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user)
-):
-    rate_limiter.check("jira.xray_publish", str(current_user.id), limit=5, window_seconds=60)
-    idem_key = request.headers.get("Idempotency-Key")
-    cached_response = idempotency_store.replay_or_reserve(
-        "jira.xray_publish",
-        str(current_user.id),
-        idem_key,
-        req.model_dump(),
+    current_user: User,
+    db: Session,
+    request: Request,
+) -> XrayTestSuitePublishResponse:
+    _get_xray_cloud_access_token()
+    raise HTTPException(
+        status_code=501,
+        detail="Xray Cloud publishing is now separated from Jira issue creation and requires dedicated external API mapping that is not configured yet",
     )
-    if cached_response is not None:
-        return XrayTestSuitePublishResponse(**cached_response)
 
-    if conn_id != req.jira_connection_id:
-        raise HTTPException(status_code=400, detail="Connection mismatch for Xray publish request")
-    if not req.test_cases:
-        raise HTTPException(status_code=400, detail="No test cases were provided for Xray publishing")
 
+def _publish_xray_server_test_suite(
+    conn_id: int,
+    req: XrayTestSuitePublishRequest,
+    current_user: User,
+    db: Session,
+    request: Request,
+) -> XrayTestSuitePublishResponse:
     conn = db.query(JiraConnection).filter(
         JiraConnection.id == conn_id,
         JiraConnection.user_id == current_user.id
@@ -542,8 +571,8 @@ def publish_xray_test_suite(
     adapter = get_adapter(conn)
     engine = JiraMetadataEngine(adapter)
 
-    issue_types = engine.get_project_metadata(req.xray_project_id)
-    test_issue_type_id = _resolve_test_issue_type_id(issue_types, req.test_issue_type_id, req.test_issue_type_name)
+    project_metadata = engine.get_project_metadata(req.xray_project_id)
+    test_issue_type_id = _resolve_test_issue_type_id(project_metadata, req.test_issue_type_id, req.test_issue_type_name)
     test_fields = engine.get_field_schema(req.xray_project_id, test_issue_type_id)
     repository_path_field_id = _detect_repository_path_field_id(test_fields, req.repository_path_field_id)
     folder_path = _normalize_folder_path(req.folder_path, req.story_issue_key)
@@ -599,7 +628,7 @@ def publish_xray_test_suite(
     idempotency_store.store_response(
         "jira.xray_publish",
         str(current_user.id),
-        idem_key,
+        request.headers.get("Idempotency-Key"),
         req.model_dump(),
         response.model_dump(),
     )
@@ -614,3 +643,39 @@ def publish_xray_test_suite(
         warnings=warnings,
     )
     return response
+
+@router.post("/connections/{conn_id}/xray/test-suite", response_model=XrayTestSuitePublishResponse)
+def publish_xray_test_suite(
+    conn_id: int,
+    request: Request,
+    req: XrayTestSuitePublishRequest,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    rate_limiter.check("jira.xray_publish", str(current_user.id), limit=5, window_seconds=60)
+    idem_key = request.headers.get("Idempotency-Key")
+    cached_response = idempotency_store.replay_or_reserve(
+        "jira.xray_publish",
+        str(current_user.id),
+        idem_key,
+        req.model_dump(),
+    )
+    if cached_response is not None:
+        return XrayTestSuitePublishResponse(**cached_response)
+
+    if conn_id != req.jira_connection_id:
+        raise HTTPException(status_code=400, detail="Connection mismatch for Xray publish request")
+    if not req.test_cases:
+        raise HTTPException(status_code=400, detail="No test cases were provided for Xray publishing")
+
+    conn = db.query(JiraConnection).filter(
+        JiraConnection.id == conn_id,
+        JiraConnection.user_id == current_user.id
+    ).first()
+    if not conn:
+        raise HTTPException(status_code=404, detail="Connection not found")
+
+    if conn.auth_type == JiraAuthType.CLOUD:
+        return _publish_xray_cloud_test_suite(req, current_user, db, request)
+
+    return _publish_xray_server_test_suite(conn_id, req, current_user, db, request)

@@ -2,7 +2,7 @@ import httpx
 import base64
 import re
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Sequence, Tuple
 from fastapi import HTTPException
 from app.services.jira.adapters.base import JiraAdapter
 
@@ -26,6 +26,39 @@ class JiraCloudAdapter(JiraAdapter):
             verify=self.verify_ssl,
         )
 
+    def _fallback_candidate(self, v3_path: str) -> Optional[str]:
+        if "/rest/api/3/" not in v3_path:
+            return None
+        return v3_path.replace("/rest/api/3/", "/rest/api/2/", 1)
+
+    def _request_candidates(
+        self,
+        method: str,
+        paths: Sequence[str],
+        fallback_statuses: Tuple[int, ...] = (404, 405),
+    ) -> httpx.Response:
+        last_response: Optional[httpx.Response] = None
+        tried: list[str] = []
+
+        for path in paths:
+            if not path or path in tried:
+                continue
+            tried.append(path)
+            response = self._request(method, path)
+            last_response = response
+            if response.status_code in fallback_statuses:
+                fallback_path = self._fallback_candidate(path)
+                if fallback_path and fallback_path not in tried:
+                    tried.append(fallback_path)
+                    fallback_response = self._request(method, fallback_path)
+                    last_response = fallback_response
+                    if fallback_response.status_code not in fallback_statuses:
+                        return fallback_response
+                continue
+            return response
+
+        return last_response if last_response is not None else self._request(method, paths[0])
+
     def _request(self, method: str, path: str) -> httpx.Response:
         try:
             response = self.client.request(method, path)
@@ -39,6 +72,12 @@ class JiraCloudAdapter(JiraAdapter):
                     status_code=400,
                     detail="Jira Cloud access denied. Verify the account permissions."
                 )
+            if response.status_code == 429:
+                retry_after = response.headers.get("Retry-After")
+                detail = "Jira Cloud rate limit exceeded."
+                if retry_after:
+                    detail = f"{detail} Retry after {retry_after} seconds."
+                raise HTTPException(status_code=429, detail=detail)
             return response
         except httpx.TimeoutException:
             logger.error("jira_cloud_request_timeout", extra={"path": path})
@@ -195,7 +234,7 @@ class JiraCloudAdapter(JiraAdapter):
         }
 
     def get_projects(self) -> List[Dict[str, Any]]:
-        response = self._request("GET", "/rest/api/3/project")
+        response = self._request_candidates("GET", ["/rest/api/3/project"])
         if response.status_code != 200:
             logger.warning("jira_cloud_get_projects_failed", extra={"host": self.host_url, "status_code": response.status_code})
             raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to fetch Jira projects"))
@@ -220,12 +259,11 @@ class JiraCloudAdapter(JiraAdapter):
         return None
 
     def get_issue_types(self, project_id: str) -> Dict[str, Any]:
-        # Use project metadata endpoint instead of deprecated createmeta
-        response = self._request("GET", f"/rest/api/3/project/{project_id}")
+        response = self._request_candidates("GET", [f"/rest/api/3/project/{project_id}"])
         if response.status_code == 404:
             resolved_project_ref = self._resolve_project_ref(project_id)
             if resolved_project_ref and str(resolved_project_ref) != str(project_id):
-                response = self._request("GET", f"/rest/api/3/project/{resolved_project_ref}")
+                response = self._request_candidates("GET", [f"/rest/api/3/project/{resolved_project_ref}"])
 
         if response.status_code != 200:
             raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to fetch Jira issue types"))
@@ -248,7 +286,7 @@ class JiraCloudAdapter(JiraAdapter):
         }
 
     def get_issue_context(self, issue_key: str) -> Dict[str, Any]:
-        response = self._request("GET", f"/rest/api/3/issue/{issue_key}?fields=project,issuetype")
+        response = self._request_candidates("GET", [f"/rest/api/3/issue/{issue_key}?fields=project,issuetype"])
         if response.status_code != 200:
             raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to fetch Jira issue context"))
 
@@ -265,8 +303,6 @@ class JiraCloudAdapter(JiraAdapter):
         }
 
     def get_fields(self, project_id: str, issue_type_id: str) -> List[Dict[str, Any]]:
-        # Use the official Jira Cloud v3 createmeta endpoint with query filters
-        # Note: The path-based version is for Server/DC only.
         url = "/rest/api/3/issue/createmeta"
         param_sets = []
         project_ref = str(project_id).strip()
@@ -294,9 +330,24 @@ class JiraCloudAdapter(JiraAdapter):
                 logger.error("jira_cloud_get_fields_network_error", extra={"error": str(exc), "project": project_id})
                 raise HTTPException(status_code=502, detail=f"Failed to connect to Jira: {str(exc)}")
 
+            if response.status_code == 429:
+                retry_after = response.headers.get("Retry-After")
+                detail = "Jira Cloud rate limit exceeded while fetching field metadata."
+                if retry_after:
+                    detail = f"{detail} Retry after {retry_after} seconds."
+                raise HTTPException(status_code=429, detail=detail)
+
+            if response.status_code in (404, 405):
+                fallback_url = self._fallback_candidate(url)
+                if fallback_url:
+                    fallback_response = self.client.get(fallback_url, params=params)
+                    response = fallback_response
+
             if response.status_code == 200:
                 data = response.json()
-                return self._normalize_fields_payload(data)
+                fields = self._normalize_fields_payload(data)
+                if fields:
+                    return fields
 
             last_error_response = response
             logger.info(
@@ -325,6 +376,8 @@ class JiraCloudAdapter(JiraAdapter):
             
         try:
             response = self.client.post("/rest/api/3/issue", json=issue_data)
+            if response.status_code in (404, 405):
+                response = self.client.post("/rest/api/2/issue", json=issue_data)
         except httpx.TimeoutException:
             raise HTTPException(status_code=504, detail=f"Timed out connecting to Jira at {self.host_url}.")
         except httpx.HTTPError as exc:
@@ -342,6 +395,8 @@ class JiraCloudAdapter(JiraAdapter):
         }
         try:
             response = self.client.post("/rest/api/3/issueLink", json=payload)
+            if response.status_code in (404, 405):
+                response = self.client.post("/rest/api/2/issueLink", json=payload)
         except httpx.TimeoutException:
             raise HTTPException(status_code=504, detail=f"Timed out connecting to Jira at {self.host_url}.")
         except httpx.HTTPError as exc:
@@ -410,8 +465,6 @@ class JiraCloudAdapter(JiraAdapter):
         base_params: Dict[str, Any] = {"query": query, "maxResults": 20}
         attempts: List[tuple[str, Dict[str, Any]]] = []
 
-        # Prefer project-scoped search first for assignee-style fields. On Cloud, the
-        # multi-project endpoint is more reliable when a project key is available.
         if project_key:
             attempts.append(
                 (
@@ -448,6 +501,8 @@ class JiraCloudAdapter(JiraAdapter):
         # Picker endpoints are the best general-purpose typeahead fallback for Cloud.
         attempts.append(("/rest/api/3/user/picker", dict(base_params)))
         attempts.append(("/rest/api/3/user/search", dict(base_params)))
+        attempts.append(("/rest/api/2/user/picker", dict(base_params)))
+        attempts.append(("/rest/api/2/user/search", dict(base_params)))
 
         last_status: Optional[int] = None
         for endpoint, params in attempts:
@@ -466,6 +521,12 @@ class JiraCloudAdapter(JiraAdapter):
                     status_code=400,
                     detail=self._extract_error_message(response, "Failed to search Jira users"),
                 )
+            if response.status_code == 429:
+                retry_after = response.headers.get("Retry-After")
+                detail = "Jira Cloud rate limit exceeded while searching users."
+                if retry_after:
+                    detail = f"{detail} Retry after {retry_after} seconds."
+                raise HTTPException(status_code=429, detail=detail)
             if response.status_code != 200:
                 logger.info(
                     "jira_cloud_search_users_fallback",
@@ -487,7 +548,7 @@ class JiraCloudAdapter(JiraAdapter):
 
 
     def get_issue_link_types(self) -> List[str]:
-        response = self._request("GET", "/rest/api/3/issueLinkType")
+        response = self._request_candidates("GET", ["/rest/api/3/issueLinkType"])
         if response.status_code != 200:
             raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to fetch Jira issue link types"))
 
