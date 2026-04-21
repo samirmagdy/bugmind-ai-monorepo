@@ -110,8 +110,23 @@ async def add_security_headers(request: Request, call_next):
 async def startup_event():
     logger.info("ENVIRONMENT: %s", settings.ENVIRONMENT)
     logger.info("DATABASE_URL: %s", settings.DATABASE_URL.split("@")[-1] if "@" in settings.DATABASE_URL else "masked")
-    
-    # Perform mandatory connection check
+    # 1. Verify Security Keys
+    _placeholders = [
+        "32-byte-base64-encryption-key-for-jira-tokens",
+        "CHANGE_THIS_IN_PRODUCTION_MUST_BE_32_BYTES_!",
+        "CHANGE_THIS_IN_PRODUCTION_b8m9k2n3m4n5b6g7v8a9c0d1e2f3a4b"
+    ]
+    if not settings.SECRET_KEY or settings.SECRET_KEY in _placeholders:
+        logger.error("CRITICAL: SECRET_KEY is missing or using a default value. Deployment aborted for safety.")
+        import sys
+        sys.exit(1)
+        
+    if not settings.ENCRYPTION_KEY or settings.ENCRYPTION_KEY in _placeholders:
+        logger.error("CRITICAL: ENCRYPTION_KEY is missing or using a default value. Cannot protect Jira credentials.")
+        import sys
+        sys.exit(1)
+
+    # 2. Perform mandatory connection check
     try:
         from app.core.database import engine
         inspector = inspect(engine)

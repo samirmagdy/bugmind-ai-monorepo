@@ -103,6 +103,32 @@ export class BugMindDB {
       request.onerror = () => reject(request.error);
     });
   }
+
+  async clearMetadata(key: string): Promise<void> {
+    await this.init();
+    return new Promise((resolve, reject) => {
+      if (!this.db) return reject('DB not initialized');
+      const transaction = this.db.transaction([META_STORE], 'readwrite');
+      const store = transaction.objectStore(META_STORE);
+      const request = store.delete(key);
+
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async clearAllMetadata(): Promise<void> {
+    await this.init();
+    return new Promise((resolve, reject) => {
+      if (!this.db) return reject('DB not initialized');
+      const transaction = this.db.transaction([META_STORE], 'readwrite');
+      const store = transaction.objectStore(META_STORE);
+      const request = store.clear();
+
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
 }
 
 

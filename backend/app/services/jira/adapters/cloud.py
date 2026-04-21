@@ -221,29 +221,34 @@ class JiraCloudAdapter(JiraAdapter):
     def get_fields(self, project_id: str, issue_type_id: str) -> List[Dict[str, Any]]:
         # Use the replacement for the deprecated createmeta endpoint
         # Primary: Target nested metadata (Performance optimized)
+        # Note: Atlassian removed the global /createmeta endpoint in 2021.
         url = f"/rest/api/3/issue/createmeta/{project_id}/issuetypes/{issue_type_id}"
-        response = self.client.get(url)
-        
-        # Fallback: Query-param based metadata (Legacy support / Robustness)
+        try:
+            response = self.client.get(url)
+        except httpx.HTTPError as exc:
+            logger.error("jira_cloud_get_fields_network_error", extra={"error": str(exc), "project": project_id})
+            raise HTTPException(status_code=502, detail=f"Failed to connect to Jira: {str(exc)}")
+
         if response.status_code == 404:
-            logger.info("jira_cloud_createmeta_404_fallback", extra={"project_id": project_id, "issue_type_id": issue_type_id})
-            params = {
-                "projectIds": project_id,
-                "issueTypeIds": issue_type_id,
-                "expand": "projects.issuetypes.fields"
-            }
-            response = self.client.get("/rest/api/3/issue/createmeta", params=params)
+            logger.warning("jira_cloud_get_fields_404", extra={"project": project_id, "type": issue_type_id})
+            # Often caused by invalid IDs or missing permissions for that specific project/type
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Jira metadata not found for project '{project_id}' and issue type '{issue_type_id}'. Ensure the IDs are correct and your account has 'Browse Project' and 'Create Issue' permissions."
+            )
 
         if response.status_code != 200:
             logger.error("jira_cloud_get_fields_failed", extra={
                 "status": response.status_code,
                 "project": project_id,
-                "type": issue_type_id
+                "type": issue_type_id,
+                "response": response.text[:200]
             })
             raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to fetch Jira field metadata"))
 
         data = response.json()
         return self._normalize_fields_payload(data)
+
 
     def create_issue(self, issue_data: Dict[str, Any]) -> str:
         # Standardize standard text fields to ADF for API v3 compatibility

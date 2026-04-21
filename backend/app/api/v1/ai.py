@@ -100,9 +100,13 @@ def _assert_connection_matches_instance(connection: JiraConnection, instance_url
     requested = _normalize_instance_url(instance_url)
     connection_url = _normalize_instance_url(connection.host_url)
     if requested and connection_url and requested != connection_url:
+        logger.warning(
+            "connection_mismatch_attempted user_id=%s connection_id=%s requested=%s actual=%s",
+            connection.user_id, connection.id, requested, connection_url
+        )
         raise HTTPException(
             status_code=400,
-            detail=f"Active Jira connection does not match the current tab. Expected {requested} but selected connection points to {connection_url}."
+            detail=f"Security Alert: Your active Jira connection ({connection_url}) does not match the page you are currently viewing ({requested}). Please verify your connection settings."
         )
 
 

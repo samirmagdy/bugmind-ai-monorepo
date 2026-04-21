@@ -153,14 +153,15 @@ export const JiraProvider: React.FC<{
     logDebug('JIRA-BOOT', `Bootstrapping Jira context for ${normalizedUrl}${projectIdentity ? ` (${projectIdentity})` : ''}`);
     startFetch(fetchKey);
 
-    const promise = (async () => {
+    const payload: JiraBootstrapRequestPayload = {
+      instance_url: normalizedUrl,
+      project_key: projectKey,
+      project_id: projectId,
+      issue_type_id: requestIssueTypeId
+    };
+
+    const performFetch = async (retryCount = 0): Promise<JiraBootstrapContext | null> => {
       try {
-        const payload: JiraBootstrapRequestPayload = {
-          instance_url: normalizedUrl,
-          project_key: projectKey,
-          project_id: projectId,
-          issue_type_id: requestIssueTypeId
-        };
         const res = await apiRequest(`${apiBase}/jira/bootstrap-context`, {
           method: 'POST',
           token: activeToken,
@@ -170,7 +171,8 @@ export const JiraProvider: React.FC<{
         });
 
         if (!res.ok) {
-          throw new Error(await res.text() || `Failed to bootstrap Jira context (${res.status})`);
+          const errorText = await res.text();
+          throw new Error(errorText || `Failed to bootstrap Jira context (${res.status})`);
         }
 
         const data = await readJsonResponse<JiraBootstrapResponsePayload>(res);
@@ -183,15 +185,19 @@ export const JiraProvider: React.FC<{
         logDebug('JIRA-BOOT-OK', `Resolved connection ${data.connection_id}`);
         return data;
       } catch (err: unknown) {
+        if (retryCount < 2) {
+          logDebug('JIRA-BOOT-RETRY', `Retrying bootstrap (${retryCount + 1}/2) due to: ${String(err)}`);
+          return performFetch(retryCount + 1);
+        }
         logDebug('JIRA-BOOT-ERR', String(err));
         updateSession({ error: translateError(err, 'jira-status').description }, tabId);
         return null;
       } finally {
         clearFetch(fetchKey);
-        bootstrapPromiseRef.current.delete(cacheKey);
       }
-    })();
+    };
 
+    const promise = performFetch();
     bootstrapPromiseRef.current.set(cacheKey, promise);
     return promise;
   }, [apiBase, applyBootstrapContext, authToken, logDebug, refreshAuthToken, updateSession]);
@@ -415,6 +421,7 @@ export const JiraProvider: React.FC<{
         if (session.jiraConnectionId === id) {
           updateSession({ jiraConnectionId: null });
         }
+        await dbService.clearAllMetadata();
         await fetchConnections();
       }
     } catch (err) {

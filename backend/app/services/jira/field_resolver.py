@@ -1,4 +1,6 @@
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
+import datetime
+import re
 from app.services.jira.contract_aliases import canonicalize_ai_payload, normalize_ai_field_key
 
 class JiraFieldResolver:
@@ -101,7 +103,28 @@ class JiraFieldResolver:
                 raw_value = [raw_value]
             return [str(v) for v in raw_value if str(v).strip()]
 
-        # 5. Array handling (generic arrays)
+        # 5. Date / Datetime handling
+        elif field_type == "date" or field_type == "datetime":
+            if not raw_value:
+                return None
+            
+            # If already looks like ISO (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)
+            iso_pattern = re.compile(r"^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2})?")
+            if isinstance(raw_value, str) and iso_pattern.match(raw_value):
+                return raw_value
+                
+            # If is actual datetime object
+            if isinstance(raw_value, (datetime.date, datetime.datetime)):
+                return raw_value.isoformat()
+            
+            # Simple heuristic for common AI strings
+            try:
+                # If "today", "tomorrow", etc. (placeholder logic for now, usually AI outputs strings like "2023-10-27")
+                return str(raw_value)
+            except:
+                return None
+
+        # 6. Array handling (generic arrays)
         elif field_type == "array":
             if not isinstance(raw_value, list):
                 if not raw_value: return []
