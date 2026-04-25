@@ -1,21 +1,25 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ChevronDown, Search, X, Check, Plus, Loader2 } from 'lucide-react';
 
-interface Option {
-  id: string | number;
+export interface SelectOption {
+  id?: string | number;
   name?: string;
   avatar?: string;
   value?: string;
   label?: string;
+  icon_url?: string;
+  iconUrl?: string;
 }
 
+export type SelectValue = SelectOption | string | number | null | undefined;
+
 interface LuxurySearchableSelectProps {
-  options: Option[];
-  value: any | any[];
-  onChange: (value: any) => void;
+  options: SelectOption[];
+  value: SelectValue | SelectValue[];
+  onChange: (value: SelectValue | SelectValue[]) => void;
   isMulti?: boolean;
   placeholder?: string;
-  onSearchAsync?: (query: string) => Promise<Option[] | void>;
+  onSearchAsync?: (query: string) => Promise<SelectOption[] | void>;
   allowCustomValues?: boolean;
   required?: boolean;
   className?: string;
@@ -35,7 +39,7 @@ const LuxurySearchableSelect: React.FC<LuxurySearchableSelectProps> = ({
   const [isOpen, setIsOpen] = useState(false);
   const [openUp, setOpenUp] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [asyncResults, setAsyncResults] = useState<Option[]>([]);
+  const [asyncResults, setAsyncResults] = useState<SelectOption[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const lastSearchRef = useRef('');
@@ -90,10 +94,10 @@ const LuxurySearchableSelect: React.FC<LuxurySearchableSelectProps> = ({
     return () => clearTimeout(timer);
   }, [searchQuery, onSearchAsync]);
 
-  const currentValues = Array.isArray(value) ? value : (value ? [value] : []);
+  const currentValues: SelectValue[] = Array.isArray(value) ? value : (value ? [value] : []);
   
   // Helper to resolve a value (object or ID) to a full option for display
-  const resolveValueToOption = (v: any): Option => {
+  const resolveValueToOption = (v: SelectValue): SelectOption => {
     const findById = (id: string | number | undefined) => {
       if (id === undefined || id === null) return null;
       return options.find(opt => opt.id === id) || asyncResults.find(opt => opt.id === id) || null;
@@ -104,6 +108,10 @@ const LuxurySearchableSelect: React.FC<LuxurySearchableSelectProps> = ({
       if (matched) return { ...matched, ...v, avatar: v.avatar || v.icon_url || v.iconUrl || matched.avatar };
       if (v.name || v.value || v.label || v.avatar || v.icon_url || v.iconUrl) return { ...v, avatar: v.avatar || v.icon_url || v.iconUrl };
       return { ...v, name: v.id ? String(v.id) : 'Unknown value' };
+    }
+
+    if (v === null || v === undefined) {
+      return { name: 'Unknown value' };
     }
 
     const found = findById(v);
@@ -118,11 +126,11 @@ const LuxurySearchableSelect: React.FC<LuxurySearchableSelectProps> = ({
 
   const displayOptions = onSearchAsync && searchQuery.length >= 2 ? asyncResults : filteredOptions;
 
-  const handleToggle = (opt: Option) => {
+  const handleToggle = (opt: SelectOption) => {
     if (isMulti) {
-      const isSelected = currentValues.some(v => (typeof v === 'object' ? v.id === opt.id : v === opt.id));
+      const isSelected = currentValues.some(v => (typeof v === 'object' && v !== null ? v.id === opt.id : v === opt.id));
       if (isSelected) {
-        onChange(currentValues.filter(v => (typeof v === 'object' ? v.id !== opt.id : v !== opt.id)));
+        onChange(currentValues.filter(v => (typeof v === 'object' && v !== null ? v.id !== opt.id : v !== opt.id)));
       } else {
         onChange([...currentValues, opt]);
       }
@@ -176,12 +184,12 @@ const LuxurySearchableSelect: React.FC<LuxurySearchableSelectProps> = ({
               })()
             ) : (
               // Multi-select display (Bubbles/Tags)
-              currentValues.map((v: any, i: number) => {
+              currentValues.map((v, i: number) => {
                 const opt = resolveValueToOption(v);
                 const label = opt.name || opt.value || opt.label || opt.id;
                 return (
                   <div 
-                    key={typeof v === 'object' ? (v.id || i) : v} 
+                    key={typeof v === 'object' && v !== null ? (v.id || i) : (v ?? i)} 
                     className="bg-[var(--status-info)]/10 text-[var(--status-info)] px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-tight flex items-center gap-1.5 border border-[var(--status-info)]/20 animate-in zoom-in-95"
                   >
                     <span className="truncate max-w-[80px]">{label}</span>
@@ -237,7 +245,7 @@ const LuxurySearchableSelect: React.FC<LuxurySearchableSelectProps> = ({
           <div className="overflow-y-auto custom-scrollbar flex-1 py-1 bg-[var(--dropdown-bg)]">
             {displayOptions.length > 0 ? (
               displayOptions.map(opt => {
-                const isSelected = currentValues.some(v => (typeof v === 'object' ? v.id === opt.id : v === opt.id));
+                const isSelected = currentValues.some(v => (typeof v === 'object' && v !== null ? v.id === opt.id : v === opt.id));
                 return (
                   <button 
                     key={opt.id}

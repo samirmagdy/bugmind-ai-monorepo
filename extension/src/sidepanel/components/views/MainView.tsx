@@ -1,14 +1,14 @@
 import React, { useEffect, useRef } from 'react';
 import { useBugMind } from '../../hooks/useBugMind';
 import { 
-  Plus, ChevronDown, 
+  Plus, ChevronDown, Bug,
   Loader2, Send, AlertCircle, Zap, RefreshCw,
   Compass, ArrowRight, Check, Layout, AlertTriangle
 } from 'lucide-react';
-import { BugReport, JiraField, TestCase } from '../../types';
+import { BugReport, JiraField, JiraFieldOption, JiraUser, TestCase } from '../../types';
 import AutoResizeTextarea from '../common/AutoResizeTextarea';
-import { ActionButton, SurfaceCard, StatusPanel } from '../common/DesignSystem';
-import LuxurySearchableSelect from '../common/LuxurySearchableSelect';
+import { ActionButton, SurfaceCard, StatusBadge, StatusPanel } from '../common/DesignSystem';
+import LuxurySearchableSelect, { SelectOption, SelectValue } from '../common/LuxurySearchableSelect';
 import { TIMEOUTS } from '../../constants';
 
 const HIDDEN_SYSTEM_FIELD_KEYS = new Set([
@@ -25,6 +25,23 @@ type SelectDisplayValue = {
   label?: string;
   avatar?: string;
 };
+
+type StoredSelectValue = {
+  id: string;
+  name?: string;
+  value?: string;
+  label?: string;
+  avatar?: string;
+};
+
+type ExtraFieldValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JiraUser
+  | JiraFieldOption
+  | (JiraUser | JiraFieldOption | string)[];
 
 function isSystemManagedField(field: JiraField): boolean {
   const normalizedKey = field.key.trim().toLowerCase().replace(/[_-]/g, '');
@@ -75,6 +92,41 @@ function mergeDisplayValue(currentValue: unknown, fallbackValue: unknown): unkno
   return currentValue;
 }
 
+function toStoredSelectValue(value: SelectValue): StoredSelectValue {
+  if (typeof value === 'object' && value !== null) {
+    return {
+      id: String(value.id ?? ''),
+      name: value.name,
+      value: value.value,
+      label: value.label,
+      avatar: value.avatar
+    };
+  }
+
+  return { id: String(value ?? '') };
+}
+
+function isSelectOption(value: SelectValue | SelectValue[]): value is SelectOption {
+  return !Array.isArray(value) && typeof value === 'object' && value !== null;
+}
+
+function toAllowedValueOption(option: JiraFieldOption): SelectOption {
+  return {
+    id: option.id,
+    name: option.name,
+    value: option.value,
+    label: option.label
+  };
+}
+
+function toUserOption(user: JiraUser): SelectOption {
+  return {
+    id: user.id,
+    name: user.name,
+    avatar: user.avatar
+  };
+}
+
 const MainView: React.FC = () => {
   const { 
     session, updateSession, currentTabId, refreshIssue, debug, handleTabReload,
@@ -90,6 +142,17 @@ const MainView: React.FC = () => {
   const staleRecoveryAttemptsRef = useRef(0);
   const manualInputs = session.manualInputs?.length ? session.manualInputs : [''];
   const requiresIssueType = !session.issueData || !session.selectedIssueType?.id || session.issueTypes.length === 0;
+  const acceptanceCriteria = session.issueData?.acceptanceCriteria?.trim() || '';
+  const descriptionText = session.issueData?.description?.trim() || '';
+  const hasStructuredCriteria = acceptanceCriteria.length > 120 || acceptanceCriteria.includes('\n') || acceptanceCriteria.includes('-');
+  const recommendedWorkflow = !session.issueData ? null : hasStructuredCriteria ? 'tests' : (acceptanceCriteria.length < 48 && descriptionText.length > 0 ? 'analysis' : 'manual');
+  const recommendationLabel = !session.issueData
+    ? 'Open a Jira story to enable all workflows.'
+    : recommendedWorkflow === 'tests'
+      ? 'Recommended: Generate Test Cases for this story'
+      : recommendedWorkflow === 'analysis'
+        ? 'Recommended: Run AI Gap Analysis to uncover missing scenarios'
+        : 'Recommended: I Found a Bug for quick reporting';
 
   const setWorkflow = (mainWorkflow: 'home' | 'manual' | 'analysis' | 'tests') => {
     updateSession({ mainWorkflow, error: null });
@@ -366,57 +429,122 @@ const MainView: React.FC = () => {
               <div className="space-y-4">
                 {session.mainWorkflow === 'home' ? (
                   <SurfaceCard className="space-y-0 cursor-default hover:border-[var(--card-border)] animate-in fade-in slide-in-from-bottom-4 duration-700 overflow-hidden">
-                    <div className="space-y-2 pb-5">
-                      <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--text-muted)]">Choose Workflow</div>
+                    <div className="space-y-3 pb-5">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--text-muted)]">Choose Workflow</div>
+                        <StatusBadge tone="info" className="opacity-80">
+                          {session.issueData ? 'Story Detected' : 'Context Needed'}
+                        </StatusBadge>
+                      </div>
                       <h3 className="workflow-card-title">Start from one action</h3>
                       <p className="workflow-card-subtitle">Each workflow opens in its own focused page while keeping the same Jira context above.</p>
+                      <div className={`rounded-[1rem] border px-3.5 py-3 text-[11px] font-medium leading-relaxed ${
+                        session.issueData
+                          ? 'border-[var(--border-soft)] bg-[var(--surface-soft)] text-[var(--text-secondary)]'
+                          : 'border-[var(--status-warning)]/20 bg-[var(--warning-bg)] text-[var(--text-secondary)]'
+                      }`}>
+                        <span className="font-bold text-[var(--text-primary)]">{recommendationLabel}</span>
+                        {session.issueData && (
+                          <span className="block mt-1">
+                            {recommendedWorkflow === 'tests'
+                              ? 'Create Xray-ready coverage from the current acceptance criteria.'
+                              : recommendedWorkflow === 'analysis'
+                                ? 'Get a report of missing requirements, edge cases, and functional risks.'
+                                : 'Generate structured Jira-ready bugs instantly from your notes.'}
+                          </span>
+                        )}
+                      </div>
                     </div>
 
                     <div className="border-t border-[var(--border-soft)]">
-                      <div className="group relative flex items-center justify-between gap-4 py-5 px-1">
+                      <div className={`group relative flex items-center justify-between gap-4 rounded-[1.1rem] py-5 px-1 transition-colors ${
+                        recommendedWorkflow === 'manual' ? 'bg-[var(--surface-accent)]/45' : 'hover:bg-[var(--surface-soft)]/70'
+                      }`}>
                         <button type="button" onClick={() => setWorkflow('manual')} className="absolute inset-0" aria-label="I Found a Bug" />
                         <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-[1rem] bg-[var(--surface-accent)] flex items-center justify-center text-[var(--primary-purple)] shrink-0">
-                            <Plus size={18} />
+                          <div className={`w-12 h-12 rounded-[1.1rem] flex items-center justify-center shrink-0 ${
+                            recommendedWorkflow === 'manual'
+                              ? 'bg-[var(--primary-gradient)] text-white'
+                              : 'bg-[var(--surface-accent)] text-[var(--primary-purple)]'
+                          }`}>
+                            <Bug size={20} />
                           </div>
                           <div>
-                            <h4 className="workflow-card-title text-[14px]">I Found a Bug</h4>
-                            <p className="workflow-card-subtitle">Turn plain English notes into Jira-ready bug reports, one or many at once.</p>
+                            <div className="flex items-center gap-2">
+                              <h4 className="workflow-card-title text-[15px]">I Found a Bug</h4>
+                              <StatusBadge className={recommendedWorkflow === 'manual' ? '' : 'opacity-80'}>
+                                {recommendedWorkflow === 'manual' ? 'Recommended' : 'Primary'}
+                              </StatusBadge>
+                            </div>
+                            <p className="workflow-card-subtitle">Generate structured bugs ready to submit in Jira.</p>
                           </div>
                         </div>
-                        <ArrowRight size={16} className="text-[var(--text-muted)] shrink-0 transition-transform group-hover:translate-x-0.5" />
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="rounded-full border border-[var(--card-border)] bg-[var(--bg-elevated)] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--text-primary)]">
+                            Start
+                          </span>
+                          <ArrowRight size={16} className="text-[var(--text-muted)] transition-transform group-hover:translate-x-0.5" />
+                        </div>
                       </div>
                     </div>
 
                     <div className="border-t border-[var(--border-soft)]">
-                      <div className="group relative flex items-center justify-between gap-4 py-5 px-1">
+                      <div className={`group relative flex items-center justify-between gap-4 rounded-[1.1rem] py-5 px-1 transition-colors ${
+                        recommendedWorkflow === 'analysis' ? 'bg-[var(--surface-accent-strong)]/55' : 'hover:bg-[var(--surface-soft)]/70'
+                      }`}>
                         <button type="button" onClick={() => setWorkflow('analysis')} className="absolute inset-0" aria-label="AI Gap Analysis" />
                         <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-[1rem] bg-[var(--surface-accent-strong)] flex items-center justify-center text-[var(--primary-blue)] shrink-0">
-                            <Zap size={18} />
+                          <div className={`w-12 h-12 rounded-[1.1rem] flex items-center justify-center shrink-0 ${
+                            recommendedWorkflow === 'analysis'
+                              ? 'bg-[var(--primary-blue)] text-white'
+                              : 'bg-[var(--surface-accent-strong)] text-[var(--primary-blue)]'
+                          }`}>
+                            <Zap size={20} />
                           </div>
                           <div>
-                            <h4 className="workflow-card-title text-[14px]">AI Gap Analysis</h4>
-                            <p className="workflow-card-subtitle">Identify missing requirements, functional gaps, edge cases, and risk areas.</p>
+                            <div className="flex items-center gap-2">
+                              <h4 className="workflow-card-title text-[15px]">AI Gap Analysis</h4>
+                              {recommendedWorkflow === 'analysis' && <StatusBadge tone="info">Recommended</StatusBadge>}
+                            </div>
+                            <p className="workflow-card-subtitle">Get a report of missing scenarios, requirements, and risk areas.</p>
                           </div>
                         </div>
-                        <ArrowRight size={16} className="text-[var(--text-muted)] shrink-0 transition-transform group-hover:translate-x-0.5" />
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="rounded-full border border-[var(--card-border)] bg-[var(--bg-elevated)] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--text-primary)]">
+                            Start
+                          </span>
+                          <ArrowRight size={16} className="text-[var(--text-muted)] transition-transform group-hover:translate-x-0.5" />
+                        </div>
                       </div>
                     </div>
 
                     <div className="border-t border-[var(--border-soft)]">
-                      <div className="group relative flex items-center justify-between gap-4 py-5 px-1">
+                      <div className={`group relative flex items-center justify-between gap-4 rounded-[1.1rem] py-5 px-1 transition-colors ${
+                        recommendedWorkflow === 'tests' ? 'bg-[var(--success-bg)]/70' : 'hover:bg-[var(--surface-soft)]/70'
+                      }`}>
                         <button type="button" onClick={() => setWorkflow('tests')} className="absolute inset-0" aria-label="Generate Test Cases" />
                         <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-[1rem] bg-[var(--surface-soft)] flex items-center justify-center text-[var(--status-success)] shrink-0">
-                            <Check size={18} />
+                          <div className={`w-12 h-12 rounded-[1.1rem] flex items-center justify-center shrink-0 ${
+                            recommendedWorkflow === 'tests'
+                              ? 'bg-[var(--status-success)] text-white'
+                              : 'bg-[var(--surface-soft)] text-[var(--status-success)]'
+                          }`}>
+                            <Check size={20} />
                           </div>
                           <div>
-                            <h4 className="workflow-card-title text-[14px]">Generate Test Cases</h4>
-                            <p className="workflow-card-subtitle">Create structured QA test cases and prepare them for Jira Xray publishing.</p>
+                            <div className="flex items-center gap-2">
+                              <h4 className="workflow-card-title text-[15px]">Generate Test Cases</h4>
+                              {recommendedWorkflow === 'tests' && <StatusBadge tone="success">Recommended</StatusBadge>}
+                            </div>
+                            <p className="workflow-card-subtitle">Create and export Xray-ready test cases linked to this story.</p>
                           </div>
                         </div>
-                        <ArrowRight size={16} className="text-[var(--text-muted)] shrink-0 transition-transform group-hover:translate-x-0.5" />
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="rounded-full border border-[var(--card-border)] bg-[var(--bg-elevated)] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--text-primary)]">
+                            Start
+                          </span>
+                          <ArrowRight size={16} className="text-[var(--text-muted)] transition-transform group-hover:translate-x-0.5" />
+                        </div>
                       </div>
                     </div>
                   </SurfaceCard>
@@ -451,10 +579,12 @@ const MainView: React.FC = () => {
                             options={session.issueTypes.map(t => ({ id: t.id, name: t.name, avatar: t.icon_url }))}
                             value={session.selectedIssueType}
                             placeholder="Select issue type..."
-                            onChange={(type: any) => {
-                              if (type && session.jiraConnectionId && session.issueData) {
-                                updateSession({ selectedIssueType: type, jiraMetadata: null });
-                                void bootstrapJiraConfig(type.id, { force: true, loading: true, logTag: 'MAIN-TYPE-SWITCH' });
+                            onChange={(type) => {
+                              if (type && !Array.isArray(type) && session.jiraConnectionId && session.issueData) {
+                                const selectedType = session.issueTypes.find((issueType) => issueType.id === (isSelectOption(type) ? type.id : type));
+                                if (!selectedType) return;
+                                updateSession({ selectedIssueType: selectedType, jiraMetadata: null });
+                                void bootstrapJiraConfig(selectedType.id, { force: true, loading: true, logTag: 'MAIN-TYPE-SWITCH' });
                               }
                             }}
                           />
@@ -625,8 +755,9 @@ const MainView: React.FC = () => {
                         options={session.xrayProjects.map(p => ({ id: p.id, name: `${p.key} · ${p.name}` }))}
                         value={session.xrayTargetProjectId ? { id: session.xrayTargetProjectId } : null}
                         placeholder="Select target project..."
-                        onChange={(next: any) => {
-                          const project = session.xrayProjects.find(item => item.id === next?.id);
+                        onChange={(next) => {
+                          const selectedProjectId = isSelectOption(next) ? String(next.id ?? '') : Array.isArray(next) ? '' : String(next ?? '');
+                          const project = session.xrayProjects.find(item => item.id === selectedProjectId);
                           updateSession({
                             xrayTargetProjectId: project?.id || null,
                             xrayTargetProjectKey: project?.key || null
@@ -813,35 +944,22 @@ const MainView: React.FC = () => {
                                         </label>
                                         <LuxurySearchableSelect 
                                           isMulti={isMulti}
-                                          options={(field.allowed_values || []) as any[]}
-                                          value={currentVal}
+                                          options={(field.allowed_values || []).map(toAllowedValueOption)}
+                                          value={currentVal as SelectValue | SelectValue[]}
                                           placeholder={field.type.includes('user') ? "Search users..." : (isMulti ? `Add ${field.name}...` : `Select ${field.name}...`)}
                                           required={field.required}
                                           allowCustomValues={field.type === 'labels' || field.type === 'array'}
                                           onSearchAsync={field.type.includes('user') ? async (q) => {
                                             const results = await searchUsers(q, undefined, field.key);
-                                            return (results || []) as any[];
+                                            return (results || []).map(toUserOption);
                                           } : undefined}
                                           onChange={(next) => {
-                                            let finalVal = next;
+                                            let finalVal: ExtraFieldValue = (next ?? null) as ExtraFieldValue;
                                             if (field.type === 'option' || field.type === 'multi-select' || field.type === 'priority' || field.type === 'user' || field.type === 'multi-user') {
-                                              const toStoredOption = (value: any) => {
-                                                if (typeof value === 'object' && value !== null) {
-                                                  return {
-                                                    id: value.id,
-                                                    name: value.name,
-                                                    value: value.value,
-                                                    label: value.label,
-                                                    avatar: value.avatar
-                                                  };
-                                                }
-                                                return { id: value };
-                                              };
-
                                               if (isMulti) {
-                                                finalVal = (next as any[]).map(toStoredOption);
+                                                finalVal = (Array.isArray(next) ? next : []).map(toStoredSelectValue);
                                               } else {
-                                                finalVal = toStoredOption(next);
+                                                finalVal = toStoredSelectValue(Array.isArray(next) ? next[0] : next);
                                               }
                                             }
                                             handleUpdateBug(idx, { 

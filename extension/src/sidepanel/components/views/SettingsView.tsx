@@ -546,10 +546,10 @@ const SettingsView: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center justify-between gap-3 rounded-[1.2rem] border border-[var(--card-border)] bg-[var(--surface-soft)] p-1.5">
+        <div className="flex items-center justify-between gap-3 rounded-[1rem] border border-[var(--card-border)] bg-[var(--surface-soft)] p-1.5">
           <div className="flex items-center gap-2 px-2">
-            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--bg-elevated)] text-[var(--primary-blue)]">
-              {session.theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--bg-elevated)] text-[var(--primary-blue)]">
+              {session.theme === 'dark' ? <Sun size={13} /> : <Moon size={13} />}
             </span>
             <div className="leading-tight">
               <div className="text-[11px] font-bold text-[var(--text-primary)]">
@@ -567,14 +567,14 @@ const SettingsView: React.FC = () => {
               theme: session.theme === 'dark' ? 'light' : 'dark',
               themeSource: 'manual'
             })}
-            className="flex h-10 min-w-[112px] items-center justify-between rounded-full border border-[var(--card-border)] bg-[var(--bg-elevated)] px-2.5 text-[11px] font-bold text-[var(--text-primary)] transition-colors hover:border-[var(--border-active)] hover:bg-[var(--surface-soft-hover)]"
+            className="flex h-8 min-w-[92px] items-center justify-between rounded-full border border-[var(--card-border)] bg-[var(--bg-elevated)] px-2 text-[10px] font-bold text-[var(--text-primary)] transition-colors hover:border-[var(--border-active)] hover:bg-[var(--surface-soft-hover)]"
           >
-            <span className={`flex h-6 w-6 items-center justify-center rounded-full transition-colors ${
+            <span className={`flex h-5 w-5 items-center justify-center rounded-full transition-colors ${
               session.theme === 'dark'
                 ? 'bg-[var(--surface-accent-strong)] text-[var(--primary-blue)]'
                 : 'bg-[var(--surface-accent)] text-[var(--primary-purple)]'
             }`}>
-              {session.theme === 'dark' ? <Sun size={13} /> : <Moon size={13} />}
+              {session.theme === 'dark' ? <Sun size={11} /> : <Moon size={11} />}
             </span>
             <span>{session.theme === 'dark' ? 'Dark' : 'Light'}</span>
           </button>

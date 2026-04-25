@@ -187,7 +187,7 @@ export default function App() {
       <footer className="relative z-[1] h-12 border-t border-[var(--footer-border)] bg-[var(--footer-bg)] flex items-center justify-between px-3 shrink-0">
         <button 
           onClick={() => debug.setShow(!debug.show)}
-          className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-[0.16em] transition-colors ${debug.show ? 'bg-[var(--surface-soft)] text-[var(--primary-blue)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
+          className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-[0.16em] transition-colors opacity-75 ${debug.show ? 'bg-[var(--surface-soft)] text-[var(--primary-blue)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:opacity-100'}`}
         >
           Debug Log
         </button>
@@ -196,7 +196,7 @@ export default function App() {
           {auth.authToken && (
             <button 
               onClick={handleLogout}
-              className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)] hover:text-[var(--error)] hover:bg-[var(--surface-soft)] transition-colors"
+              className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)] hover:text-[var(--error)] hover:bg-[var(--surface-soft)] transition-colors opacity-75 hover:opacity-100"
             >
               Sign Out
             </button>
