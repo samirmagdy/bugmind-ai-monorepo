@@ -1,6 +1,6 @@
 import React, { useState, useRef, useMemo, useCallback } from 'react';
 import { TabSession, BugReport, Usage, INITIAL_SESSION, TestCase, MissingField, IssueContextPayload } from '../types';
-import { apiRequest, getErrorMessage, readJsonResponse, throwApiErrorResponse } from '../services/api';
+import { ApiError, apiRequest, getErrorMessage, readJsonResponse, throwApiErrorResponse } from '../services/api';
 import {
   AIGenerationRequestPayload,
   AIGenerationResponsePayload,
@@ -32,7 +32,45 @@ export const AIProvider: React.FC<{
   currentTabId: number | null,
   setTabSessions: React.Dispatch<React.SetStateAction<Record<number, TabSession>>>
 }> = ({ children, logDebug, apiBase, authToken, refreshAuthToken, session, updateSession, currentTabId, setTabSessions }) => {
+  const extractBulkSubmitFailure = useCallback((err: unknown) => {
+    if (!(err instanceof ApiError) || !Array.isArray(err.details)) return null;
+
+    const detail = err.details.find((item) => item && typeof item === 'object' && 'bug_index' in (item as Record<string, unknown>)) as
+      | {
+          bug_index?: unknown;
+          bug_summary?: unknown;
+          missing_fields?: unknown;
+          jira_error?: unknown;
+        }
+      | undefined;
+
+    if (!detail || typeof detail.bug_index !== 'number') return null;
+
+    const parsedMissingFields = Array.isArray(detail.missing_fields)
+      ? detail.missing_fields
+          .filter((field): field is { key: string; name: string } => Boolean(field) && typeof field === 'object' && typeof (field as { key?: unknown }).key === 'string' && typeof (field as { name?: unknown }).name === 'string')
+      : [];
+
+    return {
+      bugIndex: detail.bug_index,
+      bugSummary: typeof detail.bug_summary === 'string' ? detail.bug_summary : undefined,
+      missingFields: parsedMissingFields,
+      jiraError: typeof detail.jira_error === 'string' ? detail.jira_error : undefined,
+    };
+  }, []);
+
   const parseJiraRequiredFieldErrors = useCallback((err: unknown) => {
+    const bulkFailure = extractBulkSubmitFailure(err);
+    if (bulkFailure?.missingFields?.length) {
+      return bulkFailure.missingFields.map((field) => {
+        const schemaField = session.jiraMetadata?.fields.find((item) => item.key === field.key);
+        return {
+          key: field.key,
+          name: schemaField?.name || field.name || field.key,
+        };
+      });
+    }
+
     const rawMessage = err instanceof Error ? err.message : String(err || '');
     const parseFieldMap = (value: unknown): Array<{ key: string; name: string }> => {
       if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
@@ -70,7 +108,7 @@ export const AIProvider: React.FC<{
     } catch {
       return [];
     }
-  }, [session.jiraMetadata?.fields]);
+  }, [extractBulkSubmitFailure, session.jiraMetadata?.fields]);
 
   const isSystemManagedMissingField = useCallback((field: MissingField) => {
     const normalizedKey = field.key.trim().toLowerCase().replace(/[_-]/g, '');
@@ -499,6 +537,7 @@ export const AIProvider: React.FC<{
       const data = await readJsonResponse<AISubmitResponsePayload>(res);
       updateSession({ view: 'success', createdIssues: data.created_issues || [] });
     } catch (err: unknown) {
+      const bulkFailure = extractBulkSubmitFailure(err);
       const jiraRequiredFields = parseJiraRequiredFieldErrors(err);
       if (jiraRequiredFields.length > 0) {
         const visibleKeys = Array.from(new Set([
@@ -509,9 +548,18 @@ export const AIProvider: React.FC<{
         updateSession({
           error: null,
           view: 'preview',
-          previewBugIndex: index ?? session.previewBugIndex ?? 0,
+          previewBugIndex: bulkFailure?.bugIndex ?? index ?? session.previewBugIndex ?? 0,
           visibleFields: visibleKeys,
           validationErrors: jiraRequiredFields.map((field) => `Field "${field.name}" is required.`)
+        });
+        return;
+      }
+
+      if (bulkFailure) {
+        updateSession({
+          view: 'preview',
+          previewBugIndex: bulkFailure.bugIndex,
+          error: bulkFailure.jiraError || getErrorMessage(err),
         });
         return;
       }

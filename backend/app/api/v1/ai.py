@@ -507,7 +507,7 @@ async def submit_bugs(
             available_link_types = []
     link_candidates = _resolve_link_type_candidates("Relates", available_link_types) if story_issue_key else []
 
-    for bug in req.bugs:
+    for bug_index, bug in enumerate(req.bugs):
         mapping_record = _get_field_mapping_record(db, current_user.id, req.project_key, req.project_id, req.issue_type_id)
         payload_fields = inject_standard_field_aliases(
             schema,
@@ -522,8 +522,20 @@ async def submit_bugs(
         payload_fields = _merge_saved_field_defaults(payload_fields, mapping_record)
         missing_fields = _validate_payload(schema, payload_fields)
         if missing_fields:
-            names = ", ".join(field["name"] for field in missing_fields)
-            raise HTTPException(status_code=400, detail=f"Cannot submit bug. Missing required Jira fields: {names}")
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": {
+                        "code": "BULK_BUG_FIELDS_MISSING",
+                        "message": f"Bug {bug_index + 1} is missing required Jira fields.",
+                        "details": [{
+                            "bug_index": bug_index,
+                            "bug_summary": bug.summary,
+                            "missing_fields": missing_fields,
+                        }],
+                    }
+                },
+            )
 
         platform = "server" if prefer_project_key else "cloud"
         resolved_payload = _resolve_payload(
@@ -537,7 +549,23 @@ async def submit_bugs(
             platform=platform
         )
 
-        issue_key = adapter.create_issue(resolved_payload)
+        try:
+            issue_key = adapter.create_issue(resolved_payload)
+        except HTTPException as exc:
+            raise HTTPException(
+                status_code=exc.status_code,
+                detail={
+                    "error": {
+                        "code": "BULK_BUG_SUBMIT_FAILED",
+                        "message": f"Bug {bug_index + 1} could not be created in Jira.",
+                        "details": [{
+                            "bug_index": bug_index,
+                            "bug_summary": bug.summary,
+                            "jira_error": exc.detail,
+                        }],
+                    }
+                },
+            ) from exc
         created_issues.append(XrayPublishedTest(id=issue_key, key=issue_key, self=""))
         if story_issue_key:
             linked = False
