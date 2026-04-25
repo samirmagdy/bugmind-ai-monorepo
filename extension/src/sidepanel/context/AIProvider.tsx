@@ -569,7 +569,7 @@ export const AIProvider: React.FC<{
       submitBugsInFlightRef.current = false;
       updateSession({ loading: false });
     }
-  }, [authToken, apiBase, getProjectRequestParams, parseJiraRequiredFieldErrors, refreshAuthToken, session.bugs, session.instanceUrl, session.issueData, session.jiraConnectionId, session.previewBugIndex, session.selectedIssueType, session.visibleFields, updateSession]);
+  }, [authToken, apiBase, extractBulkSubmitFailure, getProjectRequestParams, parseJiraRequiredFieldErrors, refreshAuthToken, session.bugs, session.instanceUrl, session.issueData, session.jiraConnectionId, session.previewBugIndex, session.selectedIssueType, session.visibleFields, updateSession]);
 
   const searchUsers = useCallback(async (query: string, bugIndex?: number, fieldId?: string) => {
     if (query.length < 2 || !session.jiraConnectionId) return;
