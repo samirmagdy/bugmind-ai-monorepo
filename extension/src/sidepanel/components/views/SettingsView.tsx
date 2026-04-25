@@ -154,7 +154,7 @@ const FieldRow: React.FC<{
         <div className={`relative transition-all duration-500 ${!isVisible ? 'pointer-events-none' : ''}`}>
           { (field.type === 'user' || field.type === 'multi-user') ? (
             <div className="relative z-[60]">
-	              {savedDefault ? (
+              {savedDefault ? (
                 <div className="flex items-center justify-between bg-[var(--surface-soft)] border border-[var(--card-border)] rounded-[1.25rem] px-4 py-2.5 transition-all hover:bg-[var(--surface-soft-hover)] group/val">
                   <div className="flex items-center gap-3">
                     {typeof savedDefault === 'object' && savedDefault !== null && !Array.isArray(savedDefault) && savedDefault.avatar ? (
