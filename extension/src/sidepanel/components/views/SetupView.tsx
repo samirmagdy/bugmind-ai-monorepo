@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useBugMind } from '../../hooks/useBugMind';
-import { ExternalLink, ArrowLeft, RefreshCw, Globe, ShieldCheck } from 'lucide-react';
-import { ActionButton, FieldLabel, SectionTitle, SurfaceCard } from '../common/DesignSystem';
+import { ExternalLink, ArrowLeft, RefreshCw, Globe, ShieldCheck, Lock, AtSign, Link } from 'lucide-react';
+import { ActionButton } from '../common/DesignSystem';
 
 const SetupView: React.FC = () => {
   const { 
@@ -64,146 +64,176 @@ const SetupView: React.FC = () => {
   const hasConnections = (session.connections?.length || 0) > 0;
 
   return (
-    <div className="space-y-8 pt-6 animate-bp-flicker">
-      <div className="flex items-center gap-4">
+    <div className="space-y-6 animate-in fade-in duration-500">
+      {/* Header */}
+      <div className="context-card flex items-center gap-3 px-4 py-3.5">
         {hasConnections && (
           <button 
             onClick={() => setGlobalView('main')}
-            className="p-3 bg-[var(--bg-input)] hover:bg-[var(--bg-card)] rounded-none border border-[var(--border-main)] transition-all text-[var(--text-muted)] hover:text-[var(--text-main)] shadow-sm group"
+            className="p-2.5 rounded-full bg-[var(--surface-soft)] border border-[var(--card-border)] text-[var(--text-muted)] hover:text-[var(--primary-blue)] hover:border-[var(--primary-blue)] transition-all"
           >
-            <ArrowLeft size={20} className="group-hover:-translate-x-1 transition-transform" />
+            <ArrowLeft size={16} />
           </button>
         )}
-        <div className="space-y-1">
-          <SectionTitle title="Instance Config" subtitle="Link your Jira workspace" />
+        <div>
+          <h2 className="text-lg font-bold text-[var(--text-primary)]">Jira Connection</h2>
+          <p className="text-xs text-[var(--text-secondary)]">Link your Jira workspace to BugMind</p>
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-8">
-        {/* Global Orchestrator Settings */}
-        <SurfaceCard className="p-6 rounded-none relative overflow-hidden group">
-          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-[var(--status-info)]/20 to-transparent"></div>
-          <div className="flex items-center gap-3 mb-5">
-            <div className="p-2 bg-[var(--status-info)]/10 rounded-none border border-[var(--status-info)]/20 shadow-inner">
-              <Globe size={16} className="text-[var(--status-info)]" />
+      <form onSubmit={handleSubmit} className="space-y-5">
+        {/* Engine Endpoint */}
+        <div className="context-card space-y-4">
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-[0.9rem] bg-[var(--bg-input)] border border-[var(--border-soft)] flex items-center justify-center text-[var(--primary-blue)]">
+              <Globe size={14} />
             </div>
-            <span className="bp-subheading text-[var(--status-info)]">BugMind Engine</span>
+            <span className="text-sm font-bold text-[var(--text-primary)]">BugMind Engine</span>
           </div>
-          <div className="space-y-2">
-            <FieldLabel className="normal-case tracking-tight opacity-40">Control Plane Endpoint</FieldLabel>
-            <input 
-              type="url" 
-              value={apiBase} 
-              onChange={e => {
-                const val = e.target.value;
-                setApiBase(val);
-                chrome.storage.local.set({ 'bugmind_api_base': val.trim().replace(/\/+$/, '') });
-              }}
-              className="w-full bp-input rounded-none px-5 py-4 outline-none transition-all text-sm text-[var(--text-main)] placeholder:text-[var(--text-muted)] placeholder:opacity-20"
-              placeholder="https://api.bugmind.ai/v1"
-              required
-            />
+          <div className="space-y-1.5">
+            <label className="context-label uppercase tracking-wider block ml-1">Control Plane Endpoint</label>
+            <div className="relative">
+              <div className="absolute inset-y-0 left-3 flex items-center text-[var(--text-muted)]">
+                <Link size={14} />
+              </div>
+              <input 
+                type="url" 
+                value={apiBase} 
+                onChange={e => {
+                  const val = e.target.value;
+                  setApiBase(val);
+                  chrome.storage.local.set({ 'bugmind_api_base': val.trim().replace(/\/+$/, '') });
+                }}
+                className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-2xl pl-9 pr-4 py-2.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)] transition-all"
+                placeholder="https://api.bugmind.ai/v1"
+                required
+              />
+            </div>
           </div>
-        </SurfaceCard>
+        </div>
 
         {/* Platform Selection */}
-        <div className="space-y-3">
-          <FieldLabel className="ml-2 normal-case tracking-tight opacity-40">Deployment Architecture</FieldLabel>
-          <div className="flex bg-[var(--bg-input)] p-1.5 rounded-none border border-[var(--border-main)] shadow-inner">
-            <button 
-              type="button" 
+        <div className="space-y-2">
+          <label className="context-label uppercase tracking-wider block ml-1">Deployment Type</label>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
               onClick={() => setPlatform('cloud')}
-              className={`flex-1 py-3 text-[10px] font-black uppercase tracking-[0.2em] rounded-none transition-all duration-500 ${platform === 'cloud' ? 'bg-[var(--accent)] text-white shadow-xl shadow-[var(--accent)]/20 translate-y-[-1px]' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}
+              className={`py-3 rounded-xl text-xs font-bold border transition-all ${
+                platform === 'cloud'
+                  ? 'bg-[var(--primary-gradient)] text-white border-transparent shadow-[var(--shadow-button)]'
+                  : 'bg-[var(--surface-soft)] text-[var(--text-secondary)] border-[var(--card-border)] hover:border-[var(--primary-blue)] hover:text-[var(--primary-blue)]'
+              }`}
             >
               Atlassian Cloud
             </button>
-            <button 
-              type="button" 
+            <button
+              type="button"
               onClick={() => setPlatform('server')}
-              className={`flex-1 py-3 text-[10px] font-black uppercase tracking-[0.2em] rounded-none transition-all duration-500 ${platform === 'server' ? 'bg-[var(--accent)] text-white shadow-xl shadow-[var(--accent)]/20 translate-y-[-1px]' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}
+              className={`py-3 rounded-xl text-xs font-bold border transition-all ${
+                platform === 'server'
+                  ? 'bg-[var(--primary-gradient)] text-white border-transparent shadow-[var(--shadow-button)]'
+                  : 'bg-[var(--surface-soft)] text-[var(--text-secondary)] border-[var(--card-border)] hover:border-[var(--primary-blue)] hover:text-[var(--primary-blue)]'
+              }`}
             >
               Data Center
             </button>
           </div>
         </div>
 
-        {/* Credentials Section */}
-        <SurfaceCard className="rounded-none p-8 space-y-6 shadow-2xl relative overflow-hidden">
-          <div className="space-y-2">
-            <FieldLabel className="normal-case tracking-tight opacity-40">Workspace URL</FieldLabel>
-            <input 
-              type="url" 
-              value={url} 
-              onChange={e => setUrl(e.target.value)}
-              className="w-full bp-input rounded-none px-5 py-4 outline-none transition-all text-sm text-[var(--text-main)]"
-              placeholder={platform === 'cloud' ? "https://your-domain.atlassian.net" : "https://jira.your-corp.com"}
-              required
-            />
+        {/* Credentials */}
+        <div className="context-card space-y-4">
+          <div className="space-y-1.5">
+            <label className="context-label uppercase tracking-wider block ml-1">Workspace URL</label>
+            <div className="relative">
+              <div className="absolute inset-y-0 left-3 flex items-center text-[var(--text-muted)]">
+                <Link size={14} />
+              </div>
+              <input 
+                type="url" 
+                value={url} 
+                onChange={e => setUrl(e.target.value)}
+                className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-2xl pl-9 pr-4 py-2.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)] transition-all"
+                placeholder={platform === 'cloud' ? 'https://your-domain.atlassian.net' : 'https://jira.your-corp.com'}
+                required
+              />
+            </div>
           </div>
 
-          <div className="space-y-2">
-            <FieldLabel className="normal-case tracking-tight opacity-40">Administrative Identity</FieldLabel>
-            <input 
-              type="text" 
-              value={username} 
-              onChange={e => setUsername(e.target.value)}
-              className="w-full bp-input rounded-none px-5 py-4 outline-none transition-all text-sm text-[var(--text-main)]"
-              placeholder="identity@company.com"
-              required
-            />
+          <div className="space-y-1.5">
+            <label className="context-label uppercase tracking-wider block ml-1">Admin Email</label>
+            <div className="relative">
+              <div className="absolute inset-y-0 left-3 flex items-center text-[var(--text-muted)]">
+                <AtSign size={14} />
+              </div>
+              <input 
+                type="text" 
+                value={username} 
+                onChange={e => setUsername(e.target.value)}
+                className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-2xl pl-9 pr-4 py-2.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)] transition-all"
+                placeholder="admin@company.com"
+                required
+              />
+            </div>
           </div>
 
-          <div className="space-y-2">
-            <div className="flex justify-between items-center px-2">
-              <FieldLabel className="m-0 normal-case tracking-tight opacity-40">Secure Access Key</FieldLabel>
+          <div className="space-y-1.5">
+            <div className="flex justify-between items-center px-1">
+              <label className="context-label uppercase tracking-wider">API Token</label>
               <a 
-                href={platform === 'cloud' ? "https://id.atlassian.com/manage-profile/security/api-tokens" : "https://confluence.atlassian.com/x/8Y9XN"} 
+                href={platform === 'cloud' ? 'https://id.atlassian.com/manage-profile/security/api-tokens' : 'https://confluence.atlassian.com/x/8Y9XN'} 
                 target="_blank" 
                 rel="noopener noreferrer"
-                className="text-[9px] text-[var(--status-info)] hover:text-[var(--accent-hover)] flex items-center gap-1.5 font-black uppercase tracking-widest transition-all"
+                className="text-[10px] font-bold text-[var(--primary-blue)] flex items-center gap-1 hover:opacity-80"
               >
-                Generate {platform === 'cloud' ? 'API Token' : 'PAT'}
-                <ExternalLink size={12} />
+                Generate Token <ExternalLink size={10} />
               </a>
             </div>
-            <input 
-              type="password" 
-              value={token} 
-              onChange={e => setToken(e.target.value)}
-              className="w-full bp-input rounded-none px-5 py-4 outline-none transition-all text-sm text-[var(--text-main)] placeholder:text-[var(--text-muted)] placeholder:opacity-20"
-              placeholder="••••••••••••••••"
-              required
-            />
+            <div className="relative">
+              <div className="absolute inset-y-0 left-3 flex items-center text-[var(--text-muted)]">
+                <Lock size={14} />
+              </div>
+              <input 
+                type="password" 
+                value={token} 
+                onChange={e => setToken(e.target.value)}
+                className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-2xl pl-9 pr-4 py-2.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)] transition-all"
+                placeholder="••••••••••••••••"
+                required
+              />
+            </div>
           </div>
 
-          <div className="flex items-center gap-4 px-2 py-1 group cursor-pointer" onClick={() => setVerifySsl(!verifySsl)}>
-            <div className={`w-6 h-6 rounded-none border transition-all flex items-center justify-center ${verifySsl ? 'bg-[var(--status-success)] border-[var(--status-success)] shadow-[0_0_15px_rgba(16,185,129,0.3)]' : 'border-[var(--border-main)] bg-[var(--bg-input)] group-hover:border-[var(--status-success)]/40'}`}>
-              <ShieldCheck size={14} className={verifySsl ? 'text-white' : 'text-[var(--text-muted)]'} />
+          <div
+            className="flex items-center gap-3 px-1 py-2 cursor-pointer group"
+            onClick={() => setVerifySsl(!verifySsl)}
+          >
+            <div className={`w-4 h-4 rounded border flex items-center justify-center transition-all ${
+              verifySsl
+                ? 'bg-[var(--success)] border-[var(--success)]'
+                : 'bg-[var(--bg-elevated)] border-[var(--border-soft)] group-hover:border-[var(--success)]'
+            }`}>
+              {verifySsl && <ShieldCheck size={10} className="text-white" />}
             </div>
-            <div className="flex flex-col">
-              <span className="bp-subheading opacity-80 group-hover:opacity-100 transition-opacity">Enforce Protocol Security</span>
-              <span className="text-[8px] font-bold text-[var(--text-muted)] opacity-40 uppercase tracking-tight">Verify SSL certificates during sync</span>
+            <div>
+              <span className="text-xs font-semibold text-[var(--text-primary)]">Enforce SSL verification</span>
+              <p className="text-[10px] text-[var(--text-muted)]">Verify certificates during sync</p>
             </div>
           </div>
-        </SurfaceCard>
+        </div>
 
         <ActionButton 
           type="submit" 
           disabled={isSubmitting}
           variant="primary"
-          className="group relative overflow-hidden py-5 rounded-[2rem] shadow-2xl shadow-[var(--accent)]/30"
+          className="h-11 font-bold"
         >
-          {/* Shimmer Effect */}
-          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000 ease-in-out"></div>
-          
-          <div className="relative flex items-center justify-center gap-3">
-            {isSubmitting ? (
-              <RefreshCw size={20} className="animate-spin" />
-            ) : (
-              <ShieldCheck size={20} />
-            )}
-            <span className="text-sm uppercase tracking-[0.15em]">{isSubmitting ? 'Synchronizing Environment...' : 'Authenticate & Save Cluster'}</span>
-          </div>
+          {isSubmitting ? (
+            <RefreshCw size={18} className="animate-spin" />
+          ) : (
+            <ShieldCheck size={18} />
+          )}
+          {isSubmitting ? 'Connecting...' : 'Save & Authenticate'}
         </ActionButton>
       </form>
     </div>

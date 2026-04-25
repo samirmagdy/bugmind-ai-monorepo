@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Loader2, AlertCircle, Plus, CheckCircle2 } from 'lucide-react';
+import { Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
 
 // Context
 import { useBugMind } from './hooks/useBugMind';
@@ -24,9 +24,22 @@ export default function App() {
     session, updateSession, auth, initializing, checkAuth, refreshIssue, debug, handleLogout, sessionHydrated 
   } = useBugMind();
   const debugLog = debug.log;
+  const themeClass = session.theme === 'dark' ? 'theme-dark' : 'theme-light';
   
   const lastEffectiveView = useRef<string | null>(null);
   const lastAuthCheckKey = useRef<string | null>(null);
+
+  useEffect(() => {
+    document.documentElement.classList.remove('theme-light', 'theme-dark');
+    document.body.classList.remove('theme-light', 'theme-dark');
+    document.documentElement.classList.add(themeClass);
+    document.body.classList.add(themeClass);
+
+    return () => {
+      document.documentElement.classList.remove(themeClass);
+      document.body.classList.remove(themeClass);
+    };
+  }, [themeClass]);
 
   useEffect(() => {
     if (!auth.storageLoaded) return;
@@ -58,47 +71,75 @@ export default function App() {
     lastEffectiveView.current = activeView;
   }, [activeView, auth.authToken, auth.globalView, debugLog, refreshIssue, session.view]);
 
-
-
-
   if (initializing) {
     return (
-      <div className="h-screen flex flex-col items-center justify-center space-y-8 p-10 bg-[var(--bg-app)] relative overflow-hidden">
-        {/* Luxury Background Glow */}
-        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-[var(--status-info)]/10 blur-[120px] rounded-full animate-pulse-slow"></div>
-        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-[var(--status-success)]/5 blur-[120px] rounded-full animate-pulse-slow"></div>
-
-        <div className="relative group">
-          <div className="absolute inset-0 blur-3xl rounded-full animate-pulse bg-[var(--status-info)]/20 group-hover:bg-[var(--status-info)]/30 transition-all duration-1000"></div>
-          <div className="relative z-10 bp-panel p-8 rounded-none border border-[var(--border-main)] shadow-2xl animate-bp-flicker">
-            <Loader2 className="w-12 h-12 text-[var(--status-info)] animate-spin" />
-          </div>
-        </div>
-
-        <div className="text-center space-y-4 animate-bp-flicker stagger-1">
-          <h2 className="text-xl font-black tracking-tighter bp-heading">BugMind <span className="opacity-40">AI</span></h2>
-          <div className="flex flex-col items-center gap-3">
-            <div className="flex items-center gap-2">
-              <div className="h-1.5 w-1.5 bg-[var(--status-info)] rounded-full animate-pulse"></div>
-              <p className="text-[10px] font-black uppercase tracking-[0.3em] text-[var(--text-muted)]">Resuming secure session</p>
+      <div className={`bugmind-panel relative overflow-hidden bg-[var(--bg-page)] ${themeClass}`}>
+        <div className="panel-header">
+          <div className="flex items-center gap-3">
+            <div className="panel-icon">
+              <Loader2 className="text-white animate-spin" size={18} />
             </div>
-            <div className="h-1 w-40 rounded-full overflow-hidden bg-[var(--bg-input)] border border-[var(--border-main)]">
-              <div className="h-full bg-gradient-to-r from-[var(--status-info)] to-[var(--accent-hover)] animate-progress origin-left" />
+            <div className="leading-tight">
+              <h1 className="panel-title">
+                BugMind <span className="text-[var(--primary-blue)] opacity-70">AI</span>
+              </h1>
+              <div className="panel-subtitle">Initializing</div>
             </div>
           </div>
         </div>
+
+        <main className="relative z-[1] flex-1 overflow-hidden">
+          <div className="flex h-full items-start justify-center px-2.5 pt-4 pb-4">
+            <div className="context-card w-full max-w-[420px] rounded-[1.75rem] px-5 py-6">
+              <div className="flex items-start gap-4">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[1.1rem] border border-[var(--card-border)] bg-[var(--surface-accent-strong)] text-[var(--primary-blue)]">
+                  <Loader2 className="animate-spin" size={22} />
+                </div>
+                <div className="min-w-0 flex-1 space-y-3">
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                      Extension Startup
+                    </p>
+                    <h2 className="text-[18px] font-extrabold tracking-[-0.03em] text-[var(--text-primary)]">
+                      Securing workspace
+                    </h2>
+                    <p className="text-[12px] leading-relaxed text-[var(--text-secondary)]">
+                      Reloading authentication, restoring the active tab session, and reconnecting to Jira context.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="h-1.5 overflow-hidden rounded-full bg-[var(--disabled-bg)]">
+                      <div className="h-full w-full animate-pulse bg-[var(--primary-gradient)]" />
+                    </div>
+                    <div className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">
+                      <span>Preparing panel</span>
+                      <span>Syncing state</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </main>
+
+        <footer className="relative z-[1] h-12 border-t border-[var(--footer-border)] bg-[var(--footer-bg)] flex items-center justify-between px-3 shrink-0">
+          <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)]">
+            Startup
+          </span>
+          <span className="text-[10px] text-[var(--text-muted)] font-semibold opacity-60">{APP_VERSION}</span>
+        </footer>
       </div>
     );
   }
 
-
   return (
-    <div className={`flex flex-col h-screen text-[var(--text-main)] overflow-hidden font-sans selection:bg-[var(--status-info)]/30 transition-colors duration-500 ${session.theme === 'light' ? 'theme-light bg-[var(--bg-app)]' : 'bg-[var(--bg-app)]'}`}>
+    <div className={`bugmind-panel bg-[var(--bg-page)] ${themeClass}`}>
       <Header />
 
-      <main className="flex-1 overflow-y-auto overflow-x-hidden relative custom-scrollbar">
-        <div className="p-4 pb-24 max-w-4xl mx-auto">
-          {session.error && !['NOT_A_JIRA_PAGE', 'UNSUPPORTED_ISSUE_TYPE', 'NO_ISSUE_TYPES_FOUND', 'STALE_PAGE'].includes(session.error) && (
+      <main className="relative z-[1] flex-1 overflow-y-auto overflow-x-hidden">
+        <div className="px-2.5 pt-2.5 pb-4 space-y-3">
+          {(session.error && !['NOT_A_JIRA_PAGE', 'UNSUPPORTED_ISSUE_TYPE', 'NO_ISSUE_TYPES_FOUND', 'STALE_PAGE'].includes(session.error)) && (
             <StatusPanel
               icon={AlertCircle}
               tone="danger"
@@ -107,14 +148,12 @@ export default function App() {
               action={(
                 <ActionButton
                   onClick={() => updateSession({ error: null })}
-                  variant="ghost"
-                  tone="danger"
-                  className="w-auto px-1 py-1"
+                  variant="secondary"
+                  className="h-8 px-3 text-xs"
                 >
-                  <Plus size={14} className="rotate-45" />
+                  Dismiss
                 </ActionButton>
               )}
-              className="mb-6 animate-bp-flicker"
             />
           )}
           
@@ -122,55 +161,47 @@ export default function App() {
             <StatusPanel
               icon={CheckCircle2}
               tone="success"
-              title={session.success}
-              description={<span className="text-[9px] font-black uppercase tracking-[0.2em] text-[var(--status-success)]/70">Operation Finalized</span>}
+              title="Success"
+              description={session.success}
               action={(
                 <ActionButton
                   onClick={() => updateSession({ success: null })}
-                  variant="ghost"
-                  tone="success"
-                  className="w-auto px-1 py-1"
+                  variant="secondary"
+                  className="h-8 px-3 text-xs"
                 >
-                  <Plus size={16} className="rotate-45" />
+                  Dismiss
                 </ActionButton>
               )}
-              className="mb-6 animate-bp-flicker"
             />
           )}
 
           {activeView === 'auth' && <AuthView />}
           {activeView === 'setup' && <SetupView />}
-          
-          {activeView === 'main' && (
-            <MainView />
-          )}
-
+          {activeView === 'main' && <MainView />}
           {activeView === 'success' && <SuccessView />}
           {activeView === 'settings' && <SettingsView />}
           {activeView === 'preview' && <PreviewView />}
         </div>
       </main>
 
-      <footer className="h-10 border-t border-[var(--border-main)] bg-[var(--bg-app)]/80 backdrop-blur-xl flex items-center justify-between px-4 fixed bottom-0 left-0 right-0 z-50">
-        <div className="flex items-center gap-4">
-          <button 
-            onClick={() => debug.setShow(!debug.show)}
-            className={`text-[9px] uppercase tracking-[0.2em] font-black transition-all ${debug.show ? 'text-[var(--status-info)]' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}
-          >
-            {debug.show ? 'Close Console' : 'Telemetry Log'}
-          </button>
-        </div>
+      <footer className="relative z-[1] h-12 border-t border-[var(--footer-border)] bg-[var(--footer-bg)] flex items-center justify-between px-3 shrink-0">
+        <button 
+          onClick={() => debug.setShow(!debug.show)}
+          className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-[0.16em] transition-colors ${debug.show ? 'bg-[var(--surface-soft)] text-[var(--primary-blue)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
+        >
+          Debug Log
+        </button>
         
         <div className="flex items-center gap-3">
           {auth.authToken && (
             <button 
               onClick={handleLogout}
-              className="text-[9px] uppercase tracking-[0.2em] font-black text-[var(--text-muted)] hover:text-[var(--status-danger)] transition-all font-bold"
+              className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)] hover:text-[var(--error)] hover:bg-[var(--surface-soft)] transition-colors"
             >
-              Log Out
+              Sign Out
             </button>
           )}
-          <span className="text-[10px] text-[var(--text-muted)] font-bold opacity-30">{APP_VERSION}</span>
+          <span className="text-[10px] text-[var(--text-muted)] font-semibold opacity-60">{APP_VERSION}</span>
         </div>
       </footer>
 

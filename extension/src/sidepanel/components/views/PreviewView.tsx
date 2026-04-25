@@ -58,13 +58,13 @@ const PreviewView: React.FC = () => {
   
   if (!bug) {
     return (
-      <div className="flex flex-col items-center justify-center h-full py-12 text-center">
+      <div className="context-card flex flex-col items-center justify-center h-full py-12 text-center">
         <ShieldAlert size={48} className="text-[var(--status-danger)] opacity-20 mb-4" />
         <h3 className="text-lg font-bold text-[var(--text-main)]">Issue Not Found</h3>
         <p className="text-xs text-[var(--text-muted)] mt-2">Could not find the draft for review.</p>
         <button 
           onClick={() => updateSession({ view: 'main' })}
-          className="mt-6 text-[var(--status-info)] font-black uppercase text-[10px] tracking-widest"
+          className="mt-6 rounded-full border border-[var(--card-border)] bg-[var(--surface-soft)] px-4 py-2 text-[var(--status-info)] font-black uppercase text-[10px] tracking-[0.18em]"
         >
           Return to List
         </button>
@@ -77,15 +77,15 @@ const PreviewView: React.FC = () => {
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500 pb-48">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="context-card flex items-center justify-between px-4 py-3.5">
         <button 
           onClick={() => updateSession({ view: 'main' })}
-          className="flex items-center gap-2 text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors group"
+          className="flex items-center gap-2 rounded-full border border-[var(--card-border)] bg-[var(--surface-soft)] px-4 py-2 text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors group"
         >
           <ArrowLeft size={16} className="group-hover:-translate-x-1 transition-transform" />
           <span className="text-[10px] font-black uppercase tracking-widest">Back to Findings</span>
         </button>
-        <div className="flex items-center gap-2 bg-[var(--bg-card)] border border-[var(--border-main)] px-3 py-1 rounded-full shadow-sm">
+        <div className="flex items-center gap-2 bg-[var(--surface-soft)] border border-[var(--card-border)] px-3 py-1.5 rounded-full">
           <div className={`w-2 h-2 rounded-full ${isValid ? 'bg-[var(--status-success)]' : 'bg-[var(--status-warning)] animate-pulse'}`}></div>
           <span className="text-[9px] font-black uppercase tracking-widest text-[var(--text-muted)]">Jira Preview</span>
         </div>
@@ -101,7 +101,7 @@ const PreviewView: React.FC = () => {
 
       {/* Validation Panel */}
       {!isValid && (
-        <StatusPanel icon={AlertTriangle} title="Mandatory Fields Missing" tone="danger" className="rounded-none">
+        <StatusPanel icon={AlertTriangle} title="Mandatory Fields Missing" tone="danger" className="rounded-[2rem]">
           <ul className="space-y-1">
             {session.validationErrors.map((err, i) => (
               <li key={i} className="text-[11px] text-[var(--status-danger)] font-medium">• {err}</li>
@@ -111,7 +111,7 @@ const PreviewView: React.FC = () => {
       )}
 
       {/* High Fidelity Preview Card */}
-      <SurfaceCard className="space-y-6 rounded-none p-8 pb-16 shadow-2xl relative overflow-hidden">
+      <SurfaceCard className="space-y-6 rounded-[2rem] p-7 pb-16 shadow-[var(--shadow-card)] relative overflow-hidden">
         <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-transparent via-[var(--status-info)]/30 to-transparent"></div>
         
         {/* Issue Type Header */}
@@ -137,7 +137,7 @@ const PreviewView: React.FC = () => {
             <AlignLeft size={12} />
             <span className="text-[9px] font-black uppercase tracking-[0.2em]">Core Description</span>
           </div>
-          <div className="prose prose-invert max-w-none bg-[var(--bg-app)]/20 rounded-none p-4 border border-dashed border-[var(--border-main)]/50">
+          <div className="max-w-none bg-[var(--bg-app)]/45 rounded-[1.5rem] p-4 border border-dashed border-[var(--border-main)]/50">
             <JiraMarkdown content={previewDescription} />
           </div>
         </div>
@@ -148,7 +148,7 @@ const PreviewView: React.FC = () => {
         <div className="grid grid-cols-1 gap-6 mb-8">
           <div className="space-y-2">
             <span className="text-[9px] font-black uppercase tracking-[0.2em] text-[var(--status-success)]/80">Steps to Reproduce</span>
-            <div className="bg-[var(--bg-app)]/40 rounded-none p-4 border border-[var(--border-main)]/50">
+            <div className="bg-[var(--bg-app)]/50 rounded-[1.5rem] p-4 border border-[var(--border-main)]/50">
               <JiraMarkdown content={previewSteps} />
             </div>
           </div>
@@ -156,13 +156,13 @@ const PreviewView: React.FC = () => {
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <span className="text-[9px] font-black uppercase tracking-[0.2em] text-[var(--status-info)]/80">Expected Result</span>
-              <div className="bg-[var(--bg-app)]/40 rounded-none p-4 border border-[var(--border-main)]/50 h-full">
+              <div className="bg-[var(--bg-app)]/50 rounded-[1.5rem] p-4 border border-[var(--border-main)]/50 h-full">
                 <JiraMarkdown content={bug.expected_result} />
               </div>
             </div>
             <div className="space-y-2">
               <span className="text-[9px] font-black uppercase tracking-[0.2em] text-[var(--status-danger)]/80">Actual Result</span>
-              <div className="bg-[var(--bg-app)]/40 rounded-none p-4 border border-[var(--border-main)]/50 h-full">
+              <div className="bg-[var(--bg-app)]/50 rounded-[1.5rem] p-4 border border-[var(--border-main)]/50 h-full">
                 <JiraMarkdown content={bug.actual_result} />
               </div>
             </div>
@@ -184,7 +184,7 @@ const PreviewView: React.FC = () => {
                 const displayVal = formatResolvedFieldValue(val);
 
                 return (
-                  <div key={key} className="flex flex-col gap-1 bg-[var(--bg-app)]/40 p-3 rounded-none border border-[var(--border-main)]/30">
+                  <div key={key} className="flex flex-col gap-1 bg-[var(--bg-app)]/50 p-3 rounded-[1.25rem] border border-[var(--border-main)]/30">
                     <span className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-wider">{field?.name || key}</span>
                     <span className="text-[10px] font-bold text-[var(--status-info)] truncate">{displayVal}</span>
                   </div>
@@ -196,7 +196,7 @@ const PreviewView: React.FC = () => {
       </SurfaceCard>
 
       {/* Action Bar */}
-      <div className="fixed bottom-10 left-0 w-full p-6 bg-gradient-to-t from-[var(--bg-app)] via-[var(--bg-app)] to-transparent pt-10 z-[60]">
+      <div className="fixed bottom-8 left-0 w-full p-4 bg-gradient-to-t from-[var(--bg-app)] via-[var(--bg-app)]/95 to-transparent pt-10 z-[60]">
         <div className="flex gap-3">
           <ActionButton
             onClick={() => updateSession({ view: 'main', expandedBug: bugIndex })}

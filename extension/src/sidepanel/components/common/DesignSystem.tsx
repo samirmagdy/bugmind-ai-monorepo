@@ -8,43 +8,33 @@ function cx(...classes: Array<string | false | null | undefined>): string {
   return classes.filter(Boolean).join(' ');
 }
 
-function toneClasses(tone: Tone): { text: string; softBg: string; softBorder: string; glow: string } {
+function toneClasses(tone: Tone): { text: string; chip: string } {
   switch (tone) {
     case 'success':
       return {
-        text: 'text-[var(--status-success)]',
-        softBg: 'bg-[var(--status-success)]/10',
-        softBorder: 'border-[var(--status-success)]/20',
-        glow: 'shadow-[var(--status-success)]/5'
+        text: 'text-[var(--success)]',
+        chip: 'chip-valid'
       };
     case 'warning':
       return {
-        text: 'text-[var(--status-warning)]',
-        softBg: 'bg-[var(--status-warning)]/10',
-        softBorder: 'border-[var(--status-warning)]/20',
-        glow: 'shadow-[var(--status-warning)]/5'
+        text: 'text-[#B45309]',
+        chip: 'chip-warning'
       };
     case 'danger':
       return {
-        text: 'text-[var(--status-danger)]',
-        softBg: 'bg-[var(--status-danger)]/10',
-        softBorder: 'border-[var(--status-danger)]/20',
-        glow: 'shadow-[var(--status-danger)]/5'
+        text: 'text-[var(--error)]',
+        chip: 'chip-error'
       };
     case 'neutral':
       return {
-        text: 'text-[var(--text-main)]',
-        softBg: 'bg-[var(--bg-input)]',
-        softBorder: 'border-[var(--border-main)]',
-        glow: 'shadow-black/5'
+        text: 'text-[var(--text-primary)]',
+        chip: ''
       };
     case 'info':
     default:
       return {
-        text: 'text-[var(--status-info)]',
-        softBg: 'bg-[var(--status-info)]/10',
-        softBorder: 'border-[var(--status-info)]/20',
-        glow: 'shadow-[var(--status-info)]/5'
+        text: 'text-[var(--primary-blue)]',
+        chip: ''
       };
   }
 }
@@ -53,7 +43,7 @@ export const SurfaceCard: React.FC<{
   children: React.ReactNode;
   className?: string;
 }> = ({ children, className }) => (
-  <div className={cx('luxury-panel', className)}>
+  <div className={cx('workflow-card', className)}>
     {children}
   </div>
 );
@@ -64,12 +54,9 @@ export const SectionTitle: React.FC<{
   className?: string;
 }> = ({ title, subtitle, className }) => (
   <div className={cx('space-y-1', className)}>
-    <h2 className="text-xl font-black tracking-tighter luxury-heading">{title}</h2>
+    <h2 className="workflow-card-title">{title}</h2>
     {subtitle ? (
-      <div className="flex items-center gap-2">
-        <div className="h-1 w-6 bg-[var(--status-info)]/30 rounded-full" />
-        <p className="luxury-subheading normal-case tracking-tight opacity-40">{subtitle}</p>
-      </div>
+      <p className="workflow-card-subtitle">{subtitle}</p>
     ) : null}
   </div>
 );
@@ -78,7 +65,7 @@ export const FieldLabel: React.FC<{
   children: React.ReactNode;
   className?: string;
 }> = ({ children, className }) => (
-  <label className={cx('ds-field-label', className)}>{children}</label>
+  <label className={cx('context-label font-semibold mb-1.5 block ml-0.5', className)}>{children}</label>
 );
 
 export const StatusBadge: React.FC<{
@@ -89,10 +76,8 @@ export const StatusBadge: React.FC<{
   const colors = toneClasses(tone);
   return (
     <span className={cx(
-      'inline-flex items-center gap-2 rounded-full px-3 py-1 text-[9px] font-black uppercase tracking-[0.2em] border',
-      colors.softBg,
-      colors.softBorder,
-      colors.text,
+      'chip',
+      colors.chip || 'bg-[var(--surface-soft)] text-[var(--text-secondary)]',
       className
     )}>
       {children}
@@ -109,44 +94,55 @@ export const StatusPanel: React.FC<{
   action?: React.ReactNode;
   children?: React.ReactNode;
 }> = ({ icon: Icon, title, description, tone = 'info', className, action, children }) => {
-  const colors = toneClasses(tone);
+  
+  if (tone === 'warning') {
+    return (
+      <div className={cx('warning-card', className)}>
+        <div className="flex gap-3">
+          {Icon && <Icon size={18} className="shrink-0 mt-0.5" />}
+          <div>
+            <p className="font-bold text-sm">{title}</p>
+            {description && <div className="text-xs mt-1 opacity-90">{description}</div>}
+            {children && <div className="mt-3">{children}</div>}
+            {action && <div className="mt-3">{action}</div>}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (tone === 'danger') {
+    return (
+      <div className={cx('error-card', className)}>
+        <div className="flex gap-3">
+          {Icon && <Icon size={18} className="shrink-0 mt-0.5" />}
+          <div>
+            <p className="font-bold text-sm">{title}</p>
+            {description && <div className="text-xs mt-1 opacity-90">{description}</div>}
+            {children && <div className="mt-3">{children}</div>}
+            {action && <div className="mt-3">{action}</div>}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className={cx(
-      'relative overflow-hidden rounded-[1.5rem] border p-4 shadow-xl',
-      colors.softBg,
-      colors.softBorder,
-      colors.glow,
-      className
-    )}>
-      <div className={cx('absolute top-0 left-0 h-1 w-full bg-gradient-to-r from-transparent via-current to-transparent opacity-30', colors.text)} />
-      <div className="space-y-3">
-        <div className="flex items-start gap-3">
-          {Icon ? (
-            <div className={cx(
-              'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border shadow-inner',
-              colors.softBg,
-              colors.softBorder,
-              colors.text
-            )}>
-              <Icon size={16} />
-            </div>
-          ) : null}
-          <div className="flex-1 min-w-0">
-            <p className="text-xs font-black uppercase tracking-tight text-[var(--text-main)]">{title}</p>
-            {description ? (
-              <div className="mt-1 text-[11px] font-medium leading-relaxed text-[var(--text-muted)]">
-                {description}
-              </div>
-            ) : null}
+    <div className={cx('empty-state-card', className)}>
+      <div className="flex flex-col items-center">
+        {Icon && (
+          <div className="empty-icon">
+            <Icon size={32} />
           </div>
-          {action ? (
-            <div className="shrink-0 self-start">
-              {action}
-            </div>
-          ) : null}
-        </div>
-        {children}
+        )}
+        <p className="empty-title">{title}</p>
+        {description && (
+          <div className="empty-description mt-2">
+            {description}
+          </div>
+        )}
+        {children && <div className="mt-4 w-full">{children}</div>}
+        {action && <div className="mt-6 w-full">{action}</div>}
       </div>
     </div>
   );
@@ -160,15 +156,11 @@ export const ActionButton: React.FC<{
   variant?: ButtonVariant;
   tone?: Tone;
   className?: string;
-}> = ({ children, onClick, type = 'button', disabled, variant = 'secondary', tone = 'info', className }) => {
-  const colors = toneClasses(tone);
-
+}> = ({ children, onClick, type = 'button', disabled, variant = 'secondary', className }) => {
   const variantClass =
-    variant === 'primary'
-      ? 'bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white border-transparent shadow-xl shadow-[var(--accent)]/20 enabled:hover:scale-[1.02] active:scale-[0.98]'
-      : variant === 'ghost'
-        ? cx('bg-transparent border-transparent shadow-none', colors.text)
-        : cx(colors.softBg, colors.softBorder, colors.text, `shadow-lg ${colors.glow}`);
+    variant === 'primary' ? 'btn-primary' :
+    variant === 'ghost' ? 'btn-ghost' :
+    'btn-secondary';
 
   return (
     <button
@@ -176,7 +168,6 @@ export const ActionButton: React.FC<{
       onClick={onClick}
       disabled={disabled}
       className={cx(
-        'ds-action-button',
         variantClass,
         className
       )}

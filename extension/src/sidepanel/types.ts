@@ -223,7 +223,7 @@ export const INITIAL_SESSION: TabSession = {
   fieldDefaults: {},
   settingsTab: 'ai',
   createdIssues: [],
-  theme: 'dark',
+  theme: 'light',
   themeSource: 'auto',
   onboardingCompleted: false,
   jiraConnectionId: null,

@@ -30,8 +30,8 @@ const OnboardingTour: React.FC = () => {
   const currentStep = steps[step];
 
   return (
-    <div className="fixed inset-0 z-[2000] flex items-center justify-center p-8 bg-[var(--bg-overlay)] backdrop-blur-[15px] animate-bp-flicker">
-      <SurfaceCard className="w-full max-w-md rounded-[3rem] shadow-2xl relative group overflow-hidden border border-[var(--border-main)]">
+    <div className="fixed inset-0 z-[2000] flex items-center justify-center p-8 bg-[var(--bg-overlay)] backdrop-blur-[18px]">
+      <SurfaceCard className="w-full max-w-md rounded-[3rem] shadow-[var(--shadow-card)] relative group overflow-hidden border border-[var(--card-border)]">
         {/* Animated Progress Track */}
         <div className="absolute top-0 left-0 w-full h-1.5 bg-[var(--bg-input)]">
           <div 
@@ -42,7 +42,7 @@ const OnboardingTour: React.FC = () => {
         
         <button 
           onClick={completeOnboarding}
-          className="absolute top-8 right-8 p-2.5 text-[var(--text-muted)] hover:text-[var(--text-main)] transition-all bg-[var(--bg-input)] hover:bg-[var(--bg-card)] rounded-none border border-[var(--border-main)] shadow-sm"
+          className="absolute top-8 right-8 p-2.5 text-[var(--text-muted)] hover:text-[var(--text-main)] transition-all bg-[var(--bg-input)] hover:bg-[var(--surface-soft-hover)] rounded-full border border-[var(--border-main)] shadow-sm"
         >
           <X size={20} />
         </button>
@@ -50,16 +50,16 @@ const OnboardingTour: React.FC = () => {
         <div className="p-12 space-y-10">
           <div className="relative inline-block">
             <div className="absolute inset-0 bg-[var(--status-info)]/20 blur-2xl rounded-full animate-pulse"></div>
-            <div className="relative bg-[var(--bg-input)] w-24 h-24 rounded-none flex items-center justify-center shadow-inner border border-[var(--border-main)] group-hover:scale-105 transition-transform duration-700">
+            <div className="relative bg-[var(--bg-input)] w-24 h-24 rounded-[2rem] flex items-center justify-center shadow-inner border border-[var(--border-main)] group-hover:scale-105 transition-transform duration-700">
               {currentStep.icon}
             </div>
           </div>
 
           <div className="space-y-4">
-            <h3 className="text-xl font-black text-[var(--text-main)] tracking-tight leading-tight bp-heading">
+            <h3 className="text-xl font-black text-[var(--text-main)] tracking-tight leading-tight">
               {currentStep.title}
             </h3>
-            <p className="bp-subheading text-base leading-relaxed opacity-90 normal-case tracking-normal text-[var(--text-soft)]">
+            <p className="text-base leading-relaxed opacity-90 tracking-normal text-[var(--text-soft)]">
               {currentStep.content}
             </p>
           </div>
@@ -80,7 +80,7 @@ const OnboardingTour: React.FC = () => {
                 else completeOnboarding();
               }}
               variant="primary"
-              className="group relative overflow-hidden w-auto px-10 py-5 rounded-[1.8rem] shadow-2xl shadow-[var(--accent)]/30"
+              className="group relative overflow-hidden w-auto px-10 py-5 rounded-[1.8rem]"
             >
               <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000"></div>
               <span className="relative text-xs uppercase tracking-[0.2em]">

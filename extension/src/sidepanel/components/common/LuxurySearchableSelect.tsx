@@ -146,11 +146,11 @@ const LuxurySearchableSelect: React.FC<LuxurySearchableSelectProps> = ({
   };
 
   return (
-    <div className={`relative ${className}`} ref={dropdownRef}>
+    <div className={`luxury-select relative ${isOpen ? 'luxury-select--open z-[80]' : ''} ${className}`} ref={dropdownRef}>
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className={`w-full flex items-center justify-between bg-[var(--bg-input)] border rounded-xl px-3 py-2.5 outline-none transition-all duration-500 shadow-inner group/trigger ${
+        className={`w-full min-h-[46px] flex items-center justify-between bg-[var(--bg-input)] border rounded-[1rem] px-4 py-2.5 outline-none transition-all duration-300 shadow-inner group/trigger ${
           isOpen ? 'border-[var(--status-info)]/30 ring-4 ring-[var(--status-info)]/5' : 
           (required && currentValues.length === 0 ? 'border-[var(--status-danger)]/20' : 'border-[var(--border-main)] hover:border-[var(--text-muted)]/30')
         }`}
@@ -168,7 +168,7 @@ const LuxurySearchableSelect: React.FC<LuxurySearchableSelectProps> = ({
                     {avatar && (
                       <img src={avatar} className="w-4 h-4 rounded shadow-sm" alt="" />
                     )}
-                    <span className="text-[11px] font-black text-[var(--text-main)] truncate uppercase tracking-tight">
+                    <span className="text-[13px] font-bold text-[var(--text-main)] truncate uppercase tracking-tight">
                       {label}
                     </span>
                   </div>
@@ -182,7 +182,7 @@ const LuxurySearchableSelect: React.FC<LuxurySearchableSelectProps> = ({
                 return (
                   <div 
                     key={typeof v === 'object' ? (v.id || i) : v} 
-                    className="bg-[var(--status-info)]/10 text-[var(--status-info)] px-2 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-tight flex items-center gap-1.5 border border-[var(--status-info)]/20 animate-in zoom-in-95"
+                    className="bg-[var(--status-info)]/10 text-[var(--status-info)] px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-tight flex items-center gap-1.5 border border-[var(--status-info)]/20 animate-in zoom-in-95"
                   >
                     <span className="truncate max-w-[80px]">{label}</span>
                     <button 
@@ -199,24 +199,24 @@ const LuxurySearchableSelect: React.FC<LuxurySearchableSelectProps> = ({
               })
             )
           ) : (
-            <span className="text-[11px] text-[var(--text-muted)] opacity-40 font-medium">{placeholder}</span>
+            <span className="text-[13px] text-[var(--text-muted)] opacity-50 font-medium">{placeholder}</span>
           )}
         </div>
-        <ChevronDown className={`text-[var(--text-muted)] opacity-40 transition-transform duration-500 shrink-0 ml-2 ${isOpen ? 'rotate-180' : ''}`} size={14} />
+        <ChevronDown className={`text-[var(--text-muted)] opacity-40 transition-transform duration-300 shrink-0 ml-2 ${isOpen ? 'rotate-180' : ''}`} size={16} />
       </button>
 
       {isOpen && (
-        <div className={`absolute left-0 w-full bg-[var(--bg-card)]/95 backdrop-blur-2xl border border-[var(--border-main)] rounded-[1.5rem] overflow-hidden shadow-[0_20px_40px_rgba(0,0,0,0.4)] z-[1000] animate-luxury flex flex-col max-h-[280px] ${
+        <div className={`absolute left-0 w-full bg-[var(--dropdown-bg)] border border-[var(--dropdown-border)] rounded-[1.1rem] overflow-hidden shadow-none z-[1000] animate-luxury flex flex-col max-h-[280px] ${
           openUp ? 'bottom-full mb-2' : 'top-full mt-2'
         }`}>
-          <div className="p-2 border-b border-[var(--border-main)] sticky top-0 bg-[var(--bg-card)]/50 backdrop-blur-md z-10">
+          <div className="p-2 border-b border-[var(--dropdown-border)] sticky top-0 bg-[var(--dropdown-bg)] z-10">
             <div className="relative group/search">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] opacity-40 group-focus-within/search:text-[var(--status-info)] group-focus-within/search:opacity-100 transition-all" size={12} />
               <input 
                 type="text"
                 placeholder="Search..."
                 autoFocus
-                className="w-full bg-[var(--bg-app)] border border-[var(--border-main)] rounded-lg pl-8 pr-3 py-1.5 text-[11px] outline-none focus:border-[var(--status-info)]/30 transition-all font-medium text-[var(--text-main)]"
+                className="w-full bg-[var(--dropdown-bg-muted)] border border-[var(--dropdown-border)] rounded-[0.85rem] pl-8 pr-3 py-2 text-[12px] outline-none focus:border-[var(--status-info)]/30 transition-all font-medium text-[var(--text-main)]"
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 onKeyDown={e => {
@@ -234,7 +234,7 @@ const LuxurySearchableSelect: React.FC<LuxurySearchableSelectProps> = ({
             </div>
           </div>
           
-          <div className="overflow-y-auto custom-scrollbar flex-1 py-1">
+          <div className="overflow-y-auto custom-scrollbar flex-1 py-1 bg-[var(--dropdown-bg)]">
             {displayOptions.length > 0 ? (
               displayOptions.map(opt => {
                 const isSelected = currentValues.some(v => (typeof v === 'object' ? v.id === opt.id : v === opt.id));
@@ -242,8 +242,8 @@ const LuxurySearchableSelect: React.FC<LuxurySearchableSelectProps> = ({
                   <button 
                     key={opt.id}
                     onClick={() => handleToggle(opt)}
-                    className={`w-full flex items-center justify-between px-4 py-2.5 text-left transition-all group/item border-b border-[var(--border-main)]/10 last:border-0 ${
-                      isSelected ? 'bg-[var(--status-info)]/5' : 'hover:bg-[var(--bg-app)]'
+                    className={`w-full min-h-[48px] flex items-center justify-between px-4 py-3 text-left transition-all group/item border-b border-[var(--dropdown-border)] last:border-0 ${
+                      isSelected ? 'bg-[var(--status-info)]/10' : 'bg-[var(--dropdown-bg)] hover:bg-[var(--dropdown-bg-muted)]'
                     }`}
                   >
                     <div className="flex items-center gap-2.5">
@@ -251,7 +251,7 @@ const LuxurySearchableSelect: React.FC<LuxurySearchableSelectProps> = ({
                         <img src={opt.avatar} className="w-5 h-5 rounded-md ring-2 ring-transparent group-hover/item:ring-[var(--status-info)]/20 transition-all" alt="" />
                       )}
                       <div className="flex flex-col">
-                        <span className={`text-[11px] font-black tracking-tight transition-colors ${isSelected ? 'text-[var(--status-info)]' : 'text-[var(--text-main)] group-hover/item:text-[var(--status-info)]'}`}>
+                        <span className={`text-[13px] font-semibold tracking-tight transition-colors ${isSelected ? 'text-[var(--status-info)]' : 'text-[var(--text-main)] group-hover/item:text-[var(--status-info)]'}`}>
                           {opt.name || opt.value || opt.label || opt.id}
                         </span>
                         {opt.id && typeof opt.id === 'string' && opt.id.includes('-') && (

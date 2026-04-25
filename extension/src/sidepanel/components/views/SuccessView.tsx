@@ -8,7 +8,7 @@ const SuccessView: React.FC = () => {
 
   return (
     <div className="py-12 text-center space-y-6 animate-in zoom-in-95 duration-500">
-      <div className="w-24 h-24 bg-[var(--status-success)]/20 rounded-full flex items-center justify-center mx-auto border border-[var(--status-success)]/30 text-[var(--status-success)]">
+      <div className="w-24 h-24 bg-[var(--status-success)]/14 rounded-[2rem] flex items-center justify-center mx-auto border border-[var(--status-success)]/20 text-[var(--status-success)] shadow-[var(--shadow-sm)]">
         <CheckCircle size={56} />
       </div>
       <div className="space-y-4">
@@ -22,7 +22,7 @@ const SuccessView: React.FC = () => {
             {session.createdIssues.map((issue) => (
               <SurfaceCard
                 key={issue.key}
-                className="group rounded-none p-0 hover:bg-[var(--bg-app)]"
+                className="group p-0 hover:bg-[var(--bg-app)]/70"
               >
                 <a 
                   href={`${session.instanceUrl}/browse/${issue.key}`}
@@ -34,7 +34,7 @@ const SuccessView: React.FC = () => {
                     <StatusBadge className="px-0 py-0 border-none bg-transparent shadow-none" tone="info">Issue Created</StatusBadge>
                     <span className="text-xs font-bold text-[var(--text-main)]">{issue.key}</span>
                   </div>
-                  <div className="p-2 bg-[var(--status-info)]/10 rounded-none text-[var(--status-info)] opacity-0 group-hover:opacity-100 transition-all">
+                  <div className="p-2 bg-[var(--status-info)]/10 rounded-full text-[var(--status-info)] opacity-0 group-hover:opacity-100 transition-all">
                     <ExternalLink size={14} />
                   </div>
                 </a>
@@ -47,7 +47,7 @@ const SuccessView: React.FC = () => {
         onClick={() => { updateSession({ bugs: [], view: 'main' }); }}
         variant="secondary"
         tone="neutral"
-        className="py-4 rounded-none font-bold"
+        className="py-4 rounded-[1.4rem] font-bold"
       >
         Find Next Issue
       </ActionButton>

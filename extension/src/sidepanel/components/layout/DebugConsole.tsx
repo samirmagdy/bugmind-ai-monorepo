@@ -9,8 +9,8 @@ const DebugConsole: React.FC = () => {
   if (!showDebug) return null;
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 h-1/2 bg-[var(--bg-app)] border-t border-[var(--status-info)]/30 z-[200] flex flex-col animate-in slide-in-from-bottom-full duration-300 shadow-[0_-20px_50px_rgba(0,0,0,0.5)]">
-      <div className="flex justify-between items-center px-4 py-2 bg-[var(--bg-card)] border-b border-[var(--border-main)]">
+    <div className="fixed bottom-0 left-0 right-0 h-1/2 bg-[var(--bg-card)] border-t border-[var(--card-border)] z-[200] flex flex-col animate-in slide-in-from-bottom-full duration-300">
+      <div className="flex justify-between items-center px-4 py-3 bg-[var(--surface-soft)] border-b border-[var(--border-main)]">
         <StatusBadge tone="info" className="border-none bg-transparent px-0 py-0">Detailed Debugger</StatusBadge>
         <div className="flex items-center gap-3">
           <ActionButton
@@ -31,7 +31,7 @@ const DebugConsole: React.FC = () => {
             Clear
           </ActionButton>
           <div className="w-[1px] h-3 bg-[var(--border-main)]" />
-          <button onClick={() => setShowDebug(false)} className="text-[var(--text-muted)] hover:text-[var(--text-main)] p-1">
+          <button onClick={() => setShowDebug(false)} className="text-[var(--text-muted)] hover:text-[var(--text-main)] p-1.5 rounded-full hover:bg-[var(--surface-soft-hover)]">
             <Plus className="rotate-45" size={18} />
           </button>
         </div>
@@ -41,7 +41,7 @@ const DebugConsole: React.FC = () => {
           <div className="text-[var(--text-muted)] opacity-50 italic">No logs yet. Trigger an action to see telemetry...</div>
         ) : (
           debugLogs.map((log, i) => (
-            <SurfaceCard key={i} className="border-l-2 rounded-none border-y-0 border-r-0 border-l-[var(--border-main)] bg-transparent px-2 py-1 hover:bg-[var(--text-main)]/[0.02] shadow-none">
+            <SurfaceCard key={i} className="border-l-2 border-y-0 border-r-0 border-l-[var(--border-main)] bg-[var(--surface-soft)] px-3 py-2 shadow-none rounded-[1rem] hover:bg-[var(--surface-soft-hover)]">
               <span className="text-[var(--text-muted)] opacity-60">[{log.timestamp}]</span>{' '}
               <span className={`font-bold ${
                 log.tag.includes('ERROR') || log.tag.includes('FAIL') || log.tag.includes('CRASH') ? 'text-[var(--status-danger)]' : 
