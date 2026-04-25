@@ -41,6 +41,7 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 STANDARD_ISSUE_FIELDS = {"summary", "description", "issuetype", "project"}
+NON_CREATABLE_ISSUE_FIELDS = {"issuelinks"}
 
 
 def _get_field_mapping_record(
@@ -150,7 +151,7 @@ def _build_issue_fields(
     extra_fields = {
         key: value
         for key, value in (bug.get("extra_fields") or {}).items()
-        if key not in STANDARD_ISSUE_FIELDS
+        if key not in STANDARD_ISSUE_FIELDS and key not in NON_CREATABLE_ISSUE_FIELDS
     }
 
     project_value = _normalize_project_value(raw_project, project_key, project_id, prefer_key=prefer_project_key)
@@ -173,6 +174,8 @@ def _merge_saved_field_defaults(
     merged_fields = dict(payload_fields)
     saved_defaults = (mapping_record.field_defaults if mapping_record else None) or {}
     for field_key, default_value in saved_defaults.items():
+        if field_key in NON_CREATABLE_ISSUE_FIELDS:
+            continue
         existing = merged_fields.get(field_key)
         if existing is None or existing == "" or existing == []:
             merged_fields[field_key] = default_value

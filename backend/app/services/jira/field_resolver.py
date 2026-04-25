@@ -43,7 +43,7 @@ class JiraFieldResolver:
         for field_key, raw_value in payload_fields.items():
             if field_key not in self.schema:
                 continue
-            if field_key in {"summary", "description", "project", "issuetype"}:
+            if field_key in {"summary", "description", "project", "issuetype", "issuelinks"}:
                 continue
 
             structured_value = self._structure_value(raw_value, self.schema[field_key])

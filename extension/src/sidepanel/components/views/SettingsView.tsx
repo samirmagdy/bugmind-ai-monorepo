@@ -9,7 +9,8 @@ const HIDDEN_SYSTEM_FIELD_KEYS = new Set([
   'summary',
   'description',
   'project',
-  'issuetype'
+  'issuetype',
+  'issuelinks'
 ]);
 
 function isSystemManagedField(field: JiraField): boolean {
