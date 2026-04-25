@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { TabSession, JiraConnection, JiraProject, JiraBootstrapContext, XrayDefaultsResponse } from '../types';
-import { apiRequest, readJsonResponse } from '../services/api';
+import { apiRequest, getErrorMessage, readJsonResponse, throwApiErrorResponse } from '../services/api';
 import {
   JiraBootstrapResponsePayload,
   JiraBootstrapRequestPayload,
@@ -11,7 +11,6 @@ import {
   XrayDefaultsResponsePayload,
   JiraSettingsRequestPayload,
 } from '../services/contracts';
-import { translateError } from '../utils/ErrorTranslator';
 import { dbService } from '../services/db';
 import { JiraConnectionConfig, JiraContext } from './jira-context';
 
@@ -190,10 +189,7 @@ export const JiraProvider: React.FC<{
         });
 
         if (!res.ok) {
-          const errorText = await res.text();
-          const error = new Error(errorText || `Failed to bootstrap Jira context (${res.status})`) as Error & { status?: number };
-          error.status = res.status;
-          throw error;
+          await throwApiErrorResponse(res, `Failed to bootstrap Jira context (${res.status})`);
         }
 
         const data = await readJsonResponse<JiraBootstrapResponsePayload>(res);
@@ -213,7 +209,7 @@ export const JiraProvider: React.FC<{
           return performFetch(retryCount + 1);
         }
         logDebug('JIRA-BOOT-ERR', String(err));
-        updateSession({ error: translateError(err, 'jira-status').description }, tabId);
+        updateSession({ error: getErrorMessage(err) }, tabId);
         return null;
       } finally {
         clearFetch(fetchKey);
@@ -369,7 +365,9 @@ export const JiraProvider: React.FC<{
         token: authToken,
         onUnauthorized: refreshAuthToken
       });
-      if (!res.ok) return [];
+      if (!res.ok) {
+        await throwApiErrorResponse(res, `Failed to fetch Jira projects (${res.status})`);
+      }
       const data = await readJsonResponse<JiraProjectsResponsePayload>(res);
       return data.map(project => ({
         id: String(project.id ?? project.key ?? ''),
@@ -378,9 +376,10 @@ export const JiraProvider: React.FC<{
       }));
     } catch (err) {
       logDebug('CONN-PROJECTS-ERR', String(err));
+      updateSession({ error: getErrorMessage(err) });
       return [];
     }
-  }, [apiBase, authToken, logDebug, refreshAuthToken]);
+  }, [apiBase, authToken, logDebug, refreshAuthToken, updateSession]);
 
   const fetchXrayDefaults = useCallback(async (id: number, storyIssueKey?: string): Promise<XrayDefaultsResponse | null> => {
     if (!authToken) return null;
@@ -392,7 +391,7 @@ export const JiraProvider: React.FC<{
         onDebug: logDebug
       });
       if (!res.ok) {
-        throw new Error(await res.text() || `Failed to fetch Xray defaults (${res.status})`);
+        await throwApiErrorResponse(res, `Failed to fetch Xray defaults (${res.status})`);
       }
       return await readJsonResponse<XrayDefaultsResponsePayload>(res);
     } catch (err) {
@@ -440,7 +439,7 @@ export const JiraProvider: React.FC<{
         body: JSON.stringify(payload)
       });
       if (!res.ok) {
-        throw new Error(await res.text() || `Failed to sync Jira field settings (${res.status})`);
+        await throwApiErrorResponse(res, `Failed to sync Jira field settings (${res.status})`);
       }
       updateSession({ visibleFields: nextVisibleFields, aiMapping: nextAiMapping, fieldDefaults: nextFieldDefaults });
       return true;

@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     FRONTEND_URL: str = "http://localhost:3000"
     CORS_ORIGINS: str = ""
-    EXTENSION_ORIGINS: str = ""
+    EXTENSION_ORIGINS: str = "chrome-extension://ljofgjhfclifhgchelabmoknbdmkoomp"
     ALLOWED_HOSTS: str = ""
     EXPOSE_API_DOCS: bool = False
     ALLOW_INSECURE_JIRA_SSL: bool = False

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { deobfuscate, obfuscate } from '../utils/StorageObfuscator';
-import { apiRequest, readJsonResponse } from '../services/api';
+import { apiRequest, readJsonResponse, throwApiErrorResponse } from '../services/api';
 import { AuthRefreshRequestPayload, AuthTokenResponsePayload } from '../services/contracts';
 import { View } from '../types';
 import { AuthContext } from './auth-context';
@@ -122,7 +122,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode, logDebug: (tag:
         onDebug: logDebug
       });
       if (!res.ok) {
-        throw new Error(await res.text() || `Refresh failed (${res.status})`);
+        await throwApiErrorResponse(res, `Refresh failed (${res.status})`);
       }
       const data = await readJsonResponse<AuthTokenResponsePayload>(res);
       const secureAccessToken = obfuscate(data.access_token);

@@ -93,7 +93,13 @@ async def add_security_headers(request: Request, call_next):
                 logger.warning("security_alert unauthorized_origin_attempt origin=%s request_id=%s", origin, request_id)
                 return JSONResponse(
                     status_code=403,
-                    content={"detail": "Unauthorized request origin"}
+                    content={
+                        "detail": (
+                            "Unauthorized request origin. "
+                            "This BugMind extension origin is not allowed by the backend configuration. "
+                            "Add the current chrome-extension://<extension-id> origin to EXTENSION_ORIGINS."
+                        )
+                    }
                 )
 
     started_at = time.perf_counter()

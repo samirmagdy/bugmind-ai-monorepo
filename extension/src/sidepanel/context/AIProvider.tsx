@@ -1,6 +1,6 @@
 import React, { useState, useRef, useMemo, useCallback } from 'react';
 import { TabSession, BugReport, Usage, INITIAL_SESSION, TestCase, MissingField, IssueContextPayload } from '../types';
-import { apiRequest, readJsonResponse } from '../services/api';
+import { apiRequest, getErrorMessage, readJsonResponse, throwApiErrorResponse } from '../services/api';
 import {
   AIGenerationRequestPayload,
   AIGenerationResponsePayload,
@@ -19,7 +19,6 @@ import {
   buildIssueContextPayload,
   buildProjectRequestParams,
 } from '../services/contracts';
-import { translateError } from '../utils/ErrorTranslator';
 import { AIContext } from './ai-context';
 
 export const AIProvider: React.FC<{
@@ -145,7 +144,7 @@ export const AIProvider: React.FC<{
     try {
       const res = await apiRequest(`${apiBase}/ai/usage`, { token: authToken, onUnauthorized: refreshAuthToken });
       if (!res.ok) {
-        throw new Error(await res.text() || `Request failed with status ${res.status}`);
+        await throwApiErrorResponse(res, `Request failed with status ${res.status}`);
       }
       const data = await readJsonResponse<UsageResponsePayload>(res);
       setUsage(data);
@@ -164,7 +163,7 @@ export const AIProvider: React.FC<{
     try {
       const res = await apiRequest(`${apiBase}/settings/ai`, { token: authToken, onUnauthorized: refreshAuthToken });
       if (!res.ok) {
-        throw new Error(await res.text() || `Request failed with status ${res.status}`);
+        await throwApiErrorResponse(res, `Request failed with status ${res.status}`);
       }
 
       const data = await readJsonResponse<AISettingsResponsePayload>(res);
@@ -172,7 +171,7 @@ export const AIProvider: React.FC<{
       setHasCustomKeySaved(Boolean(data.has_custom_key));
     } catch (err) {
       logDebug('AI-SETTINGS-ERR', String(err));
-      updateSession({ error: translateError(err, 'settings').description });
+      updateSession({ error: getErrorMessage(err) });
     } finally {
       clearFetch(fetchKey);
     }
@@ -236,7 +235,7 @@ export const AIProvider: React.FC<{
       });
 
       if (!res.ok) {
-        throw new Error(await res.text() || `Failed to generate analytical report (${res.status})`);
+        await throwApiErrorResponse(res, `Failed to generate analytical report (${res.status})`);
       }
 
       const data = await readJsonResponse<AIGenerationResponsePayload>(res);
@@ -247,7 +246,7 @@ export const AIProvider: React.FC<{
 
     } catch (err: unknown) {
       logDebug('AI-ERR', String(err));
-      updateSession({ error: translateError(err, 'ai-analysis').description }, currentTabId);
+      updateSession({ error: getErrorMessage(err) }, currentTabId);
     } finally {
       generateBugsInFlightRef.current = false;
       updateSession({ loading: false }, currentTabId);
@@ -280,7 +279,7 @@ export const AIProvider: React.FC<{
         body: JSON.stringify(payload)
       });
       if (!res.ok) {
-        throw new Error(await res.text() || `Failed to generate test cases (${res.status})`);
+        await throwApiErrorResponse(res, `Failed to generate test cases (${res.status})`);
       }
       const data = await readJsonResponse<AITestCasesResponsePayload>(res);
       updateSession({
@@ -293,7 +292,7 @@ export const AIProvider: React.FC<{
       }, currentTabId);
       fetchUsage();
     } catch (err) {
-      updateSession({ error: translateError(err, 'ai-analysis').description }, currentTabId);
+      updateSession({ error: getErrorMessage(err) }, currentTabId);
     } finally {
       generateTestsInFlightRef.current = false;
       updateSession({ loading: false }, currentTabId);
@@ -336,7 +335,7 @@ export const AIProvider: React.FC<{
       });
 
       if (!res.ok) {
-        throw new Error(await res.text() || `Failed to publish test cases to Xray (${res.status})`);
+        await throwApiErrorResponse(res, `Failed to publish test cases to Xray (${res.status})`);
       }
 
       const data = await readJsonResponse<XrayPublishResponsePayload>(res);
@@ -346,7 +345,7 @@ export const AIProvider: React.FC<{
         success: `Published ${(data.created_tests || []).length} test cases to Xray folder ${data.folder_path}.`
       }, currentTabId);
     } catch (err) {
-      updateSession({ error: translateError(err, 'jira-submit').description }, currentTabId);
+      updateSession({ error: getErrorMessage(err) }, currentTabId);
     } finally {
       publishXrayInFlightRef.current = false;
       updateSession({ loading: false }, currentTabId);
@@ -388,7 +387,7 @@ export const AIProvider: React.FC<{
         });
 
         if (!res.ok) {
-          throw new Error(await res.text() || `Manual processing failed (${res.status})`);
+          await throwApiErrorResponse(res, `Manual processing failed (${res.status})`);
         }
 
         const data = await readJsonResponse<AIGenerationResponsePayload>(res);
@@ -409,7 +408,7 @@ export const AIProvider: React.FC<{
       });
       fetchUsage();
     } catch (err: unknown) {
-      updateSession({ error: translateError(err, 'ai-manual').description });
+      updateSession({ error: getErrorMessage(err) });
     } finally {
       manualGenerateInFlightRef.current = false;
       updateSession({ loading: false });
@@ -438,7 +437,7 @@ export const AIProvider: React.FC<{
         body: JSON.stringify(payload)
       });
 
-      if (!res.ok) throw new Error(await res.text() || "Validation failed");
+      if (!res.ok) await throwApiErrorResponse(res, 'Validation failed');
       
       const data = await readJsonResponse<AIPreviewResponsePayload>(res);
       const actionableMissingFields = (data.missing_fields || []).filter((field) => !isSystemManagedMissingField(field));
@@ -452,7 +451,7 @@ export const AIProvider: React.FC<{
       updateSession({ validationErrors: [] });
       return true;
     } catch (err) {
-      updateSession({ error: translateError(err, 'jira-validate').description });
+      updateSession({ error: getErrorMessage(err) });
       return false;
     } finally {
       updateSession({ loading: false });
@@ -493,7 +492,7 @@ export const AIProvider: React.FC<{
       });
 
       if (!res.ok) {
-        throw new Error(await res.text() || 'Failed to submit bugs');
+        await throwApiErrorResponse(res, 'Failed to submit bugs');
       }
 
       const data = await readJsonResponse<AISubmitResponsePayload>(res);
@@ -516,7 +515,7 @@ export const AIProvider: React.FC<{
         return;
       }
 
-      updateSession({ error: translateError(err, 'jira-submit').description });
+      updateSession({ error: getErrorMessage(err) });
     } finally {
       submitBugsInFlightRef.current = false;
       updateSession({ loading: false });

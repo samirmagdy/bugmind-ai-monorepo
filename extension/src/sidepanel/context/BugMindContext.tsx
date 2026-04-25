@@ -2,8 +2,7 @@ import React, { ReactNode, useCallback, useMemo, useEffect, useRef } from 'react
 import { useSession } from '../hooks/useSession';
 
 import { TIMEOUTS, LIMITS } from '../constants';
-import { translateError } from '../utils/ErrorTranslator';
-import { apiRequest, readJsonResponse } from '../services/api';
+import { apiRequest, getErrorMessage, readJsonResponse, throwApiErrorResponse } from '../services/api';
 import {
   AISettingsUpdateRequestPayload,
   AuthBootstrapRequestPayload,
@@ -188,7 +187,7 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
     );
 
     if (!response.ok) {
-      throw new Error(await response.text() || `Auth bootstrap failed (${response.status})`);
+      await throwApiErrorResponse(response, `Auth bootstrap failed (${response.status})`);
     }
 
       const data = await readJsonResponse<AuthBootstrapResponsePayload>(response);
@@ -350,15 +349,17 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
         if (auth.globalView === 'auth' || auth.globalView === 'setup') {
           auth.setGlobalView(nextView);
         }
-      } else {
+      } else if (res.status === 401) {
         logDebug('AUTH-FAIL', 'Session invalid. Redirecting to login.');
         auth.setAuthToken(null);
         auth.setGlobalView('auth');
+      } else {
+        await throwApiErrorResponse(res, `Authentication bootstrap failed (${res.status})`);
       }
     } catch (err) {
       logDebug('AUTH-ERR', `Background verification failed: ${err}`);
       // Don't force redirect on network errors, just show the error
-      updateSession({ error: translateError(err, 'auth').description });
+      updateSession({ error: getErrorMessage(err) });
     } finally {
       auth.setInitializing(false);
       authCheckInFlight.current = null;
@@ -387,6 +388,9 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
         timeoutMs: 10000,
         onDebug: logDebug
       });
+      if (!response.ok) {
+        await throwApiErrorResponse(response, `Login failed (${response.status})`);
+      }
       const data = await readJsonResponse<AuthTokenResponsePayload>(response);
       if (data.access_token) {
         auth.setAuthToken(data.access_token);
@@ -418,7 +422,7 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
         throw new Error(data.detail || 'Login failed');
       }
     } catch (err) {
-      updateSession({ error: translateError(err, 'login').description });
+      updateSession({ error: getErrorMessage(err) });
     } finally {
       loginInFlightRef.current = false;
       updateSession({ loading: false });
@@ -464,7 +468,7 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
         });
 
         if (!res.ok) {
-          throw new Error(await res.text() || `Registration failed (${res.status})`);
+          await throwApiErrorResponse(res, `Registration failed (${res.status})`);
         }
 
         auth.setAuthMode('login');
@@ -472,7 +476,7 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
         auth.setConfirmPassword('');
         sessionData.updateSession({ success: 'Account created! Please sign in.' });
       } catch (err) {
-        sessionData.updateSession({ error: translateError(err, 'register').description });
+        sessionData.updateSession({ error: getErrorMessage(err) });
       } finally {
         registerInFlightRef.current = false;
         sessionData.updateSession({ loading: false });
@@ -496,7 +500,7 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
           body: JSON.stringify(payload)
         });
         if (!res.ok) {
-          throw new Error(await res.text() || `Request failed with status ${res.status}`);
+          await throwApiErrorResponse(res, `Request failed with status ${res.status}`);
         }
         if (res.ok) {
           ai.setHasCustomKeySaved(true);
@@ -504,7 +508,7 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
           sessionData.updateSession({ success: 'Saved' });
         }
       } catch (err) {
-        sessionData.updateSession({ error: translateError(err, 'settings').description });
+        sessionData.updateSession({ error: getErrorMessage(err) });
       } finally {
         saveSettingsInFlightRef.current = false;
         sessionData.updateSession({ loading: false });
@@ -529,7 +533,7 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
           throw new Error('Sync failed');
         }
         sessionData.updateSession({ success: 'Synced' });
-      } catch (err) { sessionData.updateSession({ error: 'Sync failed' }); }
+      } catch (err) { sessionData.updateSession({ error: getErrorMessage(err) }); }
     },
     handleLogout: () => auth.handleLogout(() => setTabSessions({})),
     handleTabReload: () => chrome.tabs.reload(currentTabId!),
