@@ -58,7 +58,7 @@ const PreviewView: React.FC = () => {
   
   if (!bug) {
     return (
-      <div className="context-card flex flex-col items-center justify-center h-full py-12 text-center">
+      <SurfaceCard className="flex flex-col items-center justify-center h-full py-12 text-center">
         <ShieldAlert size={48} className="text-[var(--status-danger)] opacity-20 mb-4" />
         <h3 className="text-lg font-bold text-[var(--text-main)]">Issue Not Found</h3>
         <p className="text-xs text-[var(--text-muted)] mt-2">Could not find the draft for review.</p>
@@ -68,7 +68,7 @@ const PreviewView: React.FC = () => {
         >
           Return to List
         </button>
-      </div>
+      </SurfaceCard>
     );
   }
 
@@ -77,7 +77,7 @@ const PreviewView: React.FC = () => {
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500 pb-48">
       {/* Header */}
-      <div className="context-card flex items-center justify-between px-4 py-3.5">
+      <SurfaceCard className="flex items-center justify-between px-4 py-3.5">
         <button 
           onClick={() => updateSession({ view: 'main' })}
           className="flex items-center gap-2 rounded-full border border-[var(--card-border)] bg-[var(--surface-soft)] px-4 py-2 text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors group"
@@ -89,7 +89,7 @@ const PreviewView: React.FC = () => {
           <div className={`w-2 h-2 rounded-full ${isValid ? 'bg-[var(--status-success)]' : 'bg-[var(--status-warning)] animate-pulse'}`}></div>
           <span className="text-[9px] font-black uppercase tracking-widest text-[var(--text-muted)]">Jira Preview</span>
         </div>
-      </div>
+      </SurfaceCard>
 
       <div className="space-y-4">
         <h2 className="text-lg font-black text-[var(--text-main)] tracking-tight">Jira Preview</h2>

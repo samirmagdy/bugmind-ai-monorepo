@@ -3,11 +3,11 @@ import { useBugMind } from '../../hooks/useBugMind';
 import { 
   Plus, ChevronDown, 
   Loader2, X, Send, AlertCircle, Zap, RefreshCw,
-  Compass, ArrowRight, Check, Layout
+  Compass, ArrowRight, Check, Layout, AlertTriangle
 } from 'lucide-react';
 import { BugReport, JiraField, TestCase } from '../../types';
 import AutoResizeTextarea from '../common/AutoResizeTextarea';
-import { ActionButton } from '../common/DesignSystem';
+import { ActionButton, SurfaceCard, StatusPanel } from '../common/DesignSystem';
 import LuxurySearchableSelect from '../common/LuxurySearchableSelect';
 import { TIMEOUTS } from '../../constants';
 
@@ -197,7 +197,7 @@ const MainView: React.FC = () => {
   return (
     <div className="space-y-4 animate-in fade-in duration-500">
       {/* Issue Context Card */}
-      <div className="context-card relative group animate-in slide-in-from-top-4 duration-700">
+      <SurfaceCard className="relative group animate-in slide-in-from-top-4 duration-700">
         <div className="absolute top-4 right-4">
           <button 
             onClick={() => refreshIssue()} 
@@ -284,7 +284,7 @@ const MainView: React.FC = () => {
             <span className="text-xs font-medium text-[var(--text-muted)]">Hunting for context...</span>
           </div>
         )}
-      </div>
+        </SurfaceCard>
 
 
       {/* Action/List Section */}
@@ -293,65 +293,62 @@ const MainView: React.FC = () => {
           {/* Locked State Overlay */}
           {session.error === 'UNSUPPORTED_ISSUE_TYPE' && (
             <div className="absolute inset-0 z-20 flex flex-col items-center justify-start pt-8 p-3 animate-in fade-in zoom-in slide-in-from-top-3 duration-700">
-              <div className="context-card rounded-[1.75rem] p-4 shadow-[var(--shadow-card)] border-[var(--status-warning)]/20 space-y-4 text-center max-w-[260px] relative overflow-hidden">
-                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-[var(--status-warning)]/40 to-transparent"></div>
-                <div className="w-8 h-8 bg-[var(--status-warning)]/10 rounded-xl flex items-center justify-center text-[var(--status-warning)] mx-auto shadow-inner border border-[var(--status-warning)]/10">
-                  <AlertCircle size={20} />
-                </div>
-                <div className="space-y-1.5">
-                  <h4 className="text-xs font-black text-[var(--text-main)] tracking-tight">Requirement Focus</h4>
-                  <p className="text-[11px] text-[var(--text-muted)] leading-relaxed px-2">
-                    BugMind is designed for **User Stories**. 
+              <StatusPanel
+                icon={AlertCircle}
+                tone="warning"
+                title="Requirement Focus"
+                description={
+                  <span>
+                    BugMind is designed for <strong>User Stories</strong>.<br />
                     This issue is identified as a <span className="text-[var(--status-warning)] font-black">{session.issueData?.typeName || 'Other'}</span>.
-                  </p>
-                </div>
-                <button 
-                  onClick={() => refreshIssue(true)}
-                  className="w-full bg-[var(--text-main)] text-white text-[10px] font-black py-2.5 rounded-[1rem] shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 uppercase tracking-widest"
-                >
-                  <RefreshCw size={12} />
-                  Re-Scan Issue
-                </button>
-              </div>
+                  </span>
+                }
+                action={
+                  <ActionButton 
+                    onClick={() => refreshIssue(true)}
+                    variant="primary"
+                    className="w-full text-[10px] uppercase tracking-widest"
+                  >
+                    <RefreshCw size={12} className="mr-2" />
+                    Re-Scan Issue
+                  </ActionButton>
+                }
+                className="shadow-[var(--shadow-card)] max-w-[260px]"
+              />
             </div>
           )}
 
           {session.error === 'NO_ISSUE_TYPES_FOUND' && (
             <div className="absolute inset-0 z-20 flex flex-col items-center justify-start pt-12 p-3 animate-in fade-in zoom-in slide-in-from-top-3 duration-700">
-              <div className="context-card rounded-[2rem] p-4 shadow-[var(--shadow-card)] border-[var(--status-danger)]/20 space-y-5 text-center max-w-[300px] relative overflow-hidden">
-                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-[var(--status-danger)]/40 to-transparent"></div>
-                <div className="w-8 h-8 bg-[var(--status-danger)]/10 rounded-xl flex items-center justify-center text-[var(--status-danger)] mx-auto shadow-inner border border-[var(--status-danger)]/10">
-                  <AlertCircle size={28} />
-                </div>
-                <div className="space-y-2">
-                  <h4 className="text-base font-black text-[var(--text-main)] tracking-tight">Permission Restriction</h4>
-                  <p className="text-[11px] text-[var(--text-muted)] leading-relaxed px-2">
-                    Jira returned **0 accessible issue types** for this instance. This usually means the API Token used does not have permissions to view projects.
-                  </p>
-                </div>
-                <button 
-                  onClick={() => updateSession({ view: 'setup' })}
-                  className="w-full bg-[var(--primary-gradient)] text-white text-[10px] font-black py-2.5 rounded-[1rem] shadow-[var(--shadow-button)] transition-all active:scale-95 flex items-center justify-center gap-2 uppercase tracking-widest"
-                >
-                  <RefreshCw size={12} />
-                  Check Jira Connection
-                </button>
-              </div>
+              <StatusPanel
+                icon={AlertCircle}
+                tone="danger"
+                title="Permission Restriction"
+                description="Jira returned 0 accessible issue types for this instance. This usually means the API Token used does not have permissions to view projects."
+                action={
+                  <ActionButton 
+                    onClick={() => updateSession({ view: 'setup' })}
+                    variant="primary"
+                    className="w-full text-[10px] uppercase tracking-widest bg-[var(--primary-gradient)] border-0"
+                  >
+                    <RefreshCw size={12} className="mr-2" />
+                    Check Jira Connection
+                  </ActionButton>
+                }
+                className="shadow-[var(--shadow-card)] max-w-[300px]"
+              />
             </div>
           )}
 
           <div className={`transition-all duration-700 ${['UNSUPPORTED_ISSUE_TYPE', 'NO_ISSUE_TYPES_FOUND'].includes(session.error || '') ? 'blur-md grayscale opacity-30 pointer-events-none pt-4' : ''}`}>
             {(!session.bugs || session.bugs.length === 0) && (!session.testCases || session.testCases.length === 0) ? (
               <div className="space-y-4">
-                <div className="empty-state-card animate-in fade-in slide-in-from-bottom-4 duration-700">
-                  <div className="empty-icon">
-                    <Zap size={28} />
-                  </div>
-                  <h3 className="empty-title">Ready for Analysis</h3>
-                  <p className="empty-description">
-                    BugMind will analyze the story and criteria to uncover hidden requirements and potential functional gaps.
-                  </p>
-
+                <StatusPanel
+                  icon={Zap}
+                  title="Ready for Analysis"
+                  description="BugMind will analyze the story and criteria to uncover hidden requirements and potential functional gaps."
+                  className="animate-in fade-in slide-in-from-bottom-4 duration-700"
+                >
                   <div className="mt-6 space-y-3 text-left">
                     <div>
                       <label className="context-label uppercase tracking-wider mb-1.5 block ml-1">Analysis Context</label>
@@ -372,7 +369,7 @@ const MainView: React.FC = () => {
                       <ActionButton 
                         onClick={generateBugs}
                         variant="primary"
-                        className="h-11 text-[13px]"
+                        className="h-11 w-full text-[13px]"
                         disabled={!session.issueData || !session.selectedIssueType?.id || session.issueTypes.length === 0}
                       >
                         <Zap size={16} />
@@ -397,13 +394,16 @@ const MainView: React.FC = () => {
                       </div>
                     )}
                   </div>
-                </div>
+                </StatusPanel>
 
                 {!session.showManualInput ? (
-                  <div 
-                    onClick={() => updateSession({ showManualInput: true })}
-                    className="workflow-card flex items-center gap-3 group"
+                  <SurfaceCard 
+                    className="flex items-center gap-3 group cursor-pointer"
                   >
+                    <div 
+                      onClick={() => updateSession({ showManualInput: true })}
+                      className="absolute inset-0 z-10"
+                    />
                     <div className="w-9 h-9 rounded-[1rem] bg-[var(--surface-accent)] flex items-center justify-center text-[var(--primary-purple)] group-hover:bg-[var(--primary-purple)] group-hover:text-white transition-colors shrink-0">
                       <Plus size={18} />
                     </div>
@@ -411,7 +411,7 @@ const MainView: React.FC = () => {
                       <h4 className="workflow-card-title text-[14px]">Add manual finding</h4>
                       <p className="workflow-card-subtitle">Register bug notes in plain English</p>
                     </div>
-                  </div>
+                  </SurfaceCard>
                 ) : (
                   <div className="flow-screen space-y-4 animate-in slide-in-from-bottom-2">
                     <div className="flex justify-between items-center">
@@ -462,7 +462,7 @@ const MainView: React.FC = () => {
 
                 <div className="space-y-3">
                   {session.testCases.map((testCase: TestCase, idx: number) => (
-                    <div key={`${testCase.title}-${idx}`} className="workflow-card space-y-3">
+                    <SurfaceCard key={`${testCase.title}-${idx}`} className="space-y-3">
                       <div className="flex items-center justify-between">
                         <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider">Test Case {idx + 1}</span>
                         <input
@@ -497,7 +497,7 @@ const MainView: React.FC = () => {
                           className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-[0.9rem] p-2.5 text-xs text-[var(--text-secondary)] outline-none"
                         />
                       </div>
-                    </div>
+                    </SurfaceCard>
                   ))}
                 </div>
 
@@ -565,20 +565,26 @@ const MainView: React.FC = () => {
                   )}
 
                   {session.xrayWarnings.length > 0 && (
-                    <div className="warning-card space-y-1">
-                      <div className="text-[10px] font-bold uppercase tracking-wider">Publish Warnings</div>
+                    <StatusPanel 
+                      tone="warning" 
+                      title="Publish Warnings"
+                      icon={AlertTriangle}
+                    >
                       <div className="text-[11px]">
                         {session.xrayWarnings.map((warning, idx) => (
                           <div key={`${warning}-${idx}`}>{warning}</div>
                         ))}
                       </div>
-                    </div>
+                    </StatusPanel>
                   )}
 
                   {!session.xrayPublishSupported && session.xrayUnsupportedReason && (
-                    <div className="error-card text-xs">
-                      {session.xrayUnsupportedReason}
-                    </div>
+                    <StatusPanel 
+                      tone="danger" 
+                      title="Export Unavailable"
+                      description={session.xrayUnsupportedReason}
+                      icon={AlertCircle}
+                    />
                   )}
 
                   <ActionButton
@@ -612,7 +618,7 @@ const MainView: React.FC = () => {
                 
                 <div className="space-y-3">
                   {(session.bugs || []).map((bug: BugReport, idx: number) => (
-                    <div key={idx} className="workflow-card">
+                    <SurfaceCard key={idx}>
                       <div 
                         onClick={() => updateSession({ expandedBug: session.expandedBug === idx ? null : idx })}
                         className="flex items-start gap-3 cursor-pointer"
@@ -755,7 +761,7 @@ const MainView: React.FC = () => {
                           </div>
                         </div>
                       )}
-                    </div>
+                    </SurfaceCard>
                   ))}
                 </div>
 

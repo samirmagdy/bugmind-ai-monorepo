@@ -1,6 +1,6 @@
 import React from 'react';
 import { useBugMind } from '../../hooks/useBugMind';
-import { ActionButton, StatusPanel } from '../common/DesignSystem';
+import { ActionButton, StatusPanel, SurfaceCard } from '../common/DesignSystem';
 import { Mail, Lock, ShieldCheck, ArrowRight } from 'lucide-react';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -38,7 +38,7 @@ const AuthView: React.FC = () => {
           </p>
         </div>
 
-        <div className="context-card p-8 relative overflow-hidden">
+        <SurfaceCard className="p-8 relative overflow-hidden">
           <div className="absolute top-0 left-0 w-full h-1 bg-[var(--primary-gradient)]" />
           
           <form onSubmit={authMode === 'login' ? handleLogin : handleRegister} className="space-y-6">
@@ -134,7 +134,7 @@ const AuthView: React.FC = () => {
               <ArrowRight size={18} />
             </ActionButton>
           </form>
-        </div>
+        </SurfaceCard>
 
         <div className="mt-8 text-center">
           <button 

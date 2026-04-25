@@ -100,9 +100,9 @@ const LuxurySearchableSelect: React.FC<LuxurySearchableSelectProps> = ({
     };
 
     if (typeof v === 'object' && v !== null) {
-      if (v.name || v.value || v.label || v.avatar) return v;
       const matched = findById(v.id);
-      if (matched) return { ...matched, ...v };
+      if (matched) return { ...matched, ...v, avatar: v.avatar || v.icon_url || v.iconUrl || matched.avatar };
+      if (v.name || v.value || v.label || v.avatar || v.icon_url || v.iconUrl) return { ...v, avatar: v.avatar || v.icon_url || v.iconUrl };
       return { ...v, name: v.id ? String(v.id) : 'Unknown value' };
     }
 
@@ -164,11 +164,11 @@ const LuxurySearchableSelect: React.FC<LuxurySearchableSelectProps> = ({
                 const avatar = opt.avatar;
                 const label = opt.name || opt.value || opt.label || opt.id;
                 return (
-                  <div className="flex items-center gap-2 animate-in fade-in slide-in-from-left-2 duration-300">
+                  <div className="flex items-center gap-2.5 animate-in fade-in slide-in-from-left-2 duration-300">
                     {avatar && (
-                      <img src={avatar} className="w-4 h-4 rounded shadow-sm" alt="" />
+                      <img src={avatar} className="w-5 h-5 rounded-md" alt="" />
                     )}
-                    <span className="text-[13px] font-bold text-[var(--text-main)] truncate uppercase tracking-tight">
+                    <span className="text-[13px] font-semibold text-[var(--text-main)] truncate tracking-tight">
                       {label}
                     </span>
                   </div>

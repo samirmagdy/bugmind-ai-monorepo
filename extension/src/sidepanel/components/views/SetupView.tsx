@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useBugMind } from '../../hooks/useBugMind';
 import { ExternalLink, ArrowLeft, RefreshCw, Globe, ShieldCheck, Lock, AtSign, Link } from 'lucide-react';
-import { ActionButton } from '../common/DesignSystem';
+import { ActionButton, SurfaceCard } from '../common/DesignSystem';
 
 const SetupView: React.FC = () => {
   const { 
@@ -66,7 +66,7 @@ const SetupView: React.FC = () => {
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       {/* Header */}
-      <div className="context-card flex items-center gap-3 px-4 py-3.5">
+      <SurfaceCard className="flex items-center gap-3 px-4 py-3.5">
         {hasConnections && (
           <button 
             onClick={() => setGlobalView('main')}
@@ -79,11 +79,11 @@ const SetupView: React.FC = () => {
           <h2 className="text-lg font-bold text-[var(--text-primary)]">Jira Connection</h2>
           <p className="text-xs text-[var(--text-secondary)]">Link your Jira workspace to BugMind</p>
         </div>
-      </div>
+      </SurfaceCard>
 
       <form onSubmit={handleSubmit} className="space-y-5">
         {/* Engine Endpoint */}
-        <div className="context-card space-y-4">
+        <SurfaceCard className="space-y-4">
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 rounded-[0.9rem] bg-[var(--bg-input)] border border-[var(--border-soft)] flex items-center justify-center text-[var(--primary-blue)]">
               <Globe size={14} />
@@ -110,7 +110,7 @@ const SetupView: React.FC = () => {
               />
             </div>
           </div>
-        </div>
+        </SurfaceCard>
 
         {/* Platform Selection */}
         <div className="space-y-2">
@@ -142,7 +142,7 @@ const SetupView: React.FC = () => {
         </div>
 
         {/* Credentials */}
-        <div className="context-card space-y-4">
+        <SurfaceCard className="space-y-4">
           <div className="space-y-1.5">
             <label className="context-label uppercase tracking-wider block ml-1">Workspace URL</label>
             <div className="relative">
@@ -220,7 +220,7 @@ const SetupView: React.FC = () => {
               <p className="text-[10px] text-[var(--text-muted)]">Verify certificates during sync</p>
             </div>
           </div>
-        </div>
+        </SurfaceCard>
 
         <ActionButton 
           type="submit" 
