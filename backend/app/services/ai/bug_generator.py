@@ -164,10 +164,13 @@ class BugGenerator:
             mode_instruction = f"""
             The user has manually described a bug they found: "{user_description}"
             Your primary goal is to structure this specific bug report using the story context below.
+            Return exactly one bug in the bugs array.
             """
         else:
             mode_instruction = """
-            Take the initiative to predict the most likely bug that could occur based on this story context.
+            Analyze the story context and identify multiple distinct quality gaps.
+            Return 3 to 5 materially different bug candidates covering missing requirements, functional gaps, edge cases, and risks.
+            Do not collapse all findings into one generic issue.
             """
 
         instruction_block = f"\nPERSONALITY & STYLE GUIDE: {custom_instructions}" if custom_instructions else ""
@@ -180,30 +183,36 @@ class BugGenerator:
         {mode_instruction}
         
         REQUIREMENTS:
-        - The "summary" must be a high-quality headline.
-        - The "steps" must be a clean list of reproduction steps. YOU MUST PROVIDE STEPS.
-        - The "expected" result must align with the acceptance criteria in the story.
-        - The "actual" result must detail the observed deviation.
-        - The "description" must be a professional summary of the problem and its impact (Core Findings), EXCLUDING the detailed steps, expected, or actual result sections as these are captured separately.
-        - The "custom_fields" dictionary: Scrutinize the schema below. If you can confidently predict a value for any of these fields (like Priority, Severity, or Component) based on the context, populate the key with the field ID and the value with the appropriate Jira object (e.g. {{"id": "..."}}).
+        - Each bug's "summary" must be a high-quality headline.
+        - Each bug's "steps" must be a clean list of reproduction steps. YOU MUST PROVIDE STEPS.
+        - Each bug's "expected" result must align with the acceptance criteria in the story.
+        - Each bug's "actual" result must detail the observed deviation.
+        - Each bug's "description" must be a professional summary of the problem and its impact (Core Findings), EXCLUDING the detailed steps, expected, or actual result sections as these are captured separately.
+        - Each bug's "custom_fields" dictionary: Scrutinize the schema below. If you can confidently predict a value for any of these fields (like Priority, Severity, or Component) based on the context, populate the key with the field ID and the value with the appropriate Jira object (e.g. {{"id": "..."}}).
 
-        CRITICAL: YOU MUST PROVIDE VALUES FOR ALL FIELDS. 
-        If "steps" are missing, use logic to create them. 
-        If "expected" or "actual" results are not explicitly provided by the user, you MUST infer them based on the context. 
-        NEVER return null or empty strings for these core fields.
+        CRITICAL:
+        - YOU MUST PROVIDE VALUES FOR ALL FIELDS FOR EVERY BUG.
+        - If "steps" are missing, use logic to create them.
+        - If "expected" or "actual" results are not explicitly provided by the user, you MUST infer them based on the context.
+        - NEVER return null or empty strings for these core fields.
+        - Each bug in the bugs array must represent a distinct issue, not a rewording of another bug.
 
         The current Jira project expects these fields:
         {schema_json}
         
         OUTPUT FORMAT (JSON ONLY):
         {{
-            "summary": "Concise Bug Title",
-            "description": "*Summary*\\nConcise explanation of the defect and where it occurs.",
-            "steps": ["Step 1", "Step 2"],
-            "expected": "Expected behavior per the ACs",
-            "actual": "Actual observed deviation",
+            "bugs": [
+                {{
+                    "summary": "Concise Bug Title",
+                    "description": "*Summary*\\nConcise explanation of the defect and where it occurs.",
+                    "steps": ["Step 1", "Step 2"],
+                    "expected": "Expected behavior per the ACs",
+                    "actual": "Actual observed deviation",
+                    "custom_fields": {{ "field_id": {{ "id": "value_id" }} or "string_value" }}
+                }}
+            ],
             "ac_coverage": 85.0,
-            "custom_fields": {{ "field_id": {{ "id": "value_id" }} or "string_value" }}
         }}
         """
 

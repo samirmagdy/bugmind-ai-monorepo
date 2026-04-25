@@ -24,13 +24,17 @@ class StructBugField(BaseModel):
     field_id: str
     value: Any
 
-class BugGenerationResponse(BaseModel):
+class GeneratedBugResponse(BaseModel):
     summary: str
     description: str
     steps_to_reproduce: str
     expected_result: str
     actual_result: str
     fields: Dict[str, Any]
+
+
+class BugGenerationResponse(BaseModel):
+    bugs: List[GeneratedBugResponse]
     ac_coverage: float
 
 

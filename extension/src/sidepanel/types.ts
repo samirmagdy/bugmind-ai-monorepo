@@ -88,6 +88,7 @@ export interface MissingField {
 
 export interface TabSession {
   view: View;
+  mainWorkflow: MainWorkflow;
   loading: boolean;
   error: string | null;
   success: string | null;
@@ -97,8 +98,7 @@ export interface TabSession {
   expandedBug: number | null;
   testCases: TestCase[];
   coverageScore: number | null;
-  manualDesc: string;
-  showManualInput: boolean;
+  manualInputs: string[];
   jiraMetadata: JiraMetadata | null;
   issueTypes: IssueType[];
   selectedIssueType: IssueType | null;
@@ -201,9 +201,11 @@ export interface IssueData {
 }
 
 export type View = 'auth' | 'setup' | 'main' | 'success' | 'settings' | 'preview';
+export type MainWorkflow = 'home' | 'manual' | 'analysis' | 'tests';
 
 export const INITIAL_SESSION: TabSession = {
   view: 'main',
+  mainWorkflow: 'home',
   loading: false,
   error: null,
   success: null,
@@ -213,8 +215,7 @@ export const INITIAL_SESSION: TabSession = {
   expandedBug: null,
   testCases: [],
   coverageScore: null,
-  manualDesc: '',
-  showManualInput: false,
+  manualInputs: [''],
   jiraMetadata: null,
   issueTypes: [],
   selectedIssueType: null,

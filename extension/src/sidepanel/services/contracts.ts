@@ -129,13 +129,17 @@ export interface AuthBootstrapResponsePayload {
   } | null;
 }
 
-export interface AIGenerationResponsePayload {
+export interface GeneratedBugResponsePayload {
   summary: string;
   description: string;
   steps_to_reproduce: string;
   expected_result: string;
   actual_result: string;
   fields?: Record<string, unknown>;
+}
+
+export interface AIGenerationResponsePayload {
+  bugs: GeneratedBugResponsePayload[];
   ac_coverage?: number;
 }
 

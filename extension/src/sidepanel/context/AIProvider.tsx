@@ -15,6 +15,7 @@ import {
   UsageResponsePayload,
   XrayPublishRequestPayload,
   XrayPublishResponsePayload,
+  GeneratedBugResponsePayload,
   buildIssueContextPayload,
   buildProjectRequestParams,
 } from '../services/contracts';
@@ -113,6 +114,19 @@ export const AIProvider: React.FC<{
   const buildDefaultExtraFields = useCallback(() => {
     return sanitizeExtraFields((session.fieldDefaults || {}) as BugReport['extra_fields']);
   }, [sanitizeExtraFields, session.fieldDefaults]);
+
+  const toFrontendBug = useCallback((bug: GeneratedBugResponsePayload): BugReport => ({
+    summary: bug.summary,
+    description: bug.description,
+    steps_to_reproduce: bug.steps_to_reproduce || '',
+    expected_result: bug.expected_result || '',
+    actual_result: bug.actual_result || '',
+    severity: 'Medium',
+    extra_fields: {
+      ...buildDefaultExtraFields(),
+      ...sanitizeExtraFields((bug.fields || {}) as BugReport['extra_fields'])
+    }
+  }), [buildDefaultExtraFields, sanitizeExtraFields]);
 
   const buildIssueContext = useCallback((): IssueContextPayload => buildIssueContextPayload(session.issueData), [session.issueData]);
   const getProjectRequestParams = useCallback(() => {
@@ -226,20 +240,9 @@ export const AIProvider: React.FC<{
       }
 
       const data = await readJsonResponse<AIGenerationResponsePayload>(res);
-      const bug: BugReport = {
-        summary: data.summary,
-        description: data.description,
-        steps_to_reproduce: data.steps_to_reproduce || "", 
-        expected_result: data.expected_result || "",
-        actual_result: data.actual_result || "",
-        severity: "Medium",
-        extra_fields: {
-          ...buildDefaultExtraFields(),
-          ...sanitizeExtraFields((data.fields || {}) as BugReport['extra_fields'])
-        }
-      };
+      const bugs = (data.bugs || []).map(toFrontendBug);
 
-      updateSession({ bugs: [bug], testCases: [], coverageScore: null }, currentTabId);
+      updateSession({ bugs, testCases: [], coverageScore: data.ac_coverage ?? null }, currentTabId);
       logDebug('AI-OK', `Analysis complete for ${session.issueData.key}.`);
 
     } catch (err: unknown) {
@@ -249,7 +252,7 @@ export const AIProvider: React.FC<{
       generateBugsInFlightRef.current = false;
       updateSession({ loading: false }, currentTabId);
     }
-  }, [apiBase, authToken, buildDefaultExtraFields, buildIssueContext, currentTabId, getProjectRequestParams, logDebug, refreshAuthToken, sanitizeExtraFields, session.instanceUrl, session.issueData, session.jiraConnectionId, session.selectedIssueType, updateSession]);
+  }, [apiBase, authToken, buildIssueContext, currentTabId, getProjectRequestParams, logDebug, refreshAuthToken, session.instanceUrl, session.issueData, session.jiraConnectionId, session.selectedIssueType, toFrontendBug, updateSession]);
 
   const generateTestCases = useCallback(async () => {
     if (generateTestsInFlightRef.current) return;
@@ -352,7 +355,8 @@ export const AIProvider: React.FC<{
 
   const handleManualGenerate = useCallback(async () => {
     if (manualGenerateInFlightRef.current) return;
-    if (!session.manualDesc.trim() || !session.jiraConnectionId) return;
+    const manualInputs = (session.manualInputs || []).map((item) => item.trim()).filter(Boolean);
+    if (!manualInputs.length || !session.jiraConnectionId) return;
     if (!session.selectedIssueType?.id) {
       updateSession({ error: 'MISSING_ISSUE_TYPE' });
       logDebug('MANUAL-ABORT', 'Missing Jira issue type selection');
@@ -360,45 +364,49 @@ export const AIProvider: React.FC<{
     }
     manualGenerateInFlightRef.current = true;
     updateSession({ loading: true, error: null, testCases: [], coverageScore: null });
-    logDebug('MANUAL-START', 'Structuring manual description...');
+    logDebug('MANUAL-START', `Structuring ${manualInputs.length} manual finding(s)...`);
     try {
       const { projectKey, projectId } = getProjectRequestParams();
-      const payload: AIGenerationRequestPayload = {
-        issue_context: session.issueData ? buildIssueContext() : undefined,
-        selected_text: session.issueData ? undefined : session.manualDesc,
-        jira_connection_id: session.jiraConnectionId,
-        instance_url: session.instanceUrl,
-        project_key: projectKey || 'MANUAL',
-        project_id: projectId,
-        issue_type_id: session.selectedIssueType.id,
-        user_description: session.manualDesc
-      };
-      const res = await apiRequest(`${apiBase}/ai/generate`, {
-        method: 'POST',
-        token: authToken,
-        onUnauthorized: refreshAuthToken,
-        body: JSON.stringify(payload)
-      });
+      const generatedBugs: BugReport[] = [];
 
-      if (!res.ok) {
-        throw new Error(await res.text() || `Manual processing failed (${res.status})`);
+      for (const manualInput of manualInputs) {
+        const payload: AIGenerationRequestPayload = {
+          issue_context: session.issueData ? buildIssueContext() : undefined,
+          selected_text: session.issueData ? undefined : manualInput,
+          jira_connection_id: session.jiraConnectionId,
+          instance_url: session.instanceUrl,
+          project_key: projectKey || 'MANUAL',
+          project_id: projectId,
+          issue_type_id: session.selectedIssueType.id,
+          user_description: manualInput
+        };
+        const res = await apiRequest(`${apiBase}/ai/generate`, {
+          method: 'POST',
+          token: authToken,
+          onUnauthorized: refreshAuthToken,
+          body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) {
+          throw new Error(await res.text() || `Manual processing failed (${res.status})`);
+        }
+
+        const data = await readJsonResponse<AIGenerationResponsePayload>(res);
+        const generated = (data.bugs || []).map(toFrontendBug);
+        if (generated.length > 0) {
+          generatedBugs.push(generated[0]);
+        }
       }
 
-      const data = await readJsonResponse<AIGenerationResponsePayload>(res);
-      const newBug: BugReport = {
-        summary: data.summary,
-        description: data.description,
-        steps_to_reproduce: data.steps_to_reproduce || '',
-        expected_result: data.expected_result || '',
-        actual_result: data.actual_result || '',
-        severity: 'Medium',
-        extra_fields: {
-          ...buildDefaultExtraFields(),
-          ...sanitizeExtraFields((data.fields || {}) as BugReport['extra_fields'])
-        }
-      };
       const existing = session.bugs || [];
-      updateSession({ bugs: [...existing, newBug], testCases: [], coverageScore: null, manualDesc: '', showManualInput: false, expandedBug: existing.length });
+      updateSession({
+        bugs: [...existing, ...generatedBugs],
+        testCases: [],
+        coverageScore: null,
+        manualInputs: [''],
+        mainWorkflow: 'home',
+        expandedBug: existing.length
+      });
       fetchUsage();
     } catch (err: unknown) {
       updateSession({ error: translateError(err, 'ai-manual').description });
@@ -406,7 +414,7 @@ export const AIProvider: React.FC<{
       manualGenerateInFlightRef.current = false;
       updateSession({ loading: false });
     }
-  }, [apiBase, authToken, buildDefaultExtraFields, buildIssueContext, fetchUsage, getProjectRequestParams, logDebug, refreshAuthToken, sanitizeExtraFields, session.bugs, session.instanceUrl, session.issueData, session.jiraConnectionId, session.manualDesc, session.selectedIssueType?.id, updateSession]);
+  }, [apiBase, authToken, buildIssueContext, fetchUsage, getProjectRequestParams, logDebug, refreshAuthToken, session.bugs, session.instanceUrl, session.issueData, session.jiraConnectionId, session.manualInputs, session.selectedIssueType?.id, toFrontendBug, updateSession]);
 
   const validateBug = useCallback(async (index: number): Promise<boolean> => {
     const bug = session.bugs[index];

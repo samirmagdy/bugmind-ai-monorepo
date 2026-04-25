@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { useBugMind } from '../../hooks/useBugMind';
 import { 
   Plus, ChevronDown, 
-  Loader2, X, Send, AlertCircle, Zap, RefreshCw,
+  Loader2, Send, AlertCircle, Zap, RefreshCw,
   Compass, ArrowRight, Check, Layout, AlertTriangle
 } from 'lucide-react';
 import { BugReport, JiraField, TestCase } from '../../types';
@@ -88,6 +88,27 @@ const MainView: React.FC = () => {
   const { log } = debug;
   const isRecoveringStalePage = session.error === 'STALE_PAGE' && !session.issueData;
   const staleRecoveryAttemptsRef = useRef(0);
+  const manualInputs = session.manualInputs?.length ? session.manualInputs : [''];
+  const requiresIssueType = !session.issueData || !session.selectedIssueType?.id || session.issueTypes.length === 0;
+
+  const setWorkflow = (mainWorkflow: 'home' | 'manual' | 'analysis' | 'tests') => {
+    updateSession({ mainWorkflow, error: null });
+  };
+
+  const updateManualInput = (index: number, value: string) => {
+    const nextInputs = [...manualInputs];
+    nextInputs[index] = value;
+    updateSession({ manualInputs: nextInputs });
+  };
+
+  const addManualInput = () => {
+    updateSession({ manualInputs: [...manualInputs, ''] });
+  };
+
+  const removeManualInput = (index: number) => {
+    const nextInputs = manualInputs.filter((_, currentIndex) => currentIndex !== index);
+    updateSession({ manualInputs: nextInputs.length ? nextInputs : [''] });
+  };
 
   const bootstrapJiraConfig = async (issueTypeId?: string, options?: { force?: boolean; loading?: boolean; logTag?: string; errorMessage?: string }) => {
     const projectKey = session.issueData?.key.split('-')[0];
@@ -343,100 +364,185 @@ const MainView: React.FC = () => {
           <div className={`transition-all duration-700 ${['UNSUPPORTED_ISSUE_TYPE', 'NO_ISSUE_TYPES_FOUND'].includes(session.error || '') ? 'blur-md grayscale opacity-30 pointer-events-none pt-4' : ''}`}>
             {(!session.bugs || session.bugs.length === 0) && (!session.testCases || session.testCases.length === 0) ? (
               <div className="space-y-4">
-                <StatusPanel
-                  icon={Zap}
-                  title="Ready for Analysis"
-                  description="BugMind will analyze the story and criteria to uncover hidden requirements and potential functional gaps."
-                  className="animate-in fade-in slide-in-from-bottom-4 duration-700"
-                >
-                  <div className="mt-6 space-y-3 text-left">
-                    <div>
-                      <label className="context-label uppercase tracking-wider mb-1.5 block ml-1">Analysis Context</label>
-                      <LuxurySearchableSelect
-                        options={session.issueTypes.map(t => ({ id: t.id, name: t.name, avatar: t.icon_url }))}
-                        value={session.selectedIssueType}
-                        placeholder="Select issue type..."
-                        onChange={(type: any) => {
-                          if (type && session.jiraConnectionId && session.issueData) {
-                            updateSession({ selectedIssueType: type, jiraMetadata: null });
-                            void bootstrapJiraConfig(type.id, { force: true, loading: true, logTag: 'MAIN-TYPE-SWITCH' });
-                          }
-                        }}
-                      />
+                {session.mainWorkflow === 'home' ? (
+                  <SurfaceCard className="space-y-0 cursor-default hover:border-[var(--card-border)] animate-in fade-in slide-in-from-bottom-4 duration-700 overflow-hidden">
+                    <div className="space-y-2 pb-5">
+                      <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--text-muted)]">Choose Workflow</div>
+                      <h3 className="workflow-card-title">Start from one action</h3>
+                      <p className="workflow-card-subtitle">Each workflow opens in its own focused page while keeping the same Jira context above.</p>
                     </div>
 
-                    <div className="pt-2 space-y-2.5">
-                      <ActionButton 
-                        onClick={generateBugs}
-                        variant="primary"
-                        className="h-11 w-full text-[13px]"
-                        disabled={!session.issueData || !session.selectedIssueType?.id || session.issueTypes.length === 0}
-                      >
-                        <Zap size={16} />
-                        Run Gap Analysis
-                      </ActionButton>
-
-                      <ActionButton 
-                        onClick={generateTestCases}
-                        variant="secondary"
-                        className="h-11 w-full text-[13px]"
-                        disabled={!session.issueData || !session.selectedIssueType?.id || session.issueTypes.length === 0}
-                      >
-                        <Check size={16} />
-                        Generate Test Cases
-                      </ActionButton>
-                    </div>
-                    
-                    {(!session.selectedIssueType?.id || session.issueTypes.length === 0) && (
-                      <div className="flex items-center justify-center gap-2 mt-4 text-[10px] text-[var(--text-muted)] font-bold uppercase tracking-wider">
-                        <Loader2 size={10} className="animate-spin" />
-                        Fetching project metadata...
+                    <div className="border-t border-[var(--border-soft)]">
+                      <div className="group relative flex items-center justify-between gap-4 py-5 px-1">
+                        <button type="button" onClick={() => setWorkflow('manual')} className="absolute inset-0" aria-label="I Found a Bug" />
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-[1rem] bg-[var(--surface-accent)] flex items-center justify-center text-[var(--primary-purple)] shrink-0">
+                            <Plus size={18} />
+                          </div>
+                          <div>
+                            <h4 className="workflow-card-title text-[14px]">I Found a Bug</h4>
+                            <p className="workflow-card-subtitle">Turn plain English notes into Jira-ready bug reports, one or many at once.</p>
+                          </div>
+                        </div>
+                        <ArrowRight size={16} className="text-[var(--text-muted)] shrink-0 transition-transform group-hover:translate-x-0.5" />
                       </div>
-                    )}
-                  </div>
-                </StatusPanel>
-
-                {!session.showManualInput ? (
-                  <SurfaceCard 
-                    className="flex items-center gap-3 group cursor-pointer"
-                  >
-                    <div 
-                      onClick={() => updateSession({ showManualInput: true })}
-                      className="absolute inset-0 z-10"
-                    />
-                    <div className="w-9 h-9 rounded-[1rem] bg-[var(--surface-accent)] flex items-center justify-center text-[var(--primary-purple)] group-hover:bg-[var(--primary-purple)] group-hover:text-white transition-colors shrink-0">
-                      <Plus size={18} />
                     </div>
-                    <div>
-                      <h4 className="workflow-card-title text-[14px]">Add manual finding</h4>
-                      <p className="workflow-card-subtitle">Register bug notes in plain English</p>
+
+                    <div className="border-t border-[var(--border-soft)]">
+                      <div className="group relative flex items-center justify-between gap-4 py-5 px-1">
+                        <button type="button" onClick={() => setWorkflow('analysis')} className="absolute inset-0" aria-label="AI Gap Analysis" />
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-[1rem] bg-[var(--surface-accent-strong)] flex items-center justify-center text-[var(--primary-blue)] shrink-0">
+                            <Zap size={18} />
+                          </div>
+                          <div>
+                            <h4 className="workflow-card-title text-[14px]">AI Gap Analysis</h4>
+                            <p className="workflow-card-subtitle">Identify missing requirements, functional gaps, edge cases, and risk areas.</p>
+                          </div>
+                        </div>
+                        <ArrowRight size={16} className="text-[var(--text-muted)] shrink-0 transition-transform group-hover:translate-x-0.5" />
+                      </div>
+                    </div>
+
+                    <div className="border-t border-[var(--border-soft)]">
+                      <div className="group relative flex items-center justify-between gap-4 py-5 px-1">
+                        <button type="button" onClick={() => setWorkflow('tests')} className="absolute inset-0" aria-label="Generate Test Cases" />
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-[1rem] bg-[var(--surface-soft)] flex items-center justify-center text-[var(--status-success)] shrink-0">
+                            <Check size={18} />
+                          </div>
+                          <div>
+                            <h4 className="workflow-card-title text-[14px]">Generate Test Cases</h4>
+                            <p className="workflow-card-subtitle">Create structured QA test cases and prepare them for Jira Xray publishing.</p>
+                          </div>
+                        </div>
+                        <ArrowRight size={16} className="text-[var(--text-muted)] shrink-0 transition-transform group-hover:translate-x-0.5" />
+                      </div>
                     </div>
                   </SurfaceCard>
                 ) : (
-                  <div className="flow-screen space-y-4 animate-in slide-in-from-bottom-2">
-                    <div className="flex justify-between items-center">
-                      <div className="flex items-center gap-2">
-                        <div className="step-badge">AI</div>
-                        <h4 className="text-sm font-bold">Manual Entry</h4>
+                  <div className="space-y-4 animate-in fade-in slide-in-from-bottom-3 duration-500">
+                    <SurfaceCard className="space-y-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2">
+                          <button type="button" onClick={() => setWorkflow('home')} className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--card-border)] bg-[var(--surface-soft)] text-[var(--text-muted)] hover:text-[var(--text-primary)]">
+                            <ArrowRight size={14} className="rotate-180" />
+                          </button>
+                          <div>
+                            <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--text-muted)]">Workflow</div>
+                            <h3 className="workflow-card-title">
+                              {session.mainWorkflow === 'manual'
+                                ? 'I Found a Bug'
+                                : session.mainWorkflow === 'analysis'
+                                  ? 'AI Gap Analysis'
+                                  : 'Generate Test Cases'}
+                            </h3>
+                          </div>
+                        </div>
+                        <div className="step-badge">
+                          {session.mainWorkflow === 'manual' ? 'BUG' : session.mainWorkflow === 'analysis' ? 'AI' : 'QA'}
+                        </div>
                       </div>
-                      <button onClick={() => updateSession({ showManualInput: false })} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]">
-                        <X size={16} />
-                      </button>
-                    </div>
-                    <AutoResizeTextarea 
-                      className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-[1rem] p-3 text-sm outline-none focus:border-[var(--border-active)] min-h-[100px]"
-                      placeholder="Describe the issue... We'll structure it for Jira."
-                      value={session.manualDesc}
-                      onChange={e => updateSession({ manualDesc: e.target.value })}
-                    />
-                    <ActionButton 
-                      onClick={() => handleManualGenerate()}
-                      variant="primary"
-                      disabled={session.loading || !session.manualDesc.trim()}
-                    >
-                      <Zap size={16} />
-                      Synthesize Findings
-                    </ActionButton>
+
+                      {session.mainWorkflow !== 'manual' && (
+                        <div className="space-y-2">
+                          <label className="context-label uppercase tracking-wider mb-1.5 block ml-1">Analysis Context</label>
+                          <LuxurySearchableSelect
+                            options={session.issueTypes.map(t => ({ id: t.id, name: t.name, avatar: t.icon_url }))}
+                            value={session.selectedIssueType}
+                            placeholder="Select issue type..."
+                            onChange={(type: any) => {
+                              if (type && session.jiraConnectionId && session.issueData) {
+                                updateSession({ selectedIssueType: type, jiraMetadata: null });
+                                void bootstrapJiraConfig(type.id, { force: true, loading: true, logTag: 'MAIN-TYPE-SWITCH' });
+                              }
+                            }}
+                          />
+                        </div>
+                      )}
+
+                      {session.mainWorkflow === 'manual' ? (
+                        <div className="space-y-3">
+                          <p className="text-[12px] text-[var(--text-secondary)] leading-relaxed">
+                            Add one or more bug descriptions. Each input will be structured as a separate Jira-ready bug report.
+                          </p>
+                          <div className="space-y-3">
+                            {manualInputs.map((manualInput, index) => (
+                              <div key={`manual-input-${index}`} className="space-y-2">
+                                <div className="flex items-center justify-between">
+                                  <label className="context-label uppercase tracking-wider block ml-1">Bug Input {index + 1}</label>
+                                  {manualInputs.length > 1 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => removeManualInput(index)}
+                                      className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--error)]"
+                                    >
+                                      Remove
+                                    </button>
+                                  )}
+                                </div>
+                                <AutoResizeTextarea
+                                  className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-[1rem] p-3 text-sm outline-none focus:border-[var(--border-active)] min-h-[96px]"
+                                  placeholder="Describe the issue in plain English. This input becomes one bug."
+                                  value={manualInput}
+                                  onChange={e => updateManualInput(index, e.target.value)}
+                                />
+                              </div>
+                            ))}
+                          </div>
+                          <ActionButton onClick={addManualInput} variant="secondary" className="h-10 w-full text-[12px]">
+                            <Plus size={15} />
+                            Add Another Bug
+                          </ActionButton>
+                          <ActionButton
+                            onClick={() => handleManualGenerate()}
+                            variant="primary"
+                            disabled={session.loading || manualInputs.every(input => !input.trim())}
+                            className="h-11"
+                          >
+                            <Zap size={16} />
+                            Generate Structured Bugs
+                          </ActionButton>
+                        </div>
+                      ) : session.mainWorkflow === 'analysis' ? (
+                        <div className="space-y-3">
+                          <p className="text-[12px] text-[var(--text-secondary)] leading-relaxed">
+                            Analyze the story and acceptance criteria to surface hidden requirements, edge cases, and functional risk.
+                          </p>
+                          <ActionButton 
+                            onClick={generateBugs}
+                            variant="primary"
+                            className="h-11 text-[13px]"
+                            disabled={requiresIssueType}
+                          >
+                            <Zap size={16} />
+                            Run Gap Analysis
+                          </ActionButton>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          <p className="text-[12px] text-[var(--text-secondary)] leading-relaxed">
+                            Generate comprehensive QA-ready test cases from the current story and prepare them for direct Jira Xray publishing.
+                          </p>
+                          <ActionButton 
+                            onClick={generateTestCases}
+                            variant="primary"
+                            className="h-11 text-[13px]"
+                            disabled={requiresIssueType}
+                          >
+                            <Check size={16} />
+                            Generate Test Cases
+                          </ActionButton>
+                        </div>
+                      )}
+
+                      {requiresIssueType && session.mainWorkflow !== 'manual' && (
+                        <div className="flex items-center justify-center gap-2 pt-1 text-[10px] text-[var(--text-muted)] font-bold uppercase tracking-wider">
+                          <Loader2 size={10} className="animate-spin" />
+                          Fetching project metadata...
+                        </div>
+                      )}
+                    </SurfaceCard>
                   </div>
                 )}
               </div>
@@ -446,7 +552,7 @@ const MainView: React.FC = () => {
                   <h3 className="text-lg font-bold text-[var(--text-primary)]">{session.testCases.length} Test Assets</h3>
                   <div className="flex gap-4">
                     <button 
-                      onClick={() => updateSession({ testCases: [], coverageScore: null, error: null, createdIssues: [], xrayWarnings: [] })} 
+                      onClick={() => updateSession({ testCases: [], coverageScore: null, error: null, createdIssues: [], xrayWarnings: [], mainWorkflow: 'home' })} 
                       className="text-xs font-bold text-[var(--error)]"
                     >
                       Clear
@@ -602,7 +708,7 @@ const MainView: React.FC = () => {
                   <h3 className="text-lg font-bold text-[var(--text-primary)]">{(session.bugs || []).length} Analysis Findings</h3>
                   <div className="flex gap-4">
                     <button 
-                      onClick={() => updateSession({ bugs: [], testCases: [], coverageScore: null, error: null })} 
+                      onClick={() => updateSession({ bugs: [], testCases: [], coverageScore: null, error: null, mainWorkflow: 'home' })} 
                       className="text-xs font-bold text-[var(--error)]"
                     >
                       Clear

@@ -318,34 +318,46 @@ async def generate_bug_report(
         custom_instructions=req.custom_instructions
     )
 
+    ai_bugs_raw = ai_raw.get("bugs", [])
+    if not isinstance(ai_bugs_raw, list) or len(ai_bugs_raw) == 0:
+        ai_bugs_raw = [ai_raw]
+
     # 4. Resolve Fields (Mapping)
     mapping_record = _get_field_mapping_record(db, current_user.id, req.project_key, req.project_id, req.issue_type_id)
     mapping_config = mapping_record.field_mappings if mapping_record else {}
     
     platform = "server" if isinstance(adapter, JiraServerAdapter) else "cloud"
     resolver = JiraFieldResolver(mapping_config, schema, platform=platform)
-    jira_payload = resolver.resolve(ai_raw)
-    jira_payload["fields"] = _merge_saved_field_defaults(jira_payload["fields"], mapping_record)
+    resolved_bugs = []
+    for raw_bug in ai_bugs_raw:
+        if not isinstance(raw_bug, dict):
+            continue
 
-    # 5. Format Steps and Results
-    steps_list = ai_raw.get("steps", [])
-    if isinstance(steps_list, list):
-        clean_steps = [
-            re.sub(r"^\s*\d+\.\s*", "", str(step)).strip()
-            for step in steps_list
-            if str(step).strip()
-        ]
-        steps_text = "\n".join(clean_steps)
-    else:
-        steps_text = str(steps_list)
+        jira_payload = resolver.resolve(raw_bug)
+        jira_payload["fields"] = _merge_saved_field_defaults(jira_payload["fields"], mapping_record)
+
+        steps_list = raw_bug.get("steps", [])
+        if isinstance(steps_list, list):
+            clean_steps = [
+                re.sub(r"^\s*\d+\.\s*", "", str(step)).strip()
+                for step in steps_list
+                if str(step).strip()
+            ]
+            steps_text = "\n".join(clean_steps)
+        else:
+            steps_text = str(steps_list)
+
+        resolved_bugs.append({
+            "summary": raw_bug.get("summary", ""),
+            "description": raw_bug.get("description", ""),
+            "steps_to_reproduce": steps_text,
+            "expected_result": raw_bug.get("expected", ""),
+            "actual_result": raw_bug.get("actual", ""),
+            "fields": jira_payload["fields"],
+        })
 
     response = BugGenerationResponse(
-        summary=ai_raw.get("summary", ""),
-        description=ai_raw.get("description", ""),
-        steps_to_reproduce=steps_text,
-        expected_result=ai_raw.get("expected", ""),
-        actual_result=ai_raw.get("actual", ""),
-        fields=jira_payload["fields"],
+        bugs=resolved_bugs,
         ac_coverage=ai_raw.get("ac_coverage", 0.0)
     )
     log_audit(
