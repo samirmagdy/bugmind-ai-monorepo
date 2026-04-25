@@ -75,6 +75,7 @@ export interface AIPreviewRequestPayload extends ProjectRequestParams {
 export interface AISubmitRequestPayload extends ProjectRequestParams {
   jira_connection_id: number;
   instance_url?: string | null;
+  story_issue_key?: string;
   issue_type_id: string;
   bugs: BugReport[];
 }

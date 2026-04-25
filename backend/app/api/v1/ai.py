@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from datetime import datetime
 from typing import Optional, List, Dict
+import logging
 from app.api import deps
 from app.models.user import User
 from app.models.jira import JiraConnection, JiraFieldMapping
@@ -29,7 +30,7 @@ from app.services.jira.contract_aliases import (
     inject_standard_field_aliases,
     is_system_managed_standard_field,
 )
-from app.api.v1.jira import get_adapter, _normalize_instance_url
+from app.api.v1.jira import get_adapter, _normalize_instance_url, _resolve_link_type_candidates
 from app.core.security import decrypt_credential
 from app.core.audit import log_audit
 from app.core.idempotency import idempotency_store
@@ -37,6 +38,7 @@ from app.core.rate_limit import rate_limiter
 import re
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 STANDARD_ISSUE_FIELDS = {"summary", "description", "issuetype", "project"}
 
@@ -495,6 +497,15 @@ async def submit_bugs(
             )
         raise e
     created_issues: List[XrayPublishedTest] = []
+    story_issue_key = (req.story_issue_key or "").strip()
+    link_type_used: Optional[str] = None
+    available_link_types: list[str] = []
+    if story_issue_key:
+        try:
+            available_link_types = adapter.get_issue_link_types()
+        except HTTPException:
+            available_link_types = []
+    link_candidates = _resolve_link_type_candidates("Relates", available_link_types) if story_issue_key else []
 
     for bug in req.bugs:
         mapping_record = _get_field_mapping_record(db, current_user.id, req.project_key, req.project_id, req.issue_type_id)
@@ -528,6 +539,24 @@ async def submit_bugs(
 
         issue_key = adapter.create_issue(resolved_payload)
         created_issues.append(XrayPublishedTest(id=issue_key, key=issue_key, self=""))
+        if story_issue_key:
+            linked = False
+            for candidate in link_candidates:
+                try:
+                    adapter.link_issues(issue_key, candidate, story_issue_key)
+                    linked = True
+                    if not link_type_used:
+                        link_type_used = candidate
+                    break
+                except HTTPException:
+                    continue
+            if not linked:
+                logger.warning(
+                    "bug_submit_link_failed story_issue_key=%s created_issue_key=%s jira_connection_id=%s",
+                    story_issue_key,
+                    issue_key,
+                    req.jira_connection_id,
+                )
 
     response = SubmitBugsResponse(created_issues=created_issues)
     idempotency_store.store_response(
@@ -546,5 +575,7 @@ async def submit_bugs(
         issue_type_id=req.issue_type_id,
         request_path=str(request.url.path),
         created_issue_keys=[issue.key for issue in created_issues],
+        linked_story_issue_key=story_issue_key or None,
+        link_type_used=link_type_used,
     )
     return response

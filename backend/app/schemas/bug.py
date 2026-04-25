@@ -71,6 +71,7 @@ class PreviewPreparationResponse(BaseModel):
 class SubmitBugsRequest(BaseModel):
     jira_connection_id: int
     instance_url: Optional[str] = None
+    story_issue_key: Optional[str] = None
     project_key: str
     project_id: Optional[str] = None
     issue_type_id: str

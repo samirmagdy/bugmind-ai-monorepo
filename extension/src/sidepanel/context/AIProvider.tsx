@@ -479,6 +479,7 @@ export const AIProvider: React.FC<{
       const payload: AISubmitRequestPayload = {
         jira_connection_id: session.jiraConnectionId,
         instance_url: session.instanceUrl,
+        story_issue_key: session.issueData.key,
         project_key: projectKey,
         project_id: projectId,
         issue_type_id: session.selectedIssueType.id,
