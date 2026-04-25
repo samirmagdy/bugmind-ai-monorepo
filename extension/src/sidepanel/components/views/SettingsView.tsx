@@ -25,7 +25,7 @@ function isSystemManagedField(field: JiraField): boolean {
 }
 
 function normalizeSavedFieldValue(field: JiraField, rawValue: unknown): unknown {
-  if (field.type === 'user' || field.type === 'multi-user' || field.type === 'option' || field.type === 'priority' || field.type === 'cascading-select') {
+  if (field.type === 'user' || field.type === 'multi-user' || field.type === 'option' || field.type === 'priority' || field.type === 'cascading-select' || field.type === 'sprint') {
     if (Array.isArray(rawValue)) return rawValue;
     return typeof rawValue === 'object' && rawValue !== null ? rawValue : null;
   }
@@ -237,6 +237,36 @@ const FieldRow: React.FC<{
                 </div>
               )}
             </div>
+          ) : ((field.type === 'option' || field.type === 'priority' || field.type === 'cascading-select' || field.type === 'sprint') && field.allowed_values && field.allowed_values.length > 0) ? (
+            <LuxurySearchableSelect
+              options={(field.allowed_values || []).map((opt) => ({
+                id: opt.id,
+                name: opt.name || opt.value || opt.label || opt.id,
+                label: opt.label,
+              }))}
+              value={typeof savedDefault === 'object' && savedDefault !== null && !Array.isArray(savedDefault)
+                ? {
+                    id: savedDefault.id,
+                    name: savedDefault.name || savedDefault.value || savedDefault.label || savedDefault.id,
+                    label: savedDefault.label,
+                  }
+                : null}
+              onChange={(next) => {
+                if (!next || Array.isArray(next)) {
+                  updateFieldDefault(field, null);
+                  return;
+                }
+                if (isSelectOption(next)) {
+                  updateFieldDefault(field, {
+                    id: String(next.id ?? ''),
+                    name: next.name,
+                    label: next.label,
+                    value: next.name,
+                  });
+                }
+              }}
+              placeholder={field.type === 'sprint' ? 'Choose sprint...' : 'Choose value...'}
+            />
           ) : (field.allowed_values && field.allowed_values.length > 0) || field.type === 'labels' || field.type === 'array' ? (
             <div className="space-y-3 relative" ref={dropdownRef}>
               <button 

@@ -50,3 +50,8 @@ class JiraAdapter(ABC):
     def get_issue_link_types(self) -> List[str]:
         """Returns available Jira issue link type names."""
         pass
+
+    @abstractmethod
+    def get_sprint_options(self, project_id: str) -> List[Dict[str, Any]]:
+        """Returns selectable sprint options for a project."""
+        pass

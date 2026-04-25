@@ -269,3 +269,52 @@ class JiraServerAdapter(JiraAdapter):
         data = response.json()
         types = data.get("issueLinkTypes", [])
         return [link_type.get("name") for link_type in types if link_type.get("name")]
+
+    def get_sprint_options(self, project_id: str) -> List[Dict[str, Any]]:
+        project_ref = str(project_id).strip()
+        if not project_ref:
+            return []
+
+        try:
+            board_response = self.client.get("/rest/agile/1.0/board", params={"projectKeyOrId": project_ref, "maxResults": 50})
+        except httpx.HTTPError:
+            return []
+
+        if board_response.status_code != 200:
+            return []
+
+        boards = board_response.json().get("values", [])
+        sprint_options: List[Dict[str, Any]] = []
+        seen_ids: set[str] = set()
+
+        for board in boards:
+            board_id = board.get("id")
+            if not board_id:
+                continue
+
+            try:
+                sprint_response = self.client.get(
+                    f"/rest/agile/1.0/board/{board_id}/sprint",
+                    params={"state": "active,future", "maxResults": 100}
+                )
+            except httpx.HTTPError:
+                continue
+
+            if sprint_response.status_code != 200:
+                continue
+
+            for sprint in sprint_response.json().get("values", []):
+                sprint_id = str(sprint.get("id") or "").strip()
+                if not sprint_id or sprint_id in seen_ids:
+                    continue
+                seen_ids.add(sprint_id)
+                state = str(sprint.get("state") or "").strip()
+                name = str(sprint.get("name") or sprint_id).strip()
+                sprint_options.append({
+                    "id": sprint_id,
+                    "name": f"{name} ({state.title()})" if state else name,
+                    "value": name,
+                    "label": state.title() if state else None,
+                })
+
+        return sprint_options

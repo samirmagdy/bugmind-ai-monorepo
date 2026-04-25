@@ -62,6 +62,16 @@ class JiraFieldResolver:
                 return raw_value
             return {"id": raw_value} if raw_value else None
 
+        elif field_type == "sprint":
+            if isinstance(raw_value, dict):
+                raw_value = raw_value.get("id") or raw_value.get("value") or raw_value.get("name")
+            if raw_value in (None, ""):
+                return None
+            try:
+                return int(raw_value)
+            except (TypeError, ValueError):
+                return raw_value
+
         # 2. User / Multi-user handling
         elif field_type == "user" or field_type == "multi-user":
             if self.platform == "server":

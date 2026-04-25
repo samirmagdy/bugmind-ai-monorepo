@@ -49,6 +49,7 @@ class JiraMetadataEngine:
         fields = self.adapter.get_fields(project_id, issue_type_id)
         
         processed_fields = []
+        sprint_options: Optional[List[Dict[str, Any]]] = None
         for field in fields:
             # Multi-layer safety for required flag
             is_required = field.get("required", False)
@@ -70,6 +71,14 @@ class JiraMetadataEngine:
                 f_type = "multi-select"
             elif "labels" in custom_type.lower():
                 f_type = "labels"
+            elif "gh-sprint" in custom_type.lower() or schema.get("system") == "sprint" or str(field.get("name", "")).strip().lower() == "sprint":
+                f_type = "sprint"
+
+            allowed_values = field.get("allowedValues") or field.get("values") or []
+            if f_type == "sprint" and not allowed_values:
+                if sprint_options is None:
+                    sprint_options = self.adapter.get_sprint_options(project_id)
+                allowed_values = sprint_options
 
             processed_fields.append({
                 "key": field.get("fieldId") or field.get("key") or field.get("id"),
@@ -79,7 +88,7 @@ class JiraMetadataEngine:
                 "items": schema.get("items"),
                 "system": schema.get("system"),
                 "custom": custom_type,
-                "allowed_values": field.get("allowedValues") or field.get("values") or []
+                "allowed_values": allowed_values
             })
 
         if processed_fields:
