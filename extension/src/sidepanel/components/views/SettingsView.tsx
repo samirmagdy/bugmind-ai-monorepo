@@ -3,7 +3,7 @@ import { X, ChevronDown, Loader2, AlertCircle, RefreshCw, Pencil, FolderOpen, Sa
 import { useBugMind } from '../../hooks/useBugMind';
 import { IssueType, JiraField, JiraProject, JiraUser } from '../../types';
 import { ActionButton, StatusBadge, StatusPanel, SurfaceCard } from '../common/DesignSystem';
-import LuxurySearchableSelect from '../common/LuxurySearchableSelect';
+import LuxurySearchableSelect, { SelectOption, SelectValue } from '../common/LuxurySearchableSelect';
 
 const HIDDEN_SYSTEM_FIELD_KEYS = new Set([
   'summary',
@@ -46,9 +46,25 @@ function normalizeSavedFieldValue(field: JiraField, rawValue: unknown): unknown 
   return rawValue == null ? '' : String(rawValue);
 }
 
+type SavedFieldValue =
+  | string
+  | number
+  | boolean
+  | null
+  | { id: string; name?: string; value?: string; label?: string; avatar?: string }
+  | Array<string | { id: string; name?: string; value?: string; label?: string; avatar?: string }>;
+
+function isSelectOption(value: SelectValue | SelectValue[]): value is SelectOption {
+  return !Array.isArray(value) && typeof value === 'object' && value !== null;
+}
+
+function isConnectionAuthType(value: unknown): value is 'cloud' | 'server' {
+  return value === 'cloud' || value === 'server';
+}
+
 const FieldRow: React.FC<{
   field: JiraField;
-  savedDefault: any;
+  savedDefault: SavedFieldValue;
   updateFieldDefault: (field: JiraField, nextValue: unknown) => void;
   searchUsers: (query: string, bugIndex?: number, fieldId?: string) => Promise<JiraUser[] | void>;
   isVisible: boolean;
@@ -61,12 +77,6 @@ const FieldRow: React.FC<{
   const [dropdownSearch, setDropdownSearch] = useState('');
   const lastSearchedQueryRef = useRef('');
   const dropdownRef = useRef<HTMLDivElement>(null);
-
-
-
-  useEffect(() => {
-    console.log('[BugMind] FieldRow initialized:', field.name, field.type);
-  }, [field.name, field.type]);
 
   useEffect(() => {
     if (userSearchQuery.length < 2) {
@@ -144,11 +154,11 @@ const FieldRow: React.FC<{
         <div className={`relative transition-all duration-500 ${!isVisible ? 'pointer-events-none' : ''}`}>
           { (field.type === 'user' || field.type === 'multi-user') ? (
             <div className="relative z-[60]">
-              {savedDefault ? (
+	              {savedDefault ? (
                 <div className="flex items-center justify-between bg-[var(--surface-soft)] border border-[var(--card-border)] rounded-[1.25rem] px-4 py-2.5 transition-all hover:bg-[var(--surface-soft-hover)] group/val">
                   <div className="flex items-center gap-3">
-                    {typeof savedDefault === 'object' && savedDefault !== null && !Array.isArray(savedDefault) && (savedDefault as any).avatar ? (
-                      <img src={(savedDefault as any).avatar} className="w-6 h-6 rounded-full ring-2 ring-[var(--status-info)]/20" alt="" />
+                    {typeof savedDefault === 'object' && savedDefault !== null && !Array.isArray(savedDefault) && savedDefault.avatar ? (
+                      <img src={savedDefault.avatar} className="w-6 h-6 rounded-full ring-2 ring-[var(--status-info)]/20" alt="" />
                     ) : (
                       <div className="w-6 h-6 bg-[var(--status-info)]/10 rounded-full flex items-center justify-center border border-[var(--status-info)]/20">
                         <User size={12} className="text-[var(--status-info)]" />
@@ -156,7 +166,7 @@ const FieldRow: React.FC<{
                     )}
                     <div className="flex flex-col">
                       <span className="text-[11px] text-[var(--status-info)] font-black tracking-tight leading-none">
-                        {typeof savedDefault === 'object' && savedDefault !== null && !Array.isArray(savedDefault) ? ((savedDefault as any).name || 'Selected User') : 'Selected User'}
+                        {typeof savedDefault === 'object' && savedDefault !== null && !Array.isArray(savedDefault) ? (savedDefault.name || 'Selected User') : 'Selected User'}
                       </span>
                       <span className="text-[9px] text-blue-500/40 uppercase font-bold tracking-tighter mt-1">Default Assignee</span>
                     </div>
@@ -236,13 +246,13 @@ const FieldRow: React.FC<{
               >
                 <div className="flex flex-wrap gap-2 items-center flex-1 min-w-0">
                   {Array.isArray(savedDefault) && savedDefault.length > 0 ? (
-                    savedDefault.map((v: any, i: number) => (
+                    savedDefault.map((v, i: number) => (
                       <div key={typeof v === 'object' ? (v.id || i) : v} className="bg-[var(--status-info)]/10 text-[var(--status-info)] px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-tight flex items-center gap-2 border border-[var(--status-info)]/20 whitespace-nowrap overflow-hidden max-w-[120px]">
                         <span className="truncate">{typeof v === 'object' ? (v.name || v.value || v.label || v.id) : v}</span>
                         <button 
                           onClick={(e) => {
                             e.stopPropagation();
-                            const next = (savedDefault as any[]).filter((x, idx) => {
+                            const next = savedDefault.filter((x, idx) => {
                               if (typeof v === 'object' && typeof x === 'object') return x.id !== v.id;
                               return idx !== i;
                             });
@@ -298,7 +308,7 @@ const FieldRow: React.FC<{
                         return label.includes(s);
                       })
                       .map(opt => {
-                        const isSelected = Array.isArray(savedDefault) && savedDefault.some((v: any) => 
+                        const isSelected = Array.isArray(savedDefault) && savedDefault.some((v) => 
                           (typeof v === 'object' ? v.id === opt.id : v === (opt.value || opt.name || opt.label))
                         );
 
@@ -309,7 +319,7 @@ const FieldRow: React.FC<{
                               const item = { id: opt.id, value: opt.value, name: opt.name, label: opt.label };
                               const existing = Array.isArray(savedDefault) ? savedDefault : [];
                               if (isSelected) {
-                                updateFieldDefault(field, existing.filter((v: any) => (typeof v === 'object' ? v.id !== opt.id : v !== (opt.value || opt.name || opt.label))));
+                                updateFieldDefault(field, existing.filter((v) => (typeof v === 'object' ? v.id !== opt.id : v !== (opt.value || opt.name || opt.label))));
                               } else {
                                 updateFieldDefault(field, [...existing, item]);
                               }
@@ -714,7 +724,14 @@ const SettingsView: React.FC = () => {
                     { id: 'server', name: 'Jira Data Center (PAT)' }
                   ]}
                   value={{ id: newConnection.auth_type }}
-                  onChange={(next: any) => setNewConnection(prev => ({ ...prev, auth_type: next.id }))}
+                  onChange={(next) => {
+                    if (isSelectOption(next)) {
+                      const authType = String(next.id ?? '');
+                      if (isConnectionAuthType(authType)) {
+                        setNewConnection(prev => ({ ...prev, auth_type: authType }));
+                      }
+                    }
+                  }}
                 />
               </div>
               <input
@@ -892,7 +909,14 @@ const SettingsView: React.FC = () => {
                             { id: 'server', name: 'Server / DC' }
                           ]}
                           value={{ id: connectionDrafts[conn.id].auth_type }}
-                          onChange={(next: any) => setConnectionDrafts(prev => ({ ...prev, [conn.id]: { ...prev[conn.id], auth_type: next.id } }))}
+                          onChange={(next) => {
+                            if (isSelectOption(next)) {
+                              const authType = String(next.id ?? '');
+                              if (isConnectionAuthType(authType)) {
+                                setConnectionDrafts(prev => ({ ...prev, [conn.id]: { ...prev[conn.id], auth_type: authType } }));
+                              }
+                            }
+                          }}
                         />
                       </div>
                       <input
@@ -969,10 +993,12 @@ const SettingsView: React.FC = () => {
                     options={session.issueTypes.map((type: IssueType) => ({ id: type.id, name: type.name, avatar: type.icon_url }))}
                     value={session.selectedIssueType}
                     placeholder="Select issue type..."
-                    onChange={(type: any) => {
-                      if (type && session.jiraConnectionId && session.issueData) {
-                        updateSession({ selectedIssueType: type, jiraMetadata: null });
-                        void bootstrapJiraConfig(type.id, { force: true, loading: true, logTag: 'SETTINGS-TYPE' });
+                    onChange={(type) => {
+                      if (type && !Array.isArray(type) && session.jiraConnectionId && session.issueData) {
+                        const selectedType = session.issueTypes.find((issueType) => issueType.id === (isSelectOption(type) ? String(type.id ?? '') : String(type)));
+                        if (!selectedType) return;
+                        updateSession({ selectedIssueType: selectedType, jiraMetadata: null });
+                        void bootstrapJiraConfig(selectedType.id, { force: true, loading: true, logTag: 'SETTINGS-TYPE' });
                       }
                     }}
                   />
@@ -1094,8 +1120,9 @@ const SettingsView: React.FC = () => {
                               ...editableJiraFields.map((f: JiraField) => ({ id: f.key, name: `${f.name} — ${f.key}` }))
                             ]}
                             value={{ id: (session.aiMapping?.[prop.id]) || 'description' }}
-                            onChange={(next: any) => {
-                              const nextMapping = { ...(session.aiMapping || {}), [prop.id]: next.id };
+                            onChange={(next) => {
+                              if (!isSelectOption(next)) return;
+                              const nextMapping = { ...(session.aiMapping || {}), [prop.id]: String(next.id ?? 'description') };
                               saveFieldSettings(undefined, nextMapping);
                             }}
                           />
@@ -1146,7 +1173,7 @@ const SettingsView: React.FC = () => {
                           <FieldRow 
                             key={field.key}
                             field={field}
-                            savedDefault={normalizeSavedFieldValue(field, session.fieldDefaults?.[field.key])}
+                            savedDefault={normalizeSavedFieldValue(field, session.fieldDefaults?.[field.key]) as SavedFieldValue}
                             updateFieldDefault={updateFieldDefault}
                             searchUsers={searchUsers}
                             isVisible={session.visibleFields.includes(field.key) || field.required}
