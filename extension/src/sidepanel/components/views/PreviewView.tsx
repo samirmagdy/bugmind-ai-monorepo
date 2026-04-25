@@ -1,12 +1,17 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useBugMind } from '../../hooks/useBugMind';
 import {
-  ArrowLeft, AlertTriangle, Send,
+  ArrowLeft, AlertTriangle, Send, ChevronLeft, ChevronRight,
   Layout, AlignLeft, ShieldAlert
 } from 'lucide-react';
 import JiraMarkdown from '../common/JiraMarkdown';
 import { ActionButton, StatusPanel, SurfaceCard } from '../common/DesignSystem';
-import { ResolvedFieldValue } from '../../types';
+import {
+  BugReport,
+  JiraField,
+  JiraFieldOption,
+  ResolvedFieldValue
+} from '../../types';
 
 function hasResolvedField(
   fields: Record<string, ResolvedFieldValue> | undefined,
@@ -15,23 +20,108 @@ function hasResolvedField(
   return Boolean(fields) && Object.prototype.hasOwnProperty.call(fields, key);
 }
 
-function formatResolvedFieldValue(value: ResolvedFieldValue): string {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function extractNamedValue(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed ? trimmed : '(empty)';
+  }
+
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+
   if (Array.isArray(value)) {
-    return `${value.length} items selected`;
+    const items = value
+      .map(item => extractNamedValue(item))
+      .filter((item): item is string => Boolean(item) && item !== '(empty)');
+
+    if (items.length > 0) {
+      return items.join(', ');
+    }
+
+    return value.length > 0 ? `${value.length} items selected` : '(empty)';
   }
 
-  if (value === '') {
-    return '(empty)';
+  if (isRecord(value)) {
+    const preferredKeys = [
+      'displayName',
+      'name',
+      'label',
+      'value',
+      'key',
+      'emailAddress',
+      'accountId',
+      'id'
+    ] as const;
+
+    for (const key of preferredKeys) {
+      const candidate = value[key];
+      if (typeof candidate === 'string' && candidate.trim()) {
+        return candidate;
+      }
+    }
   }
 
-  if (value && typeof value === 'object') {
-    if ('name' in value && typeof value.name === 'string') return value.name;
-    if ('value' in value && typeof value.value === 'string') return value.value;
-    if ('id' in value && typeof value.id === 'string') return value.id;
-    return JSON.stringify(value);
+  return null;
+}
+
+function resolveAllowedValueLabel(
+  field: JiraField | undefined,
+  value: unknown
+): string | null {
+  if (!field?.allowed_values?.length) return null;
+
+  const rawCandidate = extractNamedValue(value);
+  if (!rawCandidate) return null;
+
+  const match = field.allowed_values.find((option: JiraFieldOption) =>
+    [option.id, option.name, option.value, option.label]
+      .filter((candidate): candidate is string => Boolean(candidate))
+      .includes(rawCandidate)
+  );
+
+  return match?.name || match?.value || match?.label || null;
+}
+
+function resolvePreviewFieldValue(
+  key: string,
+  resolvedValue: ResolvedFieldValue,
+  field: JiraField | undefined,
+  bugExtraFields: BugReport['extra_fields'] | undefined,
+  fieldDefaults: Record<string, unknown>,
+  projectKey: string | undefined
+): string {
+  if (key === 'project' && projectKey) {
+    return projectKey;
   }
 
-  return String(value);
+  const fallbackValue = bugExtraFields?.[key] ?? fieldDefaults[key];
+
+  const preferredDisplay =
+    resolveAllowedValueLabel(field, fallbackValue) ??
+    extractNamedValue(fallbackValue);
+  if (preferredDisplay) {
+    return preferredDisplay;
+  }
+
+  const resolvedDisplay =
+    resolveAllowedValueLabel(field, resolvedValue) ??
+    extractNamedValue(resolvedValue);
+  if (resolvedDisplay) {
+    return resolvedDisplay;
+  }
+
+  if (isRecord(resolvedValue)) {
+    return JSON.stringify(resolvedValue);
+  }
+
+  return '(empty)';
 }
 
 function formatStepsForPreview(stepsText: string | undefined): string {
@@ -47,12 +137,24 @@ function formatStepsForPreview(stepsText: string | undefined): string {
 }
 
 const PreviewView: React.FC = () => {
-  const { session, updateSession, ai: { submitBugs } } = useBugMind();
+  const { session, updateSession, ai: { submitBugs, preparePreviewBug } } = useBugMind();
+  const restoredPreviewRef = useRef<number | null>(null);
   
   const bugIndex = session.previewBugIndex;
   const bug = bugIndex !== null ? session.bugs[bugIndex] : null;
+  const totalBugs = session.bugs.length;
   const resolved = session.resolvedPayload?.fields;
-  const resolvedSummary = hasResolvedField(resolved, 'summary') ? formatResolvedFieldValue(resolved.summary) : bug?.summary ?? '';
+  const projectKey = session.jiraMetadata?.project_key || session.issueData?.key.split('-')[0];
+  const resolvedSummary = hasResolvedField(resolved, 'summary')
+    ? resolvePreviewFieldValue(
+        'summary',
+        resolved.summary,
+        session.jiraMetadata?.fields.find(f => f.key === 'summary'),
+        bug?.extra_fields,
+        session.fieldDefaults,
+        projectKey
+      )
+    : bug?.summary ?? '';
   const previewDescription = bug?.description ?? '';
   const previewSteps = formatStepsForPreview(bug?.steps_to_reproduce);
   
@@ -73,9 +175,24 @@ const PreviewView: React.FC = () => {
   }
 
   const isValid = session.validationErrors.length === 0;
+  const canGoPrevious = bugIndex !== null && bugIndex > 0;
+  const canGoNext = bugIndex !== null && bugIndex < totalBugs - 1;
+
+  useEffect(() => {
+    if (session.view !== 'preview' || bugIndex === null || !bug) {
+      restoredPreviewRef.current = null;
+      return;
+    }
+
+    if (resolved || session.loading) return;
+    if (restoredPreviewRef.current === bugIndex) return;
+
+    restoredPreviewRef.current = bugIndex;
+    preparePreviewBug(bugIndex);
+  }, [bug, bugIndex, preparePreviewBug, resolved, session.loading, session.view]);
 
   return (
-    <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500 pb-48">
+    <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500 pb-40">
       {/* Header */}
       <SurfaceCard className="flex items-center justify-between px-4 py-3.5">
         <button 
@@ -85,16 +202,43 @@ const PreviewView: React.FC = () => {
           <ArrowLeft size={16} className="group-hover:-translate-x-1 transition-transform" />
           <span className="text-[10px] font-black uppercase tracking-widest">Back to Findings</span>
         </button>
-        <div className="flex items-center gap-2 bg-[var(--surface-soft)] border border-[var(--card-border)] px-3 py-1.5 rounded-full">
-          <div className={`w-2 h-2 rounded-full ${isValid ? 'bg-[var(--status-success)]' : 'bg-[var(--status-warning)] animate-pulse'}`}></div>
-          <span className="text-[9px] font-black uppercase tracking-widest text-[var(--text-muted)]">Jira Preview</span>
+        <div className="flex items-center gap-2">
+          {totalBugs > 1 && (
+            <div className="flex items-center gap-1 rounded-full border border-[var(--card-border)] bg-[var(--surface-soft)] p-1">
+              <button
+                type="button"
+                onClick={() => bugIndex !== null && preparePreviewBug(bugIndex - 1)}
+                disabled={!canGoPrevious}
+                className="flex h-7 w-7 items-center justify-center rounded-full text-[var(--text-muted)] hover:text-[var(--text-main)] disabled:opacity-35 disabled:cursor-not-allowed"
+                aria-label="Preview previous bug"
+              >
+                <ChevronLeft size={14} />
+              </button>
+              <span className="min-w-[52px] text-center text-[9px] font-black uppercase tracking-widest text-[var(--text-muted)]">
+                {bugIndex! + 1} / {totalBugs}
+              </span>
+              <button
+                type="button"
+                onClick={() => bugIndex !== null && preparePreviewBug(bugIndex + 1)}
+                disabled={!canGoNext}
+                className="flex h-7 w-7 items-center justify-center rounded-full text-[var(--text-muted)] hover:text-[var(--text-main)] disabled:opacity-35 disabled:cursor-not-allowed"
+                aria-label="Preview next bug"
+              >
+                <ChevronRight size={14} />
+              </button>
+            </div>
+          )}
+          <div className="flex items-center gap-2 bg-[var(--surface-soft)] border border-[var(--card-border)] px-3 py-1.5 rounded-full">
+            <div className={`w-2 h-2 rounded-full ${isValid ? 'bg-[var(--status-success)]' : 'bg-[var(--status-warning)] animate-pulse'}`}></div>
+            <span className="text-[9px] font-black uppercase tracking-widest text-[var(--text-muted)]">Jira Preview</span>
+          </div>
         </div>
       </SurfaceCard>
 
       <div className="space-y-4">
         <h2 className="text-lg font-black text-[var(--text-main)] tracking-tight">Jira Preview</h2>
         <p className="text-[11px] text-[var(--text-muted)] leading-relaxed">
-          This is exactly how your bug will look in <span className="font-bold text-[var(--status-info)]">Jira {session.issueData?.key.split('-')[0]}</span>. 
+          This is exactly how {totalBugs > 1 ? 'this bug' : 'your bug'} will look in <span className="font-bold text-[var(--status-info)]">Jira {session.issueData?.key.split('-')[0]}</span>. 
           Use the <span className="font-bold">Edit Manually</span> button below to change individual fields.
         </p>
       </div>
@@ -181,7 +325,14 @@ const PreviewView: React.FC = () => {
               {Object.entries(resolved).map(([key, val]) => {
                 if (key === 'summary' || key === 'description' || key === 'issuetype' || val === null || val === undefined) return null;
                 const field = session.jiraMetadata?.fields.find(f => f.key === key);
-                const displayVal = formatResolvedFieldValue(val);
+                const displayVal = resolvePreviewFieldValue(
+                  key,
+                  val,
+                  field,
+                  bug.extra_fields,
+                  session.fieldDefaults,
+                  projectKey
+                );
 
                 return (
                   <div key={key} className="flex flex-col gap-1 bg-[var(--bg-app)]/50 p-3 rounded-[1.25rem] border border-[var(--border-main)]/30">
@@ -196,13 +347,13 @@ const PreviewView: React.FC = () => {
       </SurfaceCard>
 
       {/* Action Bar */}
-      <div className="fixed bottom-8 left-0 w-full p-4 bg-gradient-to-t from-[var(--bg-app)] via-[var(--bg-app)]/95 to-transparent pt-10 z-[60]">
+      <div className="fixed bottom-12 left-0 w-full px-4 pt-6 pb-3 bg-gradient-to-t from-[var(--bg-app)] via-[var(--bg-app)]/96 to-transparent z-[60]">
         <div className="flex gap-3">
           <ActionButton
             onClick={() => updateSession({ view: 'main', expandedBug: bugIndex })}
             variant="secondary"
             tone="neutral"
-            className="flex-1 py-4 rounded-[1.5rem] text-[10px]"
+            className="flex-1 h-12 rounded-[1.35rem] text-[10px]"
           >
             Edit Manually
           </ActionButton>
@@ -210,7 +361,7 @@ const PreviewView: React.FC = () => {
             onClick={() => submitBugs(bugIndex!)}
             disabled={!isValid || session.loading}
             variant="primary"
-            className="flex-[2] py-4 rounded-[1.5rem] text-[10px]"
+            className="flex-[2] h-12 rounded-[1.35rem] text-[10px]"
           >
             {session.loading ? (
               <span className="flex items-center gap-2">
@@ -225,6 +376,18 @@ const PreviewView: React.FC = () => {
             )}
           </ActionButton>
         </div>
+        {totalBugs > 1 && (
+          <div className="mt-2.5">
+            <ActionButton
+              onClick={() => submitBugs()}
+              disabled={session.loading}
+              variant="secondary"
+              className="w-full h-11 rounded-[1.35rem] text-[10px]"
+            >
+              Publish All {totalBugs} Bugs
+            </ActionButton>
+          </div>
+        )}
       </div>
     </div>
   );

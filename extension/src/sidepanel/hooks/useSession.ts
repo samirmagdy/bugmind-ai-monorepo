@@ -18,7 +18,6 @@ function stripEphemeralJiraState(session: Partial<TabSession>): Partial<TabSessi
   delete sanitized.jiraMetadata;
   delete sanitized.visibleFields;
   delete sanitized.aiMapping;
-  delete sanitized.previewBugIndex;
   delete sanitized.validationErrors;
   delete sanitized.resolvedPayload;
 
@@ -112,6 +111,20 @@ export function useSession(log?: (tag: string, msg: string) => void) {
         }
       } catch (err) {
         console.error('Failed to load bugs from IndexedDB', err);
+      }
+
+      if (
+        sessionData.view === 'preview' &&
+        (sessionData.previewBugIndex === null ||
+          sessionData.previewBugIndex === undefined ||
+          sessionData.previewBugIndex < 0 ||
+          sessionData.previewBugIndex >= sessionData.bugs.length)
+      ) {
+        sessionData = {
+          ...sessionData,
+          view: 'main',
+          previewBugIndex: null
+        };
       }
 
       setTabSessions((prev: Record<number, TabSession>) => ({
