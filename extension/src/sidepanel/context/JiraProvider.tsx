@@ -360,7 +360,7 @@ export const JiraProvider: React.FC<{
       logDebug('CONN-UPDATE-ERR', String(err));
       return false;
     }
-  }, [apiBase, authToken, fetchConnections, logDebug, refreshAuthToken]);
+  }, [apiBase, authToken, fetchConnections, logDebug, refreshAuthToken, updateSession]);
 
   const fetchProjects = useCallback(async (id: number): Promise<JiraProject[]> => {
     if (!authToken) return [];

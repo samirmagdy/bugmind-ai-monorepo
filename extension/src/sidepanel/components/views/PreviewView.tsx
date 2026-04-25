@@ -157,7 +157,20 @@ const PreviewView: React.FC = () => {
     : bug?.summary ?? '';
   const previewDescription = bug?.description ?? '';
   const previewSteps = formatStepsForPreview(bug?.steps_to_reproduce);
-  
+
+  useEffect(() => {
+    if (session.view !== 'preview' || bugIndex === null || !bug) {
+      restoredPreviewRef.current = null;
+      return;
+    }
+
+    if (resolved || session.loading) return;
+    if (restoredPreviewRef.current === bugIndex) return;
+
+    restoredPreviewRef.current = bugIndex;
+    preparePreviewBug(bugIndex);
+  }, [bug, bugIndex, preparePreviewBug, resolved, session.loading, session.view]);
+
   if (!bug) {
     return (
       <SurfaceCard className="flex flex-col items-center justify-center h-full py-12 text-center">
@@ -177,19 +190,6 @@ const PreviewView: React.FC = () => {
   const isValid = session.validationErrors.length === 0;
   const canGoPrevious = bugIndex !== null && bugIndex > 0;
   const canGoNext = bugIndex !== null && bugIndex < totalBugs - 1;
-
-  useEffect(() => {
-    if (session.view !== 'preview' || bugIndex === null || !bug) {
-      restoredPreviewRef.current = null;
-      return;
-    }
-
-    if (resolved || session.loading) return;
-    if (restoredPreviewRef.current === bugIndex) return;
-
-    restoredPreviewRef.current = bugIndex;
-    preparePreviewBug(bugIndex);
-  }, [bug, bugIndex, preparePreviewBug, resolved, session.loading, session.view]);
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500 pb-40">
