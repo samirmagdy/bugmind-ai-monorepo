@@ -22,7 +22,9 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     FRONTEND_URL: str = "http://localhost:3000"
     CORS_ORIGINS: str = ""
+    EXTENSION_ORIGINS: str = ""
     ALLOWED_HOSTS: str = ""
+    EXPOSE_API_DOCS: bool = False
     ALLOW_INSECURE_JIRA_SSL: bool = False
     ALLOW_PRIVATE_JIRA_HOSTS: bool = False
     LOG_LEVEL: str = "INFO"
@@ -72,8 +74,21 @@ class Settings(BaseSettings):
         raw = (self.CORS_ORIGINS or "").strip()
         if raw:
             origins.extend([origin.strip().rstrip("/") for origin in raw.split(",") if origin.strip()])
+
+        origins.extend(self.extension_origins_list)
             
         return list(set(origins))  # Unique origins only
+
+    @property
+    def extension_origins_list(self) -> list[str]:
+        raw = (self.EXTENSION_ORIGINS or "").strip()
+        if not raw:
+            return []
+        return list({
+            origin.strip().rstrip("/")
+            for origin in raw.split(",")
+            if origin.strip()
+        })
 
     @property
     def allowed_hosts_list(self) -> list[str]:
@@ -93,6 +108,10 @@ class Settings(BaseSettings):
         if self.ALLOW_PRIVATE_JIRA_HOSTS:
             return True
         return not self.is_production
+
+    @property
+    def docs_enabled(self) -> bool:
+        return self.EXPOSE_API_DOCS or not self.is_production
 
     class Config:
         env_file = str(Path(__file__).resolve().parents[3] / ".env")

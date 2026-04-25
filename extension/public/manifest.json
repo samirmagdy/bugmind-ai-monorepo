@@ -11,9 +11,9 @@
     "scripting"
   ],
   "host_permissions": [
-    "*://*.atlassian.net/*",
-    "*://*.atlassian.net/browse/*",
-    "*://*.atlassian.net/issues/*",
+    "https://*.atlassian.net/*"
+  ],
+  "optional_host_permissions": [
     "*://*/browse/*",
     "*://*/issues/*",
     "*://*/rest/api/*"
@@ -30,7 +30,7 @@
   },
   "content_scripts": [
     {
-      "matches": ["*://*.atlassian.net/browse/*", "*://*/browse/*", "*://*.atlassian.net/issues/*"],
+      "matches": ["https://*.atlassian.net/browse/*", "https://*.atlassian.net/issues/*"],
       "js": ["assets/content.js"]
     }
   ],

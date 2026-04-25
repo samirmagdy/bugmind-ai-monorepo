@@ -36,6 +36,22 @@ function inferPlatformFromUrl(url: string): 'cloud' | 'server' {
   return url.includes('.atlassian.net') ? 'cloud' : 'server';
 }
 
+async function ensureOptionalJiraPermissions(baseUrl: string, authType: 'cloud' | 'server'): Promise<boolean> {
+  if (authType === 'cloud') return true;
+
+  try {
+    const origin = new URL(normalizeJiraUrl(baseUrl)).origin;
+    const origins = [`${origin}/browse/*`, `${origin}/issues/*`, `${origin}/rest/api/*`];
+
+    const contains = await chrome.permissions.contains({ origins });
+    if (contains) return true;
+
+    return await chrome.permissions.request({ origins });
+  } catch {
+    return false;
+  }
+}
+
 function resolveConnectionForUrl(connections: JiraConnection[], targetUrl: string | null | undefined): JiraConnection | undefined {
   const normalizedTarget = normalizeJiraUrl(targetUrl);
   if (!normalizedTarget) return connections.find(c => c.is_active) || connections[0];
@@ -316,6 +332,19 @@ export const JiraProvider: React.FC<{
   const updateConnection = useCallback(async (id: number, updates: Record<string, unknown>): Promise<boolean> => {
     if (!authToken) return false;
     try {
+      const nextHost = typeof updates.host_url === 'string' ? updates.host_url : null;
+      const nextAuthType = updates.auth_type === 'cloud' || updates.auth_type === 'server'
+        ? updates.auth_type
+        : null;
+      if (nextHost && nextAuthType) {
+        const granted = await ensureOptionalJiraPermissions(nextHost, nextAuthType);
+        if (!granted) {
+          logDebug('CONN-PERMS-ERR', `Optional Jira permissions denied for ${nextHost}`);
+          updateSession({ error: 'Optional permission for this Jira host was denied.' });
+          return false;
+        }
+      }
+
       const res = await apiRequest(`${apiBase}/jira/connections/${id}`, {
         method: 'PATCH',
         token: authToken,
@@ -445,6 +474,13 @@ export const JiraProvider: React.FC<{
     updateSession({ loading: true });
     logDebug('JIRA-CONN', `Creating new connection to ${config.base_url}...`);
     try {
+      const granted = await ensureOptionalJiraPermissions(config.base_url, config.auth_type);
+      if (!granted) {
+        logDebug('JIRA-PERMS-ERR', `Optional Jira permissions denied for ${config.base_url}`);
+        updateSession({ error: 'Optional permission for this Jira host was denied.' });
+        return false;
+      }
+
       const payload: JiraConnectionCreateRequestPayload = {
         host_url: config.base_url.replace(/\/$/, ''),
         username: config.username,

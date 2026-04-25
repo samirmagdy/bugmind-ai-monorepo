@@ -14,6 +14,17 @@ class BugGenerator:
     def __init__(self, api_key: Optional[str] = None):
         self.ai_client = OpenRouterClient(api_key=api_key)
 
+    def _sanitize_for_ai(self, text: str) -> str:
+        if not text:
+            return text
+
+        sanitized = text
+        sanitized = re.sub(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", "[REDACTED_EMAIL]", sanitized, flags=re.IGNORECASE)
+        sanitized = re.sub(r"\b(?:Bearer\s+)?[A-Za-z0-9_\-]{20,}\b", "[REDACTED_TOKEN]", sanitized, flags=re.IGNORECASE)
+        sanitized = re.sub(r"\b\d{7,}\b", "[REDACTED_NUMBER]", sanitized)
+        sanitized = re.sub(r"([?&](?:token|access_token|refresh_token|api[_-]?key|apikey|auth|authorization)=)[^&\s]+", r"\1[REDACTED_TOKEN]", sanitized, flags=re.IGNORECASE)
+        return sanitized
+
     def _get_message_content(self, response: Dict[str, Any]) -> str:
         choices = response.get("choices") or []
         if not choices:
@@ -217,10 +228,10 @@ class BugGenerator:
         """
 
         try:
-            truncated_context = self._truncate_context(context_text)
+            truncated_context = self._truncate_context(self._sanitize_for_ai(context_text))
             user_prompt = f"Story Context:\n{truncated_context}"
             if user_description:
-                user_prompt += f"\n\nUser's Bug Observation:\n{self._truncate_context(user_description, 2000)}"
+                user_prompt += f"\n\nUser's Bug Observation:\n{self._truncate_context(self._sanitize_for_ai(user_description), 2000)}"
             return await self._generate_and_parse_json(system_prompt, user_prompt, model=model)
         except HTTPException:
             raise
@@ -255,7 +266,7 @@ class BugGenerator:
         """
 
         try:
-            truncated_context = self._truncate_context(context_text)
+            truncated_context = self._truncate_context(self._sanitize_for_ai(context_text))
             user_prompt = f"Story Context:\n{truncated_context}"
             try:
                 return await self._generate_and_parse_json(

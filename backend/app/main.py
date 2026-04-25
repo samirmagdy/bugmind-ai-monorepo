@@ -1,6 +1,7 @@
 import logging
 import traceback
 import time
+from urllib.parse import urlparse
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
@@ -19,10 +20,21 @@ from app.core.logging import configure_logging
 configure_logging()
 logger = logging.getLogger("bugmind.http")
 
+
+def _normalize_request_origin(raw_origin: str) -> str:
+    if not raw_origin:
+        return ""
+    parsed = urlparse(raw_origin)
+    if parsed.scheme and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
+    return raw_origin.rstrip("/")
+
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
-    openapi_url=f"{settings.API_V1_STR}/openapi.json"
+    openapi_url=f"{settings.API_V1_STR}/openapi.json" if settings.docs_enabled else None,
+    docs_url="/docs" if settings.docs_enabled else None,
+    redoc_url="/redoc" if settings.docs_enabled else None,
 )
 
 app.add_exception_handler(HTTPException, http_exception_handler)
@@ -73,17 +85,16 @@ async def add_security_headers(request: Request, call_next):
     
     # Strict Origin Validation in Production
     if settings.is_production and request.method != "GET":
-        allowed_extension_prefix = "chrome-extension://"
-        origin = request.headers.get("Origin") or request.headers.get("Referer")
+        origin = _normalize_request_origin(request.headers.get("Origin") or request.headers.get("Referer") or "")
         
-        # If origin is provided, it must be from an extension
-        if origin and not origin.startswith(allowed_extension_prefix):
-             # Highly sensitive: we might want to log this attempt
-             logger.warning("security_alert unauthorized_origin_attempt origin=%s request_id=%s", origin, request_id)
-             return JSONResponse(
-                 status_code=403, 
-                 content={"detail": "Unauthorized request origin"}
-             )
+        if origin:
+            allowed_origins = set(settings.extension_origins_list + settings.cors_origins_list)
+            if origin not in allowed_origins:
+                logger.warning("security_alert unauthorized_origin_attempt origin=%s request_id=%s", origin, request_id)
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": "Unauthorized request origin"}
+                )
 
     started_at = time.perf_counter()
     response: Response = await call_next(request)
@@ -149,7 +160,7 @@ async def startup_event():
 
 @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
 def root_redirect():
-    return RedirectResponse(url="/docs")
+    return RedirectResponse(url="/docs" if settings.docs_enabled else "/health")
 
 @app.get("/health", tags=["System"])
 @app.get("/health ", tags=["System"], include_in_schema=False)
