@@ -6,7 +6,7 @@ from app.services.jira.adapters.base import JiraAdapter
 from redis.exceptions import RedisError
 
 class JiraMetadataEngine:
-    FIELD_SCHEMA_CACHE_VERSION = "v2"
+    FIELD_SCHEMA_CACHE_VERSION = "v3"
 
     def __init__(self, adapter: JiraAdapter):
         self.adapter = adapter

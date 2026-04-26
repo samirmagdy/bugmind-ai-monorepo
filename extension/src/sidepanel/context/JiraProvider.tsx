@@ -73,6 +73,8 @@ function buildProjectIdentity(projectKey: string, projectId?: string): string {
   return projectId || projectKey;
 }
 
+const FRONTEND_METADATA_CACHE_VERSION = 'v2';
+
 export const JiraProvider: React.FC<{ 
   children: React.ReactNode, 
   logDebug: (tag: string, msg: string) => void,
@@ -150,7 +152,7 @@ export const JiraProvider: React.FC<{
     const requestIssueTypeId = issueTypeId || undefined;
     const cacheKey = `bootstrap-${normalizedUrl}-${projectIdentity}-${requestIssueTypeId || 'default'}`;
     const fetchKey = `bootstrap-${normalizedUrl}-${projectIdentity}`;
-    const metadataCacheKey = projectKey ? `metadata-${projectIdentity}-${requestIssueTypeId || 'default'}` : '';
+    const metadataCacheKey = projectKey ? `metadata-${FRONTEND_METADATA_CACHE_VERSION}-${projectIdentity}-${requestIssueTypeId || 'default'}` : '';
 
     if (!force) {
       const inFlight = bootstrapPromiseRef.current.get(cacheKey);
