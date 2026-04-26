@@ -8,7 +8,7 @@ class IssueContext(BaseModel):
     description: str = ""
     acceptance_criteria: str = ""
 
-class BugGenerationRequest(BaseModel):
+class AIWorkItemGenerationRequest(BaseModel):
     selected_text: Optional[str] = None
     issue_context: Optional[IssueContext] = None
     jira_connection_id: int
@@ -29,7 +29,7 @@ class StructBugField(BaseModel):
     field_id: str
     value: Any
 
-class GeneratedBugResponse(BaseModel):
+class GeneratedFindingResponse(BaseModel):
     summary: str
     description: str
     steps_to_reproduce: str
@@ -69,10 +69,17 @@ class GapAnalysisSummary(BaseModel):
     ac_coverage_map: List[AnalysisCoverageItem] = []
 
 
-class BugGenerationResponse(BaseModel):
-    bugs: List[GeneratedBugResponse]
-    ac_coverage: float
+class FindingGenerationResponse(BaseModel):
+    bugs: List[GeneratedFindingResponse]
     warnings: List[str] = []
+
+
+class ManualBugGenerationResponse(FindingGenerationResponse):
+    pass
+
+
+class GapAnalysisResponse(FindingGenerationResponse):
+    ac_coverage: float
     analysis_summary: Optional[GapAnalysisSummary] = None
 
 
@@ -166,3 +173,9 @@ class XrayTestSuitePublishResponse(BaseModel):
     repository_path_field_id: Optional[str] = None
     link_type_used: Optional[str] = None
     warnings: List[str] = []
+
+
+# Backward-compatible aliases while the rest of the codebase migrates.
+BugGenerationRequest = AIWorkItemGenerationRequest
+GeneratedBugResponse = GeneratedFindingResponse
+BugGenerationResponse = GapAnalysisResponse

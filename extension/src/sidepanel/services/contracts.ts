@@ -136,7 +136,7 @@ export interface AuthBootstrapResponsePayload {
   } | null;
 }
 
-export interface GeneratedBugResponsePayload {
+export interface GeneratedFindingResponsePayload {
   summary: string;
   description: string;
   steps_to_reproduce: string;
@@ -152,10 +152,15 @@ export interface GeneratedBugResponsePayload {
   fields?: Record<string, unknown>;
 }
 
-export interface AIGenerationResponsePayload {
-  bugs: GeneratedBugResponsePayload[];
-  ac_coverage?: number;
+export interface FindingGenerationResponsePayload {
+  bugs: GeneratedFindingResponsePayload[];
   warnings?: string[];
+}
+
+export interface ManualBugGenerationResponsePayload extends FindingGenerationResponsePayload {}
+
+export interface GapAnalysisResponsePayload extends FindingGenerationResponsePayload {
+  ac_coverage?: number;
   analysis_summary?: GapAnalysisSummary | null;
 }
 

@@ -11,8 +11,9 @@ from app.models.jira import JiraConnection, JiraFieldMapping
 from app.models.subscription import Subscription, PlanType
 from app.models.usage import UsageLog
 from app.schemas.bug import (
-    BugGenerationRequest,
-    BugGenerationResponse,
+    AIWorkItemGenerationRequest,
+    GapAnalysisResponse,
+    ManualBugGenerationResponse,
     PreviewPreparationRequest,
     PreviewPreparationResponse,
     SubmitBugsRequest,
@@ -312,69 +313,28 @@ def _validate_payload(schema: list, payload_fields: dict) -> List[Dict]:
             })
     return missing_fields
 
-@router.get("/usage")
-def get_usage(
-    db: Session = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user)
+
+async def _generate_findings_response(
+    req: AIWorkItemGenerationRequest,
+    db: Session,
+    current_user: User,
+    include_analysis_summary: bool,
 ):
-    sub = db.query(Subscription).filter(Subscription.user_id == current_user.id).first()
-    if not sub:
-        raise HTTPException(status_code=404, detail="Subscription not found")
-
-    now = datetime.utcnow()
-    first_day = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    usage_count = db.query(UsageLog).filter(
-        UsageLog.user_id == current_user.id,
-        UsageLog.created_at >= first_day
-    ).count()
-
-    if sub.plan == PlanType.FREE:
-        limit = LimitChecker.FREE_LIMIT
-        remaining = max(limit - usage_count, 0)
-    else:
-        limit = 999999
-        remaining = max(limit - usage_count, 0)
-
-    return {
-        "count": usage_count,
-        "limit": limit,
-        "remaining": remaining,
-        "plan": sub.plan.value
-    }
-
-@router.post("/generate", response_model=BugGenerationResponse)
-async def generate_bug_report(
-    request: Request,
-    req: BugGenerationRequest,
-    db: Session = Depends(deps.get_db), 
-    current_user: User = Depends(deps.get_current_user)
-):
-    rate_limiter.check("ai.generate", str(current_user.id), limit=10, window_seconds=60)
-    # 1. Enforce Subscription Limits
-    LimitChecker.check_and_increment(db, current_user.id, "/generate", 0)
-
-    # 2. Get Jira Schema
     if not (req.project_id or req.project_key) or not req.issue_type_id:
         raise HTTPException(
             status_code=400,
             detail="Missing Jira context (Project or Issue Type). Please ensure you are on a valid Jira issue tab."
         )
 
-    conn = db.query(JiraConnection).filter(
-        JiraConnection.id == req.jira_connection_id, 
-        JiraConnection.user_id == current_user.id
-    ).first()
-    if not conn:
-        raise HTTPException(status_code=404, detail="Jira connection not found")
+    conn = _get_owned_connection(db, current_user.id, req.jira_connection_id)
     _assert_connection_matches_instance(conn, req.instance_url)
-        
+
     adapter = get_adapter(conn)
     engine = JiraMetadataEngine(adapter)
     schema_project_id = req.project_id or req.project_key
     try:
         schema = engine.get_field_schema(schema_project_id, req.issue_type_id)
     except HTTPException as e:
-        # Re-wrap Jira errors with better context
         if e.status_code == 400:
             raise HTTPException(
                 status_code=400,
@@ -382,7 +342,6 @@ async def generate_bug_report(
             )
         raise e
 
-    # 3. Request AI Generation
     custom_api_key = None
     if current_user.encrypted_ai_api_key:
         custom_api_key = decrypt_credential(current_user.encrypted_ai_api_key)
@@ -391,7 +350,7 @@ async def generate_bug_report(
     story_context = _compose_story_context(req.selected_text, req.issue_context)
     ai_raw = await generator.generate_bug(
         story_context,
-        schema, 
+        schema,
         issue_type_name=req.issue_type_name,
         model=req.model or current_user.custom_ai_model,
         user_description=req.user_description,
@@ -407,10 +366,9 @@ async def generate_bug_report(
         ai_bugs_raw = [ai_raw]
     ai_bugs_raw, overlap_warnings = _annotate_bug_overlaps(ai_bugs_raw)
 
-    # 4. Resolve Fields (Mapping)
     mapping_record = _get_field_mapping_record(db, current_user.id, req.project_key, req.project_id, req.issue_type_id)
     mapping_config = mapping_record.field_mappings if mapping_record else {}
-    
+
     platform = "server" if isinstance(adapter, JiraServerAdapter) else "cloud"
     resolver = JiraFieldResolver(mapping_config, schema, platform=platform)
     resolved_bugs = []
@@ -454,16 +412,63 @@ async def generate_bug_report(
     elif not isinstance(ai_warnings, list):
         ai_warnings = []
 
-    analysis_summary = ai_raw.get("analysis_summary")
-    if not isinstance(analysis_summary, dict):
-        analysis_summary = None
+    warnings = list(dict.fromkeys([*ai_warnings, *overlap_warnings]))
+    if include_analysis_summary:
+        analysis_summary = ai_raw.get("analysis_summary")
+        if not isinstance(analysis_summary, dict):
+            analysis_summary = None
+        return GapAnalysisResponse(
+            bugs=resolved_bugs,
+            ac_coverage=ai_raw.get("ac_coverage", 0.0),
+            warnings=warnings,
+            analysis_summary=analysis_summary,
+        )
 
-    response = BugGenerationResponse(
+    return ManualBugGenerationResponse(
         bugs=resolved_bugs,
-        ac_coverage=ai_raw.get("ac_coverage", 0.0),
-        warnings=list(dict.fromkeys([*ai_warnings, *overlap_warnings])),
-        analysis_summary=analysis_summary,
+        warnings=warnings,
     )
+
+@router.get("/usage")
+def get_usage(
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    sub = db.query(Subscription).filter(Subscription.user_id == current_user.id).first()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+
+    now = datetime.utcnow()
+    first_day = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    usage_count = db.query(UsageLog).filter(
+        UsageLog.user_id == current_user.id,
+        UsageLog.created_at >= first_day
+    ).count()
+
+    if sub.plan == PlanType.FREE:
+        limit = LimitChecker.FREE_LIMIT
+        remaining = max(limit - usage_count, 0)
+    else:
+        limit = 999999
+        remaining = max(limit - usage_count, 0)
+
+    return {
+        "count": usage_count,
+        "limit": limit,
+        "remaining": remaining,
+        "plan": sub.plan.value
+    }
+
+@router.post("/generate", response_model=GapAnalysisResponse)
+async def generate_bug_report(
+    request: Request,
+    req: AIWorkItemGenerationRequest,
+    db: Session = Depends(deps.get_db), 
+    current_user: User = Depends(deps.get_current_user)
+):
+    rate_limiter.check("ai.generate", str(current_user.id), limit=10, window_seconds=60)
+    LimitChecker.check_and_increment(db, current_user.id, "/generate", 0)
+    response = await _generate_findings_response(req, db, current_user, include_analysis_summary=True)
     log_audit(
         "ai.generate",
         current_user.id,
@@ -475,10 +480,34 @@ async def generate_bug_report(
     )
     return response
 
+
+@router.post("/generate/manual", response_model=ManualBugGenerationResponse)
+async def generate_manual_bug_report(
+    request: Request,
+    req: AIWorkItemGenerationRequest,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    rate_limiter.check("ai.generate", str(current_user.id), limit=10, window_seconds=60)
+    LimitChecker.check_and_increment(db, current_user.id, "/generate", 0)
+
+    response = await _generate_findings_response(req, db, current_user, include_analysis_summary=False)
+    log_audit(
+        "ai.generate.manual",
+        current_user.id,
+        db=db,
+        jira_connection_id=req.jira_connection_id,
+        project_key=req.project_key,
+        issue_type_id=req.issue_type_id,
+        request_path=str(request.url.path),
+        generated_count=len(response.bugs),
+    )
+    return response
+
 @router.post("/test-cases", response_model=TestSuiteResponse)
 async def generate_test_suite(
     request: Request,
-    req: BugGenerationRequest,
+    req: AIWorkItemGenerationRequest,
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user)
 ):

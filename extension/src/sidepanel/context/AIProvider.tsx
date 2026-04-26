@@ -3,7 +3,8 @@ import { TabSession, BugReport, Usage, INITIAL_SESSION, TestCase, MissingField, 
 import { ApiError, apiRequest, getErrorMessage, readJsonResponse, throwApiErrorResponse } from '../services/api';
 import {
   AIGenerationRequestPayload,
-  AIGenerationResponsePayload,
+  GapAnalysisResponsePayload,
+  ManualBugGenerationResponsePayload,
   AIPreviewRequestPayload,
   AIPreviewResponsePayload,
   AISubmitRequestPayload,
@@ -15,7 +16,7 @@ import {
   UsageResponsePayload,
   XrayPublishRequestPayload,
   XrayPublishResponsePayload,
-  GeneratedBugResponsePayload,
+  GeneratedFindingResponsePayload,
   buildIssueContextPayload,
   buildProjectRequestParams,
 } from '../services/contracts';
@@ -152,7 +153,7 @@ export const AIProvider: React.FC<{
     return sanitizeExtraFields((session.fieldDefaults || {}) as BugReport['extra_fields']);
   }, [sanitizeExtraFields, session.fieldDefaults]);
 
-  const toFrontendBug = useCallback((bug: GeneratedBugResponsePayload): BugReport => ({
+  const toFrontendBug = useCallback((bug: GeneratedFindingResponsePayload): BugReport => ({
     summary: bug.summary,
     description: bug.description,
     steps_to_reproduce: bug.steps_to_reproduce || '',
@@ -355,7 +356,7 @@ export const AIProvider: React.FC<{
         await throwApiErrorResponse(res, `Failed to generate analytical report (${res.status})`);
       }
 
-      const data = await readJsonResponse<AIGenerationResponsePayload>(res);
+      const data = await readJsonResponse<GapAnalysisResponsePayload>(res);
       const bugs = (data.bugs || []).map(toFrontendBug);
 
       updateSession({
@@ -510,7 +511,7 @@ export const AIProvider: React.FC<{
             buildArtifactContextFromList(manualInput.supportingArtifacts || [])
           ].filter(Boolean).join('\n\n')
         };
-        const res = await apiRequest(`${apiBase}/ai/generate`, {
+        const res = await apiRequest(`${apiBase}/ai/generate/manual`, {
           method: 'POST',
           token: authToken,
           onUnauthorized: refreshAuthToken,
@@ -521,7 +522,7 @@ export const AIProvider: React.FC<{
           await throwApiErrorResponse(res, `Manual processing failed (${res.status})`);
         }
 
-        const data = await readJsonResponse<AIGenerationResponsePayload>(res);
+        const data = await readJsonResponse<ManualBugGenerationResponsePayload>(res);
         const generated = (data.bugs || []).map(toFrontendBug);
         if (generated.length > 0) {
           generatedBugs.push(generated[0]);
@@ -581,7 +582,7 @@ export const AIProvider: React.FC<{
       if (!res.ok) {
         await throwApiErrorResponse(res, `Failed to refine finding (${res.status})`);
       }
-      const data = await readJsonResponse<AIGenerationResponsePayload>(res);
+      const data = await readJsonResponse<GapAnalysisResponsePayload>(res);
       const regenerated = (data.bugs || []).map(toFrontendBug)[0];
       if (!regenerated || !currentTabId) return;
 
@@ -691,10 +692,15 @@ export const AIProvider: React.FC<{
       const data = await readJsonResponse<AISubmitResponsePayload>(res);
       updateSession({
         view: 'success',
+        mainWorkflow: 'home',
         createdIssues: (data.created_issues || []).map((issue) => ({
           ...issue,
           linkedToStory: !(data.unlinked_issue_keys || []).includes(issue.key)
         })),
+        previewBugIndex: null,
+        resolvedPayload: null,
+        validationErrors: [],
+        expandedBug: null,
         success: data.warnings?.length ? data.warnings.join(' ') : null,
       });
     } catch (err: unknown) {

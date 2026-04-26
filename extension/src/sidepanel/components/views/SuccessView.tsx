@@ -46,7 +46,24 @@ const SuccessView: React.FC = () => {
         )}
       </div>
       <ActionButton
-        onClick={() => { updateSession({ bugs: [], view: 'main' }); }}
+        onClick={() => {
+          updateSession({
+            bugs: [],
+            testCases: [],
+            coverageScore: null,
+            gapAnalysisSummary: null,
+            createdIssues: [],
+            xrayWarnings: [],
+            view: 'main',
+            mainWorkflow: 'home',
+            previewBugIndex: null,
+            resolvedPayload: null,
+            validationErrors: [],
+            expandedBug: null,
+            error: null,
+            success: null
+          });
+        }}
         variant="secondary"
         tone="neutral"
         className="py-4 rounded-[1.4rem] font-bold"
