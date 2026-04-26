@@ -157,6 +157,11 @@ export interface AIPreviewResponsePayload {
 
 export interface AISubmitResponsePayload {
   created_issues: CreatedIssue[];
+  warnings?: string[];
+  linked_story_issue_key?: string | null;
+  link_type_used?: string | null;
+  linked_issue_keys?: string[];
+  unlinked_issue_keys?: string[];
 }
 
 export type JiraConnectionsResponsePayload = JiraConnection[];

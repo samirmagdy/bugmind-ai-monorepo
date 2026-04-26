@@ -109,6 +109,11 @@ class XrayPublishedTest(BaseModel):
 
 class SubmitBugsResponse(BaseModel):
     created_issues: List[XrayPublishedTest]
+    warnings: List[str] = []
+    linked_story_issue_key: Optional[str] = None
+    link_type_used: Optional[str] = None
+    linked_issue_keys: List[str] = []
+    unlinked_issue_keys: List[str] = []
 
 
 class XrayTestSuitePublishResponse(BaseModel):

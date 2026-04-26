@@ -535,7 +535,11 @@ export const AIProvider: React.FC<{
       }
 
       const data = await readJsonResponse<AISubmitResponsePayload>(res);
-      updateSession({ view: 'success', createdIssues: data.created_issues || [] });
+      updateSession({
+        view: 'success',
+        createdIssues: data.created_issues || [],
+        success: data.warnings?.length ? data.warnings.join(' ') : null,
+      });
     } catch (err: unknown) {
       const bulkFailure = extractBulkSubmitFailure(err);
       const jiraRequiredFields = parseJiraRequiredFieldErrors(err);

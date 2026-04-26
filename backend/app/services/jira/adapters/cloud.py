@@ -3,6 +3,7 @@ import base64
 import re
 import logging
 import html
+import time
 from typing import Dict, Any, List, Optional, Sequence, Tuple
 from fastapi import HTTPException
 from app.services.jira.adapters.base import JiraAdapter
@@ -10,6 +11,10 @@ from app.services.jira.adapters.base import JiraAdapter
 logger = logging.getLogger(__name__)
 
 class JiraCloudAdapter(JiraAdapter):
+    _TRANSIENT_STATUS_CODES = {429, 502, 503, 504}
+    _MAX_RETRIES = 2
+    _RETRY_BACKOFF_SECONDS = 0.5
+
     def __init__(self, host_url: str, username: str, token: str, verify_ssl: bool = True):
         super().__init__(host_url, username, token, verify_ssl)
         auth_string = f"{self.username}:{self.token}"
@@ -60,26 +65,53 @@ class JiraCloudAdapter(JiraAdapter):
 
         return last_response if last_response is not None else self._request(method, paths[0])
 
-    def _request(self, method: str, path: str) -> httpx.Response:
+    def _sleep_before_retry(self, attempt: int, retry_after: Optional[str] = None) -> None:
+        if retry_after:
+            try:
+                time.sleep(min(float(retry_after), 5.0))
+                return
+            except (TypeError, ValueError):
+                pass
+        time.sleep(self._RETRY_BACKOFF_SECONDS * attempt)
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: Optional[Dict[str, Any]] = None,
+        json: Optional[Dict[str, Any]] = None,
+        retry_on_transient: Optional[bool] = None,
+    ) -> httpx.Response:
+        attempts = self._MAX_RETRIES + 1
+        should_retry = method.upper() in {"GET", "HEAD"} if retry_on_transient is None else retry_on_transient
         try:
-            response = self.client.request(method, path)
-            if response.status_code == 401:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Jira Cloud authentication failed. Verify the email and API token."
-                )
-            if response.status_code == 403:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Jira Cloud access denied. Verify the account permissions."
-                )
-            if response.status_code == 429:
-                retry_after = response.headers.get("Retry-After")
-                detail = "Jira Cloud rate limit exceeded."
-                if retry_after:
-                    detail = f"{detail} Retry after {retry_after} seconds."
-                raise HTTPException(status_code=429, detail=detail)
-            return response
+            for attempt in range(1, attempts + 1):
+                response = self.client.request(method, path, params=params, json=json)
+                if response.status_code == 401:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Jira Cloud authentication failed. Verify the email and API token."
+                    )
+                if response.status_code == 403:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Jira Cloud access denied. Verify the account permissions."
+                    )
+                if should_retry and response.status_code in self._TRANSIENT_STATUS_CODES and attempt < attempts:
+                    logger.warning(
+                        "jira_cloud_request_retry",
+                        extra={"path": path, "status": response.status_code, "attempt": attempt},
+                    )
+                    self._sleep_before_retry(attempt, response.headers.get("Retry-After"))
+                    continue
+                if response.status_code == 429:
+                    retry_after = response.headers.get("Retry-After")
+                    detail = "Jira Cloud rate limit exceeded."
+                    if retry_after:
+                        detail = f"{detail} Retry after {retry_after} seconds."
+                    raise HTTPException(status_code=429, detail=detail)
+                return response
         except httpx.TimeoutException:
             logger.error("jira_cloud_request_timeout", extra={"path": path})
             raise HTTPException(status_code=504, detail="Connection to Jira Cloud timed out. Please try again.")
@@ -322,26 +354,12 @@ class JiraCloudAdapter(JiraAdapter):
 
         last_error_response: Optional[httpx.Response] = None
         for params in param_sets:
-            try:
-                response = self.client.get(url, params=params)
-            except httpx.TimeoutException:
-                logger.error("jira_cloud_get_fields_timeout", extra={"project": project_id})
-                raise HTTPException(status_code=504, detail="Jira metadata request timed out. High project complexity detected.")
-            except httpx.HTTPError as exc:
-                logger.error("jira_cloud_get_fields_network_error", extra={"error": str(exc), "project": project_id})
-                raise HTTPException(status_code=502, detail=f"Failed to connect to Jira: {str(exc)}")
-
-            if response.status_code == 429:
-                retry_after = response.headers.get("Retry-After")
-                detail = "Jira Cloud rate limit exceeded while fetching field metadata."
-                if retry_after:
-                    detail = f"{detail} Retry after {retry_after} seconds."
-                raise HTTPException(status_code=429, detail=detail)
+            response = self._request("GET", url, params=params)
 
             if response.status_code in (404, 405):
                 fallback_url = self._fallback_candidate(url)
                 if fallback_url:
-                    fallback_response = self.client.get(fallback_url, params=params)
+                    fallback_response = self._request("GET", fallback_url, params=params)
                     response = fallback_response
 
             if response.status_code == 200:
@@ -376,17 +394,22 @@ class JiraCloudAdapter(JiraAdapter):
             fields["description"] = self._to_adf(fields["description"])
             
         try:
-            response = self.client.post("/rest/api/3/issue", json=issue_data)
+            response = self._request("POST", "/rest/api/3/issue", json=issue_data, retry_on_transient=False)
             if response.status_code in (404, 405):
-                response = self.client.post("/rest/api/2/issue", json=issue_data)
-        except httpx.TimeoutException:
-            raise HTTPException(status_code=504, detail=f"Timed out connecting to Jira at {self.host_url}.")
-        except httpx.HTTPError as exc:
-            logger.warning("jira_cloud_create_issue_failed", extra={"host": self.host_url, "error": str(exc)})
-            raise HTTPException(status_code=502, detail=f"Failed to reach Jira at {self.host_url}: {str(exc)}")
+                response = self._request("POST", "/rest/api/2/issue", json=issue_data, retry_on_transient=False)
+        except HTTPException:
+            raise
         if response.status_code not in [200, 201]:
             raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to create Jira issue"))
         return response.json().get("key")
+
+    def delete_issue(self, issue_key: str) -> None:
+        response = self._request("DELETE", f"/rest/api/3/issue/{issue_key}", retry_on_transient=False)
+        if response.status_code in (404, 405):
+            response = self._request("DELETE", f"/rest/api/2/issue/{issue_key}", retry_on_transient=False)
+
+        if response.status_code not in [200, 202, 204]:
+            raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to delete Jira issue"))
 
     def link_issues(self, inpatient_key: str, link_type: str, outward_issue_key: str):
         payload = {
@@ -394,16 +417,11 @@ class JiraCloudAdapter(JiraAdapter):
             "inwardIssue": {"key": inpatient_key},
             "outwardIssue": {"key": outward_issue_key}
         }
-        try:
-            response = self.client.post("/rest/api/3/issueLink", json=payload)
-            if response.status_code in (404, 405):
-                response = self.client.post("/rest/api/2/issueLink", json=payload)
-        except httpx.TimeoutException:
-            raise HTTPException(status_code=504, detail=f"Timed out connecting to Jira at {self.host_url}.")
-        except httpx.HTTPError as exc:
-            raise HTTPException(status_code=502, detail=f"Failed to reach Jira at {self.host_url}: {str(exc)}")
+        response = self._request("POST", "/rest/api/3/issueLink", json=payload, retry_on_transient=False)
+        if response.status_code in (404, 405):
+            response = self._request("POST", "/rest/api/2/issueLink", json=payload, retry_on_transient=False)
         if response.status_code not in [200, 201]:
-            raise HTTPException(status_code=400, detail="Failed to link issues")
+            raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to link Jira issues"))
 
     def _normalize_user_search_results(self, payload: Any) -> List[Dict[str, Any]]:
         users_raw: Any = payload
@@ -510,26 +528,17 @@ class JiraCloudAdapter(JiraAdapter):
         last_status: Optional[int] = None
         for endpoint, params in attempts:
             try:
-                response = self.client.get(endpoint, params=params)
-            except httpx.HTTPError as exc:
+                response = self._request("GET", endpoint, params=params)
+            except HTTPException as exc:
                 logger.warning(
                     "jira_cloud_search_users_exception",
-                    extra={"error": str(exc), "endpoint": endpoint, "query": query},
+                    extra={"error": str(exc.detail), "endpoint": endpoint, "query": query},
                 )
+                if exc.status_code in (400, 429):
+                    raise
                 continue
 
             last_status = response.status_code
-            if response.status_code == 401:
-                raise HTTPException(
-                    status_code=400,
-                    detail=self._extract_error_message(response, "Failed to search Jira users"),
-                )
-            if response.status_code == 429:
-                retry_after = response.headers.get("Retry-After")
-                detail = "Jira Cloud rate limit exceeded while searching users."
-                if retry_after:
-                    detail = f"{detail} Retry after {retry_after} seconds."
-                raise HTTPException(status_code=429, detail=detail)
             if response.status_code != 200:
                 logger.info(
                     "jira_cloud_search_users_fallback",
@@ -565,11 +574,17 @@ class JiraCloudAdapter(JiraAdapter):
             return []
 
         try:
-            board_response = self.client.get("/rest/agile/1.0/board", params={"projectKeyOrId": project_ref, "maxResults": 50})
-        except httpx.HTTPError:
+            board_response = self._request(
+                "GET",
+                "/rest/agile/1.0/board",
+                params={"projectKeyOrId": project_ref, "maxResults": 50},
+            )
+        except HTTPException as exc:
+            logger.warning("jira_cloud_sprint_boards_unavailable", extra={"project": project_ref, "detail": exc.detail})
             return []
 
         if board_response.status_code != 200:
+            logger.info("jira_cloud_sprint_boards_failed", extra={"project": project_ref, "status": board_response.status_code})
             return []
 
         boards = board_response.json().get("values", [])
@@ -582,14 +597,23 @@ class JiraCloudAdapter(JiraAdapter):
                 continue
 
             try:
-                sprint_response = self.client.get(
+                sprint_response = self._request(
+                    "GET",
                     f"/rest/agile/1.0/board/{board_id}/sprint",
-                    params={"state": "active,future", "maxResults": 100}
+                    params={"state": "active,future", "maxResults": 100},
                 )
-            except httpx.HTTPError:
+            except HTTPException as exc:
+                logger.info(
+                    "jira_cloud_sprint_options_failed",
+                    extra={"project": project_ref, "board_id": board_id, "detail": exc.detail},
+                )
                 continue
 
             if sprint_response.status_code != 200:
+                logger.info(
+                    "jira_cloud_sprint_options_status",
+                    extra={"project": project_ref, "board_id": board_id, "status": sprint_response.status_code},
+                )
                 continue
 
             for sprint in sprint_response.json().get("values", []):

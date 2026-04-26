@@ -500,6 +500,10 @@ async def submit_bugs(
             )
         raise e
     created_issues: List[XrayPublishedTest] = []
+    created_issue_keys_for_rollback: List[str] = []
+    warnings: List[str] = []
+    linked_issue_keys: List[str] = []
+    unlinked_issue_keys: List[str] = []
     story_issue_key = (req.story_issue_key or "").strip()
     link_type_used: Optional[str] = None
     available_link_types: list[str] = []
@@ -510,8 +514,11 @@ async def submit_bugs(
             available_link_types = []
     link_candidates = _resolve_link_type_candidates("Relates", available_link_types) if story_issue_key else []
 
+    mapping_record = _get_field_mapping_record(db, current_user.id, req.project_key, req.project_id, req.issue_type_id)
+    platform = "server" if prefer_project_key else "cloud"
+    prepared_payloads: List[tuple[int, Any, Dict[str, Any]]] = []
+
     for bug_index, bug in enumerate(req.bugs):
-        mapping_record = _get_field_mapping_record(db, current_user.id, req.project_key, req.project_id, req.issue_type_id)
         payload_fields = inject_standard_field_aliases(
             schema,
             _build_issue_fields(
@@ -540,7 +547,6 @@ async def submit_bugs(
                 },
             )
 
-        platform = "server" if prefer_project_key else "cloud"
         resolved_payload = _resolve_payload(
             db,
             current_user.id,
@@ -551,24 +557,54 @@ async def submit_bugs(
             payload_fields,
             platform=platform
         )
+        prepared_payloads.append((bug_index, bug, resolved_payload))
+
+    for bug_index, bug, resolved_payload in prepared_payloads:
 
         try:
             issue_key = adapter.create_issue(resolved_payload)
         except HTTPException as exc:
+            rollback_failed_keys: List[str] = []
+            rolled_back_issue_keys: List[str] = []
+            rollback_failure_details: List[dict[str, str]] = []
+            for created_issue_key in reversed(created_issue_keys_for_rollback):
+                try:
+                    adapter.delete_issue(created_issue_key)
+                    rolled_back_issue_keys.append(created_issue_key)
+                except HTTPException as rollback_exc:
+                    rollback_failed_keys.append(created_issue_key)
+                    rollback_failure_details.append(
+                        {
+                            "issue_key": created_issue_key,
+                            "error": str(rollback_exc.detail),
+                        }
+                    )
+            error_message = f"Bug {bug_index + 1} could not be created in Jira."
+            if rollback_failed_keys:
+                error_message = (
+                    f"{error_message} Some earlier bugs were already created and could not be deleted automatically. "
+                    "Review Jira permissions or remove them manually."
+                )
             raise HTTPException(
                 status_code=exc.status_code,
                 detail={
                     "error": {
                         "code": "BULK_BUG_SUBMIT_FAILED",
-                        "message": f"Bug {bug_index + 1} could not be created in Jira.",
+                        "message": error_message,
                         "details": [{
                             "bug_index": bug_index,
                             "bug_summary": bug.summary,
                             "jira_error": exc.detail,
+                            "rolled_back_issue_keys": rolled_back_issue_keys,
+                            "rollback_attempted_issue_keys": created_issue_keys_for_rollback,
+                            "rollback_failed_issue_keys": rollback_failed_keys,
+                            "rollback_failed_issue_details": rollback_failure_details,
+                            "partial_publish": bool(rollback_failed_keys),
                         }],
                     }
                 },
             ) from exc
+        created_issue_keys_for_rollback.append(issue_key)
         created_issues.append(XrayPublishedTest(id=issue_key, key=issue_key, self=""))
         if story_issue_key:
             linked = False
@@ -576,12 +612,15 @@ async def submit_bugs(
                 try:
                     adapter.link_issues(issue_key, candidate, story_issue_key)
                     linked = True
+                    linked_issue_keys.append(issue_key)
                     if not link_type_used:
                         link_type_used = candidate
                     break
                 except HTTPException:
                     continue
             if not linked:
+                unlinked_issue_keys.append(issue_key)
+                warnings.append(f"Issue {issue_key} was created but could not be linked to parent story {story_issue_key}.")
                 logger.warning(
                     "bug_submit_link_failed story_issue_key=%s created_issue_key=%s jira_connection_id=%s",
                     story_issue_key,
@@ -589,7 +628,14 @@ async def submit_bugs(
                     req.jira_connection_id,
                 )
 
-    response = SubmitBugsResponse(created_issues=created_issues)
+    response = SubmitBugsResponse(
+        created_issues=created_issues,
+        warnings=warnings,
+        linked_story_issue_key=story_issue_key or None,
+        link_type_used=link_type_used,
+        linked_issue_keys=linked_issue_keys,
+        unlinked_issue_keys=unlinked_issue_keys,
+    )
     idempotency_store.store_response(
         "ai.submit",
         str(current_user.id),

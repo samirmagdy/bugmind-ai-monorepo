@@ -29,6 +29,11 @@ class JiraAdapter(ABC):
     def create_issue(self, issue_data: Dict[str, Any]) -> str:
         """Returns the created issue key."""
         pass
+
+    @abstractmethod
+    def delete_issue(self, issue_key: str) -> None:
+        """Deletes a previously created issue."""
+        pass
         
     @abstractmethod
     def link_issues(self, inpatient_key: str, link_type: str, outward_issue_key: str):
