@@ -267,6 +267,21 @@ const PreviewView: React.FC = () => {
             {session.selectedIssueType?.name || 'BUG'} REPORT
           </span>
         </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {bug.category && (
+            <div className="rounded-full border border-[var(--card-border)] bg-[var(--surface-soft)] px-3 py-1 text-[9px] font-black uppercase tracking-wider text-[var(--text-muted)]">
+              {bug.category}
+            </div>
+          )}
+          <div className="rounded-full border border-[var(--card-border)] bg-[var(--surface-soft)] px-3 py-1 text-[9px] font-black uppercase tracking-wider text-[var(--text-muted)]">
+            {bug.severity} severity
+          </div>
+          {typeof bug.confidence === 'number' && (
+            <div className="rounded-full border border-[var(--card-border)] bg-[var(--surface-soft)] px-3 py-1 text-[9px] font-black uppercase tracking-wider text-[var(--text-muted)]">
+              {bug.confidence}% confidence
+            </div>
+          )}
+        </div>
 
         {/* Summary */}
         <h1 className="text-xl font-black text-[var(--text-main)] leading-tight tracking-tight">
@@ -312,6 +327,30 @@ const PreviewView: React.FC = () => {
             </div>
           </div>
         </div>
+
+        {((bug.acceptance_criteria_refs && bug.acceptance_criteria_refs.length > 0) || (bug.evidence && bug.evidence.length > 0)) && (
+          <>
+            <div className="h-px bg-[var(--border-main)]/50 mr-[-2rem] ml-[-2rem]"></div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {(bug.acceptance_criteria_refs && bug.acceptance_criteria_refs.length > 0) && (
+                <div className="space-y-2">
+                  <span className="text-[9px] font-black uppercase tracking-[0.2em] text-[var(--text-muted)]">Acceptance Criteria References</span>
+                  <div className="bg-[var(--bg-app)]/50 rounded-[1.5rem] p-4 border border-[var(--border-main)]/30 text-[11px] text-[var(--text-secondary)] space-y-1">
+                    {bug.acceptance_criteria_refs.map((reference, index) => <div key={`${reference}-${index}`}>• {reference}</div>)}
+                  </div>
+                </div>
+              )}
+              {(bug.evidence && bug.evidence.length > 0) && (
+                <div className="space-y-2">
+                  <span className="text-[9px] font-black uppercase tracking-[0.2em] text-[var(--text-muted)]">Supporting Evidence</span>
+                  <div className="bg-[var(--bg-app)]/50 rounded-[1.5rem] p-4 border border-[var(--border-main)]/30 text-[11px] text-[var(--text-secondary)] space-y-1">
+                    {bug.evidence.map((item, index) => <div key={`${item}-${index}`}>• {item}</div>)}
+                  </div>
+                </div>
+              )}
+            </div>
+          </>
+        )}
 
         {/* Full Mapped Payload - excluding summary/description */}
         {resolved && Object.keys(resolved).length > 2 && (

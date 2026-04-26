@@ -18,7 +18,7 @@ const SuccessView: React.FC = () => {
         </div>
 
         {session.createdIssues && session.createdIssues.length > 0 && (
-          <div className="space-y-2 px-6 max-h-[220px] overflow-y-auto custom-scrollbar">
+          <div className="space-y-2 px-6">
             {session.createdIssues.map((issue) => (
               <SurfaceCard
                 key={issue.key}
@@ -31,7 +31,9 @@ const SuccessView: React.FC = () => {
                   className="flex items-center justify-between p-3.5"
                 >
                   <div className="flex flex-col items-start gap-1">
-                    <StatusBadge className="px-0 py-0 border-none bg-transparent shadow-none" tone="info">Issue Created</StatusBadge>
+                    <StatusBadge className="px-0 py-0 border-none bg-transparent shadow-none" tone={issue.linkedToStory === false ? 'warning' : 'info'}>
+                      {issue.linkedToStory === false ? 'Created Only' : 'Created & Linked'}
+                    </StatusBadge>
                     <span className="text-xs font-bold text-[var(--text-main)]">{issue.key}</span>
                   </div>
                   <div className="p-2 bg-[var(--status-info)]/10 rounded-full text-[var(--status-info)] opacity-0 group-hover:opacity-100 transition-all">

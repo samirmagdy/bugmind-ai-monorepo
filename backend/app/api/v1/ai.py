@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from datetime import datetime
 from typing import Optional, List, Dict
+from difflib import SequenceMatcher
 import logging
 from app.api import deps
 from app.models.user import User
@@ -84,6 +85,79 @@ def _compose_story_context(selected_text: Optional[str], issue_context) -> str:
         return selected_text.strip()
 
     raise HTTPException(status_code=400, detail="Issue context is required for AI generation")
+
+
+def _normalize_text_for_overlap(value: object) -> str:
+    text = re.sub(r"\s+", " ", str(value or "").strip().lower())
+    return re.sub(r"[^a-z0-9 ]+", "", text)
+
+
+def _token_overlap_ratio(left: str, right: str) -> float:
+    left_tokens = set(token for token in left.split() if token)
+    right_tokens = set(token for token in right.split() if token)
+    if not left_tokens or not right_tokens:
+        return 0.0
+    return len(left_tokens & right_tokens) / max(len(left_tokens | right_tokens), 1)
+
+
+def _annotate_bug_overlaps(raw_bugs: List[dict]) -> tuple[List[dict], List[str]]:
+    warnings: List[str] = []
+    duplicate_group_index = 1
+
+    for index, bug in enumerate(raw_bugs):
+        if not isinstance(bug, dict):
+            continue
+        bug.setdefault("duplicate_group", None)
+        bug.setdefault("overlap_warning", None)
+        bug.setdefault("acceptance_criteria_refs", [])
+        bug.setdefault("evidence", [])
+
+        current_summary = _normalize_text_for_overlap(bug.get("summary"))
+        current_signature = _normalize_text_for_overlap(
+            " ".join(
+                [
+                    str(bug.get("summary", "")),
+                    str(bug.get("expected", "")),
+                    str(bug.get("actual", "")),
+                ]
+            )
+        )
+        for compare_index in range(index):
+            other_bug = raw_bugs[compare_index]
+            if not isinstance(other_bug, dict):
+                continue
+
+            other_summary = _normalize_text_for_overlap(other_bug.get("summary"))
+            other_signature = _normalize_text_for_overlap(
+                " ".join(
+                    [
+                        str(other_bug.get("summary", "")),
+                        str(other_bug.get("expected", "")),
+                        str(other_bug.get("actual", "")),
+                    ]
+                )
+            )
+
+            summary_similarity = SequenceMatcher(None, current_summary, other_summary).ratio()
+            signature_similarity = SequenceMatcher(None, current_signature, other_signature).ratio()
+            token_overlap = _token_overlap_ratio(current_signature, other_signature)
+
+            if max(summary_similarity, signature_similarity, token_overlap) < 0.78:
+                continue
+
+            group = other_bug.get("duplicate_group") or f"DUP-{duplicate_group_index}"
+            if not other_bug.get("duplicate_group"):
+                duplicate_group_index += 1
+                other_bug["duplicate_group"] = group
+            bug["duplicate_group"] = group
+            bug["overlap_warning"] = f"Potential overlap with finding {compare_index + 1}."
+            other_bug.setdefault("overlap_warning", f"Potential overlap with finding {index + 1}.")
+            warnings.append(
+                f"Findings {compare_index + 1} and {index + 1} may overlap. Review before publishing."
+            )
+            break
+
+    return raw_bugs, list(dict.fromkeys(warnings))
 
 
 def _get_owned_connection(db: Session, user_id: int, connection_id: int) -> JiraConnection:
@@ -320,12 +394,17 @@ async def generate_bug_report(
         schema, 
         model=req.model or current_user.custom_ai_model,
         user_description=req.user_description,
-        custom_instructions=req.custom_instructions
+        custom_instructions=req.custom_instructions,
+        bug_count=req.bug_count,
+        focus_bug_summary=req.focus_bug_summary,
+        refinement_prompt=req.refinement_prompt,
+        supporting_context=req.supporting_context,
     )
 
     ai_bugs_raw = ai_raw.get("bugs", [])
     if not isinstance(ai_bugs_raw, list) or len(ai_bugs_raw) == 0:
         ai_bugs_raw = [ai_raw]
+    ai_bugs_raw, overlap_warnings = _annotate_bug_overlaps(ai_bugs_raw)
 
     # 4. Resolve Fields (Mapping)
     mapping_record = _get_field_mapping_record(db, current_user.id, req.project_key, req.project_id, req.issue_type_id)
@@ -358,12 +437,26 @@ async def generate_bug_report(
             "steps_to_reproduce": steps_text,
             "expected_result": raw_bug.get("expected", ""),
             "actual_result": raw_bug.get("actual", ""),
+            "severity": raw_bug.get("severity", "Medium"),
+            "confidence": raw_bug.get("confidence", 75),
+            "category": raw_bug.get("category", "Functional Gap"),
+            "acceptance_criteria_refs": raw_bug.get("acceptance_criteria_refs", []) or [],
+            "evidence": raw_bug.get("evidence", []) or [],
+            "duplicate_group": raw_bug.get("duplicate_group"),
+            "overlap_warning": raw_bug.get("overlap_warning"),
             "fields": jira_payload["fields"],
         })
 
+    ai_warnings = ai_raw.get("warnings", [])
+    if isinstance(ai_warnings, str):
+        ai_warnings = [ai_warnings]
+    elif not isinstance(ai_warnings, list):
+        ai_warnings = []
+
     response = BugGenerationResponse(
         bugs=resolved_bugs,
-        ac_coverage=ai_raw.get("ac_coverage", 0.0)
+        ac_coverage=ai_raw.get("ac_coverage", 0.0),
+        warnings=list(dict.fromkeys([*ai_warnings, *overlap_warnings])),
     )
     log_audit(
         "ai.generate",

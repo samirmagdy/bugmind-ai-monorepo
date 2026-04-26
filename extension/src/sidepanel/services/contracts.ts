@@ -63,6 +63,10 @@ export interface AIGenerationRequestPayload extends ProjectRequestParams {
   instance_url?: string | null;
   issue_type_id: string;
   user_description?: string;
+  bug_count?: number;
+  focus_bug_summary?: string;
+  refinement_prompt?: string;
+  supporting_context?: string;
 }
 
 export interface AIPreviewRequestPayload extends ProjectRequestParams {
@@ -136,12 +140,20 @@ export interface GeneratedBugResponsePayload {
   steps_to_reproduce: string;
   expected_result: string;
   actual_result: string;
+  severity?: string;
+  confidence?: number;
+  category?: string;
+  acceptance_criteria_refs?: string[];
+  evidence?: string[];
+  duplicate_group?: string | null;
+  overlap_warning?: string | null;
   fields?: Record<string, unknown>;
 }
 
 export interface AIGenerationResponsePayload {
   bugs: GeneratedBugResponsePayload[];
   ac_coverage?: number;
+  warnings?: string[];
 }
 
 export interface AITestCasesResponsePayload {

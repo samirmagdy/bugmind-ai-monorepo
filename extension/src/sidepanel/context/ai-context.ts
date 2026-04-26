@@ -15,6 +15,7 @@ export interface AIContextType {
   generateTestCases: () => Promise<void>;
   handleManualGenerate: () => Promise<void>;
   submitBugs: (index?: number) => Promise<void>;
+  regenerateBug: (index: number, refinementPrompt?: string) => Promise<void>;
   searchUsers: (query: string, bugIndex?: number, fieldId?: string) => Promise<import('../types').JiraUser[] | void>;
   handleUpdateBug: (index: number, updates: Partial<BugReport>) => void;
   handleUpdateTestCase: (index: number, updates: Partial<TestCase>) => void;

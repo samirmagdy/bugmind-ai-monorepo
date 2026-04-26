@@ -19,6 +19,10 @@ class BugGenerationRequest(BaseModel):
     model: Optional[str] = None
     user_description: Optional[str] = None
     custom_instructions: Optional[str] = None
+    bug_count: Optional[int] = None
+    focus_bug_summary: Optional[str] = None
+    refinement_prompt: Optional[str] = None
+    supporting_context: Optional[str] = None
 
 class StructBugField(BaseModel):
     field_id: str
@@ -30,12 +34,20 @@ class GeneratedBugResponse(BaseModel):
     steps_to_reproduce: str
     expected_result: str
     actual_result: str
+    severity: Optional[str] = None
+    confidence: Optional[int] = None
+    category: Optional[str] = None
+    acceptance_criteria_refs: List[str] = []
+    evidence: List[str] = []
+    duplicate_group: Optional[str] = None
+    overlap_warning: Optional[str] = None
     fields: Dict[str, Any]
 
 
 class BugGenerationResponse(BaseModel):
     bugs: List[GeneratedBugResponse]
     ac_coverage: float
+    warnings: List[str] = []
 
 
 class BugDraft(BaseModel):
@@ -45,6 +57,12 @@ class BugDraft(BaseModel):
     expected_result: str
     actual_result: str
     severity: Optional[str] = None
+    confidence: Optional[int] = None
+    category: Optional[str] = None
+    acceptance_criteria_refs: List[str] = []
+    evidence: List[str] = []
+    duplicate_group: Optional[str] = None
+    overlap_warning: Optional[str] = None
     extra_fields: Optional[Dict[str, Any]] = None
 
 

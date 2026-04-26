@@ -3,9 +3,9 @@ import { useBugMind } from '../../hooks/useBugMind';
 import { 
   Plus, ChevronDown, Bug,
   Loader2, Send, AlertCircle, Zap, RefreshCw,
-  Compass, ArrowRight, Check, Layout, AlertTriangle
+  Compass, ArrowRight, Check, Layout, AlertTriangle, BrainCircuit, Paperclip, X
 } from 'lucide-react';
-import { BugReport, JiraField, JiraFieldOption, JiraUser, TestCase } from '../../types';
+import { BugReport, JiraField, JiraFieldOption, JiraUser, SupportingArtifact, TestCase } from '../../types';
 import AutoResizeTextarea from '../common/AutoResizeTextarea';
 import { ActionButton, SurfaceCard, StatusBadge, StatusPanel } from '../common/DesignSystem';
 import LuxurySearchableSelect, { SelectOption, SelectValue } from '../common/LuxurySearchableSelect';
@@ -134,12 +134,13 @@ const MainView: React.FC = () => {
     ai: { 
       generateBugs, generateTestCases, handleManualGenerate, 
       handleUpdateBug, handleUpdateTestCase, publishTestCasesToXray, 
-      searchUsers, preparePreviewBug 
+      searchUsers, preparePreviewBug, regenerateBug
     } 
   } = useBugMind();
   const { log } = debug;
   const isRecoveringStalePage = session.error === 'STALE_PAGE' && !session.issueData;
   const staleRecoveryAttemptsRef = useRef(0);
+  const artifactInputRef = useRef<HTMLInputElement | null>(null);
   const manualInputs = session.manualInputs?.length ? session.manualInputs : [''];
   const requiresIssueType = !session.issueData || !session.selectedIssueType?.id || session.issueTypes.length === 0;
   const acceptanceCriteria = session.issueData?.acceptanceCriteria?.trim() || '';
@@ -172,6 +173,117 @@ const MainView: React.FC = () => {
     const nextInputs = manualInputs.filter((_, currentIndex) => currentIndex !== index);
     updateSession({ manualInputs: nextInputs.length ? nextInputs : [''] });
   };
+
+  const removeSupportingArtifact = (artifactId: string) => {
+    updateSession({
+      supportingArtifacts: (session.supportingArtifacts || []).filter((artifact) => artifact.id !== artifactId)
+    });
+  };
+
+  const handleSupportingFiles = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    if (!files.length) return;
+
+    const acceptedExtensions = /\.(txt|log|md|json|csv|xml|yaml|yml)$/i;
+    const nextArtifacts: SupportingArtifact[] = [];
+    const rejectedNames: string[] = [];
+
+    for (const file of files) {
+      const isTextLike = file.type.startsWith('text/') || file.type === 'application/json' || acceptedExtensions.test(file.name);
+      if (!isTextLike || file.size > 300_000) {
+        rejectedNames.push(file.name);
+        continue;
+      }
+
+      const rawContent = await file.text();
+      const content = rawContent.trim();
+      if (!content) continue;
+
+      nextArtifacts.push({
+        id: `${file.name}-${file.lastModified}-${file.size}`,
+        name: file.name,
+        type: file.type || 'text/plain',
+        size: file.size,
+        content
+      });
+    }
+
+    if (nextArtifacts.length > 0) {
+      const existing = session.supportingArtifacts || [];
+      const merged = [...existing];
+      for (const artifact of nextArtifacts) {
+        if (!merged.some((item) => item.id === artifact.id)) {
+          merged.push(artifact);
+        }
+      }
+      updateSession({
+        supportingArtifacts: merged,
+        success: rejectedNames.length ? `Skipped unsupported files: ${rejectedNames.join(', ')}` : 'Supporting files added.'
+      });
+    } else if (rejectedNames.length) {
+      updateSession({ error: `Only text-based files up to 300 KB are supported here. Skipped: ${rejectedNames.join(', ')}` });
+    }
+
+    event.target.value = '';
+  };
+
+  const supportingContextPanel = (
+    <div className="space-y-3">
+      <div className="space-y-1.5">
+        <label className="context-label uppercase tracking-wider block ml-1">Supporting Context</label>
+        <AutoResizeTextarea
+          value={session.generationSupportingContext}
+          onChange={e => updateSession({ generationSupportingContext: e.target.value })}
+          className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-[1rem] p-3 text-xs text-[var(--text-secondary)] outline-none min-h-[72px]"
+          placeholder="Optional: add logs, constraints, environment notes, or URLs that should influence generation."
+        />
+      </div>
+      <div className="space-y-2">
+        <div className="flex items-center justify-between gap-3">
+          <label className="context-label uppercase tracking-wider block ml-1">Supporting Files</label>
+          <button
+            type="button"
+            onClick={() => artifactInputRef.current?.click()}
+            className="flex items-center gap-1 rounded-full border border-[var(--border-soft)] bg-[var(--surface-soft)] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--text-primary)]"
+          >
+            <Paperclip size={12} />
+            Add Files
+          </button>
+          <input
+            ref={artifactInputRef}
+            type="file"
+            multiple
+            accept=".txt,.log,.md,.json,.csv,.xml,.yaml,.yml,text/*,application/json"
+            className="hidden"
+            onChange={(event) => { void handleSupportingFiles(event); }}
+          />
+        </div>
+        <p className="text-[11px] text-[var(--text-muted)] leading-relaxed">
+          Upload text logs, JSON, markdown, CSV, or config snippets. These are included as AI support context for bug generation and refinement.
+        </p>
+        {session.supportingArtifacts.length > 0 && (
+          <div className="space-y-2">
+            {session.supportingArtifacts.map((artifact) => (
+              <div key={artifact.id} className="flex items-start justify-between gap-3 rounded-[1rem] border border-[var(--border-soft)] bg-[var(--surface-soft)] px-3 py-2.5">
+                <div className="min-w-0">
+                  <div className="text-[11px] font-bold text-[var(--text-primary)] truncate">{artifact.name}</div>
+                  <div className="text-[10px] text-[var(--text-muted)]">{artifact.type || 'text/plain'} • {Math.max(1, Math.round(artifact.size / 1024))} KB</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removeSupportingArtifact(artifact.id)}
+                  className="flex h-7 w-7 items-center justify-center rounded-full border border-[var(--border-soft)] text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                  aria-label={`Remove ${artifact.name}`}
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 
   const bootstrapJiraConfig = async (issueTypeId?: string, options?: { force?: boolean; loading?: boolean; logTag?: string; errorMessage?: string }) => {
     const projectKey = session.issueData?.key.split('-')[0];
@@ -620,6 +732,7 @@ const MainView: React.FC = () => {
                               </div>
                             ))}
                           </div>
+                          {supportingContextPanel}
                           <ActionButton onClick={addManualInput} variant="secondary" className="h-10 w-full text-[12px]">
                             <Plus size={15} />
                             Add Another Bug
@@ -639,6 +752,26 @@ const MainView: React.FC = () => {
                           <p className="text-[12px] text-[var(--text-secondary)] leading-relaxed">
                             Analyze the story and acceptance criteria to surface hidden requirements, edge cases, and functional risk.
                           </p>
+                          <div className="space-y-2">
+                            <label className="context-label uppercase tracking-wider mb-1.5 block ml-1">Finding Count</label>
+                            <div className="grid grid-cols-3 gap-2">
+                              {[3, 5, 7].map((count) => (
+                                <button
+                                  key={count}
+                                  type="button"
+                                  onClick={() => updateSession({ bugGenerationCount: count })}
+                                  className={`rounded-[0.95rem] border px-3 py-2 text-[11px] font-bold ${
+                                    session.bugGenerationCount === count
+                                      ? 'border-[var(--border-active)] bg-[var(--surface-accent)] text-[var(--text-primary)]'
+                                      : 'border-[var(--border-soft)] bg-[var(--bg-input)] text-[var(--text-secondary)]'
+                                  }`}
+                                >
+                                  {count} Bugs
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          {supportingContextPanel}
                           <ActionButton 
                             onClick={generateBugs}
                             variant="primary"
@@ -865,8 +998,25 @@ const MainView: React.FC = () => {
                           bug.severity === 'High' ? 'bg-[var(--warning)]' : 'bg-[var(--primary-blue)]'
                         }`} />
                         <div className="flex-1 min-w-0">
-                          <div className="workflow-card-title text-sm">{bug.summary}</div>
-                          <div className="workflow-card-subtitle text-[11px] font-bold uppercase tracking-wider">{bug.severity} Risk</div>
+                        <div className="workflow-card-title text-sm">{bug.summary}</div>
+                          <div className="mt-1 flex flex-wrap items-center gap-2">
+                            <div className="workflow-card-subtitle text-[11px] font-bold uppercase tracking-wider">{bug.severity} Risk</div>
+                            {bug.category && (
+                              <StatusBadge tone="info" className="text-[9px]">
+                                {bug.category}
+                              </StatusBadge>
+                            )}
+                            {typeof bug.confidence === 'number' && (
+                              <StatusBadge tone={bug.confidence >= 80 ? 'success' : bug.confidence >= 60 ? 'info' : 'warning'} className="text-[9px]">
+                                {bug.confidence}% confidence
+                              </StatusBadge>
+                            )}
+                            {bug.duplicate_group && (
+                              <StatusBadge tone="warning" className="text-[9px]">
+                                Overlap {bug.duplicate_group}
+                              </StatusBadge>
+                            )}
+                          </div>
                         </div>
                         <ChevronDown 
                           size={16} 
@@ -876,6 +1026,14 @@ const MainView: React.FC = () => {
                       
                       {session.expandedBug === idx && (
                         <div className="mt-4 pt-4 border-t border-[var(--border-soft)] space-y-4 animate-in slide-in-from-top-2">
+                          <div className="space-y-1.5">
+                            <label className="context-label uppercase tracking-widest block">Core Summary</label>
+                            <AutoResizeTextarea 
+                              value={bug.summary}
+                              onChange={e => handleUpdateBug(idx, { summary: e.target.value })}
+                              className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-[0.9rem] p-2.5 text-xs text-[var(--text-primary)] font-bold outline-none"
+                            />
+                          </div>
                           <div className="space-y-1.5">
                             <label className="context-label uppercase tracking-widest block">Summary</label>
                             <AutoResizeTextarea 
@@ -891,6 +1049,32 @@ const MainView: React.FC = () => {
                               onChange={e => handleUpdateBug(idx, { steps_to_reproduce: e.target.value })}
                               className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-[0.9rem] p-2.5 text-xs text-[var(--text-secondary)] font-mono outline-none"
                             />
+                          </div>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="space-y-1.5">
+                              <label className="context-label uppercase tracking-widest block">Severity</label>
+                              <LuxurySearchableSelect
+                                options={['Critical', 'High', 'Medium', 'Low'].map((value) => ({ id: value, name: value }))}
+                                value={bug.severity ? { id: bug.severity, name: bug.severity } : null}
+                                onChange={(next) => {
+                                  const nextValue = isSelectOption(next) ? String(next.id) : '';
+                                  handleUpdateBug(idx, { severity: nextValue || 'Medium' });
+                                }}
+                                placeholder="Select severity..."
+                              />
+                            </div>
+                            <div className="space-y-1.5">
+                              <label className="context-label uppercase tracking-widest block">Category</label>
+                              <LuxurySearchableSelect
+                                options={['Functional Gap', 'Validation', 'Workflow', 'Edge Case', 'Permissions', 'Data Integrity', 'Regression Risk', 'UX'].map((value) => ({ id: value, name: value }))}
+                                value={bug.category ? { id: bug.category, name: bug.category } : null}
+                                onChange={(next) => {
+                                  const nextValue = isSelectOption(next) ? String(next.id) : '';
+                                  handleUpdateBug(idx, { category: nextValue || 'Functional Gap' });
+                                }}
+                                placeholder="Select category..."
+                              />
+                            </div>
                           </div>
                           <div className="grid grid-cols-2 gap-3">
                             <div className="space-y-1.5">
@@ -910,6 +1094,36 @@ const MainView: React.FC = () => {
                               />
                             </div>
                           </div>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="space-y-1.5">
+                              <label className="context-label uppercase tracking-widest block">AC References</label>
+                              <AutoResizeTextarea
+                                value={(bug.acceptance_criteria_refs || []).join('\n')}
+                                onChange={e => handleUpdateBug(idx, {
+                                  acceptance_criteria_refs: e.target.value.split('\n').map((item) => item.trim()).filter(Boolean)
+                                })}
+                                className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-[0.9rem] p-2.5 text-xs text-[var(--text-secondary)] outline-none"
+                              />
+                            </div>
+                            <div className="space-y-1.5">
+                              <label className="context-label uppercase tracking-widest block">Evidence</label>
+                              <AutoResizeTextarea
+                                value={(bug.evidence || []).join('\n')}
+                                onChange={e => handleUpdateBug(idx, {
+                                  evidence: e.target.value.split('\n').map((item) => item.trim()).filter(Boolean)
+                                })}
+                                className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-[0.9rem] p-2.5 text-xs text-[var(--text-secondary)] outline-none"
+                              />
+                            </div>
+                          </div>
+                          {bug.overlap_warning && (
+                            <StatusPanel
+                              tone="warning"
+                              title="Potential Overlap"
+                              description={bug.overlap_warning}
+                              icon={AlertTriangle}
+                            />
+                          )}
 
                           {/* Dynamic Jira Fields */}
                           {(() => {
@@ -979,9 +1193,18 @@ const MainView: React.FC = () => {
                               <Check size={12} />
                               <span className="text-[10px] font-bold uppercase tracking-tighter">Synced to context</span>
                             </div>
-                            <button onClick={() => updateSession({ expandedBug: null })} className="text-[10px] font-bold text-[var(--primary-blue)] hover:opacity-80">
-                              Close Editor
-                            </button>
+                            <div className="flex items-center gap-3">
+                              <button
+                                onClick={() => void regenerateBug(idx)}
+                                className="flex items-center gap-1 text-[10px] font-bold text-[var(--primary-blue)] hover:opacity-80"
+                              >
+                                <BrainCircuit size={12} />
+                                Refine Finding
+                              </button>
+                              <button onClick={() => updateSession({ expandedBug: null })} className="text-[10px] font-bold text-[var(--primary-blue)] hover:opacity-80">
+                                Close Editor
+                              </button>
+                            </div>
                           </div>
                         </div>
                       )}

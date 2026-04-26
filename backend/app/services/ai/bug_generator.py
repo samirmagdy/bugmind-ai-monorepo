@@ -156,7 +156,18 @@ class BugGenerator:
             return text[:max_chars] + "\n... (text truncated due to length) ..."
         return text
         
-    async def generate_bug(self, context_text: str, current_fields_schema: list, model: str = None, user_description: str = None, custom_instructions: str = None) -> Dict[str, Any]:
+    async def generate_bug(
+        self,
+        context_text: str,
+        current_fields_schema: list,
+        model: str = None,
+        user_description: str = None,
+        custom_instructions: str = None,
+        bug_count: Optional[int] = None,
+        focus_bug_summary: Optional[str] = None,
+        refinement_prompt: Optional[str] = None,
+        supporting_context: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         AI-assisted bug drafting. If user_description is provided, it maps that to the context.
         """
@@ -171,16 +182,25 @@ class BugGenerator:
         )
 
         mode_instruction = ""
+        target_bug_count = max(1, min(int(bug_count or 5), 10))
+
         if user_description:
             mode_instruction = f"""
             The user has manually described a bug they found: "{user_description}"
             Your primary goal is to structure this specific bug report using the story context below.
             Return exactly one bug in the bugs array.
             """
+        elif focus_bug_summary or refinement_prompt:
+            mode_instruction = f"""
+            Refine or replace one existing draft finding.
+            Current draft summary: "{focus_bug_summary or 'N/A'}"
+            Refinement request: "{refinement_prompt or 'Improve clarity, specificity, and Jira readiness.'}"
+            Return exactly one improved bug in the bugs array.
+            """
         else:
             mode_instruction = """
             Analyze the story context and identify multiple distinct quality gaps.
-            Return 3 to 5 materially different bug candidates covering missing requirements, functional gaps, edge cases, and risks.
+            Return materially different bug candidates covering missing requirements, functional gaps, edge cases, and risks.
             Do not collapse all findings into one generic issue.
             """
 
@@ -199,6 +219,11 @@ class BugGenerator:
         - Each bug's "expected" result must align with the acceptance criteria in the story.
         - Each bug's "actual" result must detail the observed deviation.
         - Each bug's "description" must be a professional summary of the problem and its impact (Core Findings), EXCLUDING the detailed steps, expected, or actual result sections as these are captured separately.
+        - Each bug must include a "severity" from Critical, High, Medium, Low.
+        - Each bug must include a "confidence" integer from 0 to 100.
+        - Each bug must include a "category" like Functional Gap, Edge Case, Validation, Permissions, Workflow, Data Integrity, UX, or Regression Risk.
+        - Each bug must include "acceptance_criteria_refs" as a short list of AC references or story sections that support the finding.
+        - Each bug must include "evidence" as a short list of quoted or paraphrased signals from the story or user notes.
         - Each bug's "custom_fields" dictionary: Scrutinize the schema below. If you can confidently predict a value for any of these fields (like Priority, Severity, or Component) based on the context, populate the key with the field ID and the value with the appropriate Jira object (e.g. {{"id": "..."}}).
 
         CRITICAL:
@@ -207,6 +232,8 @@ class BugGenerator:
         - If "expected" or "actual" results are not explicitly provided by the user, you MUST infer them based on the context.
         - NEVER return null or empty strings for these core fields.
         - Each bug in the bugs array must represent a distinct issue, not a rewording of another bug.
+        - For analysis mode, return exactly {target_bug_count} bugs unless the story truly supports fewer distinct findings.
+        - Avoid duplicate or overlapping findings. If two bugs are very similar, keep the stronger one only.
 
         The current Jira project expects these fields:
         {schema_json}
@@ -220,10 +247,16 @@ class BugGenerator:
                     "steps": ["Step 1", "Step 2"],
                     "expected": "Expected behavior per the ACs",
                     "actual": "Actual observed deviation",
+                    "severity": "High",
+                    "confidence": 82,
+                    "category": "Validation",
+                    "acceptance_criteria_refs": ["AC1", "Checkout flow"],
+                    "evidence": ["Story requires X", "Acceptance criteria mention Y"],
                     "custom_fields": {{ "field_id": {{ "id": "value_id" }} or "string_value" }}
                 }}
             ],
             "ac_coverage": 85.0,
+            "warnings": ["Optional short warning if context is ambiguous"]
         }}
         """
 
@@ -232,6 +265,8 @@ class BugGenerator:
             user_prompt = f"Story Context:\n{truncated_context}"
             if user_description:
                 user_prompt += f"\n\nUser's Bug Observation:\n{self._truncate_context(self._sanitize_for_ai(user_description), 2000)}"
+            if supporting_context:
+                user_prompt += f"\n\nSupporting Context:\n{self._truncate_context(self._sanitize_for_ai(supporting_context), 3000)}"
             return await self._generate_and_parse_json(system_prompt, user_prompt, model=model)
         except HTTPException:
             raise

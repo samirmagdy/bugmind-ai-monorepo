@@ -11,10 +11,19 @@ export interface JiraFieldOption {
   label?: string;
 }
 
+export interface SupportingArtifact {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+  content: string;
+}
+
 export interface CreatedIssue {
   id: string;
   key: string;
   self: string;
+  linkedToStory?: boolean;
 }
 
 export interface TestCase {
@@ -52,6 +61,13 @@ export interface BugReport {
   expected_result: string;
   actual_result: string;
   severity: string;
+  confidence?: number;
+  category?: string;
+  acceptance_criteria_refs?: string[];
+  evidence?: string[];
+  duplicate_group?: string | null;
+  overlap_warning?: string | null;
+  edited?: boolean;
   extra_fields?: Record<string, string | number | boolean | JiraUser | JiraFieldOption | (JiraUser | JiraFieldOption | string)[] | null>;
   // Isolated search state per bug
   userSearchQuery?: string;
@@ -98,6 +114,9 @@ export interface TabSession {
   expandedBug: number | null;
   testCases: TestCase[];
   coverageScore: number | null;
+  bugGenerationCount: number;
+  generationSupportingContext: string;
+  supportingArtifacts: SupportingArtifact[];
   manualInputs: string[];
   jiraMetadata: JiraMetadata | null;
   issueTypes: IssueType[];
@@ -215,6 +234,9 @@ export const INITIAL_SESSION: TabSession = {
   expandedBug: null,
   testCases: [],
   coverageScore: null,
+  bugGenerationCount: 5,
+  generationSupportingContext: '',
+  supportingArtifacts: [],
   manualInputs: [''],
   jiraMetadata: null,
   issueTypes: [],

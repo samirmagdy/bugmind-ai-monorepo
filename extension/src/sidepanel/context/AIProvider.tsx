@@ -1,5 +1,5 @@
 import React, { useState, useRef, useMemo, useCallback } from 'react';
-import { TabSession, BugReport, Usage, INITIAL_SESSION, TestCase, MissingField, IssueContextPayload } from '../types';
+import { TabSession, BugReport, Usage, INITIAL_SESSION, TestCase, MissingField, IssueContextPayload, SupportingArtifact } from '../types';
 import { ApiError, apiRequest, getErrorMessage, readJsonResponse, throwApiErrorResponse } from '../services/api';
 import {
   AIGenerationRequestPayload,
@@ -158,7 +158,14 @@ export const AIProvider: React.FC<{
     steps_to_reproduce: bug.steps_to_reproduce || '',
     expected_result: bug.expected_result || '',
     actual_result: bug.actual_result || '',
-    severity: 'Medium',
+    severity: bug.severity || 'Medium',
+    confidence: typeof bug.confidence === 'number' ? bug.confidence : 75,
+    category: bug.category || 'Functional Gap',
+    acceptance_criteria_refs: bug.acceptance_criteria_refs || [],
+    evidence: bug.evidence || [],
+    duplicate_group: bug.duplicate_group || null,
+    overlap_warning: bug.overlap_warning || null,
+    edited: false,
     extra_fields: {
       ...buildDefaultExtraFields(),
       ...sanitizeExtraFields((bug.fields || {}) as BugReport['extra_fields'])
@@ -221,7 +228,7 @@ export const AIProvider: React.FC<{
       const curr = prev[currentTabId] || INITIAL_SESSION;
       const newBugs = [...(curr.bugs || [])];
       if (newBugs[index]) {
-        newBugs[index] = { ...newBugs[index], ...updates };
+        newBugs[index] = { ...newBugs[index], ...updates, edited: true };
       }
       return { ...prev, [currentTabId]: { ...curr, bugs: newBugs } };
     });
@@ -238,6 +245,27 @@ export const AIProvider: React.FC<{
       return { ...prev, [currentTabId]: { ...curr, testCases: newCases } };
     });
   }, [currentTabId, setTabSessions]);
+
+  const buildGenerationLearningHints = useCallback(() => {
+    const editedBugs = (session.bugs || []).filter((bug) => bug.edited);
+    if (!editedBugs.length) return '';
+
+    const hints = editedBugs.slice(0, 3).map((bug, index) => {
+      const refs = (bug.acceptance_criteria_refs || []).slice(0, 2).join(', ');
+      return `Edited example ${index + 1}: Severity=${bug.severity}; Category=${bug.category || 'Unspecified'}; Summary="${bug.summary}".${refs ? ` References=${refs}.` : ''}`;
+    });
+    return `Use these user-corrected bug drafting preferences as guidance:\n${hints.join('\n')}`;
+  }, [session.bugs]);
+
+  const buildArtifactContext = useCallback(() => {
+    const artifacts = (session.supportingArtifacts || []).map((artifact: SupportingArtifact) => {
+      const truncated = artifact.content.length > 4000
+        ? `${artifact.content.slice(0, 4000)}\n... (artifact truncated) ...`
+        : artifact.content;
+      return `Attachment: ${artifact.name} (${artifact.type || 'text/plain'}, ${artifact.size} bytes)\n${truncated}`;
+    });
+    return artifacts.join('\n\n');
+  }, [session.supportingArtifacts]);
 
   // Phase 5: Streaming Implementation
   const generateBugs = useCallback(async () => {
@@ -263,7 +291,9 @@ export const AIProvider: React.FC<{
         instance_url: session.instanceUrl,
         project_key: projectKey,
         project_id: projectId,
-        issue_type_id: session.selectedIssueType.id
+        issue_type_id: session.selectedIssueType.id,
+        bug_count: session.bugGenerationCount,
+        supporting_context: [session.generationSupportingContext, buildGenerationLearningHints(), buildArtifactContext()].filter(Boolean).join('\n\n')
       };
       const res = await apiRequest(`${apiBase}/ai/generate`, {
         method: 'POST',
@@ -279,7 +309,12 @@ export const AIProvider: React.FC<{
       const data = await readJsonResponse<AIGenerationResponsePayload>(res);
       const bugs = (data.bugs || []).map(toFrontendBug);
 
-      updateSession({ bugs, testCases: [], coverageScore: data.ac_coverage ?? null }, currentTabId);
+      updateSession({
+        bugs,
+        testCases: [],
+        coverageScore: data.ac_coverage ?? null,
+        success: data.warnings?.length ? data.warnings.join(' ') : null,
+      }, currentTabId);
       logDebug('AI-OK', `Analysis complete for ${session.issueData.key}.`);
 
     } catch (err: unknown) {
@@ -289,7 +324,7 @@ export const AIProvider: React.FC<{
       generateBugsInFlightRef.current = false;
       updateSession({ loading: false }, currentTabId);
     }
-  }, [apiBase, authToken, buildIssueContext, currentTabId, getProjectRequestParams, logDebug, refreshAuthToken, session.instanceUrl, session.issueData, session.jiraConnectionId, session.selectedIssueType, toFrontendBug, updateSession]);
+  }, [apiBase, authToken, buildArtifactContext, buildGenerationLearningHints, buildIssueContext, currentTabId, getProjectRequestParams, logDebug, refreshAuthToken, session.bugGenerationCount, session.generationSupportingContext, session.instanceUrl, session.issueData, session.jiraConnectionId, session.selectedIssueType, toFrontendBug, updateSession]);
 
   const generateTestCases = useCallback(async () => {
     if (generateTestsInFlightRef.current) return;
@@ -415,7 +450,9 @@ export const AIProvider: React.FC<{
           project_key: projectKey || 'MANUAL',
           project_id: projectId,
           issue_type_id: session.selectedIssueType.id,
-          user_description: manualInput
+          user_description: manualInput,
+          bug_count: 1,
+          supporting_context: [session.generationSupportingContext, buildGenerationLearningHints(), buildArtifactContext()].filter(Boolean).join('\n\n')
         };
         const res = await apiRequest(`${apiBase}/ai/generate`, {
           method: 'POST',
@@ -451,7 +488,66 @@ export const AIProvider: React.FC<{
       manualGenerateInFlightRef.current = false;
       updateSession({ loading: false });
     }
-  }, [apiBase, authToken, buildIssueContext, fetchUsage, getProjectRequestParams, logDebug, refreshAuthToken, session.bugs, session.instanceUrl, session.issueData, session.jiraConnectionId, session.manualInputs, session.selectedIssueType?.id, toFrontendBug, updateSession]);
+  }, [apiBase, authToken, buildArtifactContext, buildGenerationLearningHints, buildIssueContext, fetchUsage, getProjectRequestParams, logDebug, refreshAuthToken, session.bugs, session.generationSupportingContext, session.instanceUrl, session.issueData, session.jiraConnectionId, session.manualInputs, session.selectedIssueType?.id, toFrontendBug, updateSession]);
+
+  const regenerateBug = useCallback(async (index: number, refinementPrompt?: string) => {
+    const bug = session.bugs[index];
+    if (!bug || !session.issueData || !session.jiraConnectionId || !session.selectedIssueType?.id) return;
+    updateSession({ loading: true, error: null, success: null });
+    try {
+      const { projectKey, projectId } = getProjectRequestParams();
+      const payload: AIGenerationRequestPayload = {
+        issue_context: buildIssueContext(),
+        jira_connection_id: session.jiraConnectionId,
+        instance_url: session.instanceUrl,
+        project_key: projectKey,
+        project_id: projectId,
+        issue_type_id: session.selectedIssueType.id,
+        bug_count: 1,
+        focus_bug_summary: bug.summary,
+        refinement_prompt: refinementPrompt || `Refine this finding as a stronger ${bug.category || 'functional'} bug with severity ${bug.severity}.`,
+        supporting_context: [
+          session.generationSupportingContext,
+          buildGenerationLearningHints(),
+          buildArtifactContext(),
+          `Current draft evidence: ${(bug.evidence || []).join('; ')}`,
+          `Current AC references: ${(bug.acceptance_criteria_refs || []).join(', ')}`
+        ].filter(Boolean).join('\n\n')
+      };
+      const res = await apiRequest(`${apiBase}/ai/generate`, {
+        method: 'POST',
+        token: authToken,
+        onUnauthorized: refreshAuthToken,
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) {
+        await throwApiErrorResponse(res, `Failed to refine finding (${res.status})`);
+      }
+      const data = await readJsonResponse<AIGenerationResponsePayload>(res);
+      const regenerated = (data.bugs || []).map(toFrontendBug)[0];
+      if (!regenerated || !currentTabId) return;
+
+      setTabSessions(prev => {
+        const curr = prev[currentTabId] || INITIAL_SESSION;
+        const nextBugs = [...(curr.bugs || [])];
+        if (!nextBugs[index]) return prev;
+        nextBugs[index] = { ...regenerated };
+        return {
+          ...prev,
+          [currentTabId]: {
+            ...curr,
+            bugs: nextBugs,
+            expandedBug: index,
+            success: data.warnings?.length ? data.warnings.join(' ') : 'Finding regenerated.',
+          }
+        };
+      });
+    } catch (err) {
+      updateSession({ error: getErrorMessage(err) });
+    } finally {
+      updateSession({ loading: false });
+    }
+  }, [apiBase, authToken, buildArtifactContext, buildGenerationLearningHints, buildIssueContext, currentTabId, getProjectRequestParams, refreshAuthToken, session.bugs, session.generationSupportingContext, session.instanceUrl, session.issueData, session.jiraConnectionId, session.selectedIssueType, setTabSessions, toFrontendBug, updateSession]);
 
   const validateBug = useCallback(async (index: number): Promise<boolean> => {
     const bug = session.bugs[index];
@@ -537,7 +633,10 @@ export const AIProvider: React.FC<{
       const data = await readJsonResponse<AISubmitResponsePayload>(res);
       updateSession({
         view: 'success',
-        createdIssues: data.created_issues || [],
+        createdIssues: (data.created_issues || []).map((issue) => ({
+          ...issue,
+          linkedToStory: !(data.unlinked_issue_keys || []).includes(issue.key)
+        })),
         success: data.warnings?.length ? data.warnings.join(' ') : null,
       });
     } catch (err: unknown) {
@@ -628,13 +727,14 @@ export const AIProvider: React.FC<{
     generateTestCases,
     handleManualGenerate,
     submitBugs,
+    regenerateBug,
     searchUsers,
     handleUpdateBug,
     handleUpdateTestCase,
     publishTestCasesToXray,
     validateBug,
     preparePreviewBug
-  }), [usage, fetchUsage, customModel, customKey, hasCustomKeySaved, fetchAISettings, generateBugs, generateTestCases, handleManualGenerate, submitBugs, searchUsers, handleUpdateBug, handleUpdateTestCase, publishTestCasesToXray, validateBug, preparePreviewBug]);
+  }), [usage, fetchUsage, customModel, customKey, hasCustomKeySaved, fetchAISettings, generateBugs, generateTestCases, handleManualGenerate, submitBugs, regenerateBug, searchUsers, handleUpdateBug, handleUpdateTestCase, publishTestCasesToXray, validateBug, preparePreviewBug]);
 
   return <AIContext.Provider value={value}>{children}</AIContext.Provider>;
 };
