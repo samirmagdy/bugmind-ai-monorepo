@@ -105,6 +105,48 @@ class BugGenerator:
 
         return parsed
 
+    async def _generate_with_json_retry(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        model: str = None,
+        expect_test_suite: bool = False,
+    ) -> Dict[str, Any]:
+        try:
+            return await self._generate_and_parse_json(
+                system_prompt,
+                user_prompt,
+                model=model,
+                expect_test_suite=expect_test_suite,
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning("AI JSON parse failed on first attempt: %s", exc)
+            retry_prompt = system_prompt + """
+
+            CRITICAL RETRY INSTRUCTION:
+            Return one valid JSON object only.
+            Do not include markdown fences.
+            Do not include prose before or after the JSON.
+            Do not leave any field empty.
+            """
+            try:
+                return await self._generate_and_parse_json(
+                    retry_prompt,
+                    user_prompt,
+                    model=model,
+                    expect_test_suite=expect_test_suite,
+                )
+            except HTTPException:
+                raise
+            except Exception as retry_exc:
+                logger.exception("AI JSON parse failed after retry")
+                raise HTTPException(
+                    status_code=502,
+                    detail="AI returned an unreadable response. Please try again."
+                ) from retry_exc
+
     def _clean_schema_for_ai(self, schema: list) -> list:
         """
         Aggressively filters and minifies the Jira schema to prevent AI prompt bloat.
@@ -317,12 +359,12 @@ class BugGenerator:
                 user_prompt += f"\n\nUser's Bug Observation:\n{self._truncate_context(self._sanitize_for_ai(user_description), 2000)}"
             if supporting_context:
                 user_prompt += f"\n\nSupporting Context:\n{self._truncate_context(self._sanitize_for_ai(supporting_context), 3000)}"
-            return await self._generate_and_parse_json(system_prompt, user_prompt, model=model)
+            return await self._generate_with_json_retry(system_prompt, user_prompt, model=model)
         except HTTPException:
             raise
         except Exception as e:
             logger.exception("AI bug generation failed")
-            raise HTTPException(status_code=500, detail=f"AI Bug Generation Failed: {str(e)}")
+            raise HTTPException(status_code=502, detail=f"AI Bug Generation Failed: {str(e)}")
 
     async def generate_test_cases(self, context_text: str, model: str = None, custom_instructions: str = None) -> Dict[str, Any]:
         """
@@ -353,30 +395,13 @@ class BugGenerator:
         try:
             truncated_context = self._truncate_context(self._sanitize_for_ai(context_text))
             user_prompt = f"Story Context:\n{truncated_context}"
-            try:
-                return await self._generate_and_parse_json(
-                    system_prompt,
-                    user_prompt,
-                    model=model,
-                    expect_test_suite=True
-                )
-            except HTTPException:
-                raise
-            except Exception:
-                retry_prompt = system_prompt + """
-
-                CRITICAL RETRY INSTRUCTION:
-                Return a valid JSON object only.
-                Do not include markdown fences.
-                Do not include prose before or after the JSON.
-                """
-                return await self._generate_and_parse_json(
-                    retry_prompt,
-                    user_prompt,
-                    model=model,
-                    expect_test_suite=True
-                )
+            return await self._generate_with_json_retry(
+                system_prompt,
+                user_prompt,
+                model=model,
+                expect_test_suite=True
+            )
         except HTTPException:
             raise
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"AI Test Suite Generation Failed: {str(e)}")
+            raise HTTPException(status_code=502, detail=f"AI Test Suite Generation Failed: {str(e)}")

@@ -33,6 +33,13 @@ export function translateError(error: unknown, context?: string): TranslatedErro
     };
   }
 
+  if (message.includes('AI returned an unreadable response')) {
+    return {
+      title: 'AI Response Failed',
+      description: 'The AI service responded, but the result was malformed. Please try again.'
+    };
+  }
+
   if (status === 413 || message.includes('payload too large')) {
     return {
       title: 'Request Too Large',
@@ -217,6 +224,13 @@ export function translateError(error: unknown, context?: string): TranslatedErro
     return {
       title: 'Xray Publish Unsupported',
       description: message
+    };
+  }
+
+  if (message.includes('AI Bug Generation Failed') || message.includes('AI Test Suite Generation Failed') || message.includes('AI Service Error')) {
+    return {
+      title: 'AI Generation Failed',
+      description: 'BugMind could not get a usable response from the AI provider. Please try again in a moment.'
     };
   }
 
