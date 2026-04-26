@@ -3,9 +3,9 @@ import { useBugMind } from '../../hooks/useBugMind';
 import { 
   Plus, ChevronDown, Bug,
   Loader2, Send, AlertCircle, Zap, RefreshCw,
-  Compass, ArrowRight, Check, Layout, AlertTriangle, BrainCircuit, Paperclip, X
+  Compass, ArrowRight, Check, Layout, AlertTriangle, BrainCircuit, Paperclip, X, ClipboardList
 } from 'lucide-react';
-import { BugReport, JiraField, JiraFieldOption, JiraUser, SupportingArtifact, TestCase } from '../../types';
+import { BugReport, JiraField, JiraFieldOption, JiraUser, SupportingArtifact, TestCase, ManualBugInput, AnalysisCoverageItem } from '../../types';
 import AutoResizeTextarea from '../common/AutoResizeTextarea';
 import { ActionButton, SurfaceCard, StatusBadge, StatusPanel } from '../common/DesignSystem';
 import LuxurySearchableSelect, { SelectOption, SelectValue } from '../common/LuxurySearchableSelect';
@@ -127,6 +127,14 @@ function toUserOption(user: JiraUser): SelectOption {
   };
 }
 
+function coverageTone(status: string): 'success' | 'warning' | 'info' | 'danger' {
+  const normalized = status.trim().toLowerCase();
+  if (normalized === 'covered') return 'success';
+  if (normalized === 'partial') return 'warning';
+  if (normalized === 'missing') return 'danger';
+  return 'info';
+}
+
 const MainView: React.FC = () => {
   const { 
     session, updateSession, currentTabId, refreshIssue, debug, handleTabReload,
@@ -141,7 +149,7 @@ const MainView: React.FC = () => {
   const isRecoveringStalePage = session.error === 'STALE_PAGE' && !session.issueData;
   const staleRecoveryAttemptsRef = useRef(0);
   const artifactInputRef = useRef<HTMLInputElement | null>(null);
-  const manualInputs = session.manualInputs?.length ? session.manualInputs : [''];
+  const manualInputs = session.manualInputs?.length ? session.manualInputs : [{ text: '', supportingContext: '', supportingArtifacts: [] }];
   const requiresIssueType = !session.issueData || !session.selectedIssueType?.id || session.issueTypes.length === 0;
   const acceptanceCriteria = session.issueData?.acceptanceCriteria?.trim() || '';
   const descriptionText = session.issueData?.description?.trim() || '';
@@ -161,17 +169,34 @@ const MainView: React.FC = () => {
 
   const updateManualInput = (index: number, value: string) => {
     const nextInputs = [...manualInputs];
-    nextInputs[index] = value;
+    nextInputs[index] = { ...nextInputs[index], text: value };
     updateSession({ manualInputs: nextInputs });
   };
 
   const addManualInput = () => {
-    updateSession({ manualInputs: [...manualInputs, ''] });
+    updateSession({ manualInputs: [...manualInputs, { text: '', supportingContext: '', supportingArtifacts: [] }] });
   };
 
   const removeManualInput = (index: number) => {
     const nextInputs = manualInputs.filter((_, currentIndex) => currentIndex !== index);
-    updateSession({ manualInputs: nextInputs.length ? nextInputs : [''] });
+    updateSession({ manualInputs: nextInputs.length ? nextInputs : [{ text: '', supportingContext: '', supportingArtifacts: [] }] });
+  };
+
+  const updateManualSupportingContext = (index: number, value: string) => {
+    const nextInputs = [...manualInputs];
+    nextInputs[index] = { ...nextInputs[index], supportingContext: value };
+    updateSession({ manualInputs: nextInputs });
+  };
+
+  const removeManualSupportingArtifact = (index: number, artifactId: string) => {
+    const nextInputs = [...manualInputs];
+    const currentInput = nextInputs[index];
+    if (!currentInput) return;
+    nextInputs[index] = {
+      ...currentInput,
+      supportingArtifacts: (currentInput.supportingArtifacts || []).filter((artifact) => artifact.id !== artifactId)
+    };
+    updateSession({ manualInputs: nextInputs });
   };
 
   const removeSupportingArtifact = (artifactId: string) => {
@@ -227,6 +252,76 @@ const MainView: React.FC = () => {
     event.target.value = '';
   };
 
+  const handleManualSupportingFiles = async (index: number, event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    if (!files.length) return;
+
+    const acceptedExtensions = /\.(txt|log|md|json|csv|xml|yaml|yml)$/i;
+    const nextArtifacts: SupportingArtifact[] = [];
+    const rejectedNames: string[] = [];
+
+    for (const file of files) {
+      const isTextLike = file.type.startsWith('text/') || file.type === 'application/json' || acceptedExtensions.test(file.name);
+      if (!isTextLike || file.size > 300_000) {
+        rejectedNames.push(file.name);
+        continue;
+      }
+
+      const rawContent = await file.text();
+      const content = rawContent.trim();
+      if (!content) continue;
+
+      nextArtifacts.push({
+        id: `${file.name}-${file.lastModified}-${file.size}`,
+        name: file.name,
+        type: file.type || 'text/plain',
+        size: file.size,
+        content
+      });
+    }
+
+    const nextInputs = [...manualInputs];
+    const currentInput = nextInputs[index];
+    if (currentInput && nextArtifacts.length > 0) {
+      const merged = [...(currentInput.supportingArtifacts || [])];
+      for (const artifact of nextArtifacts) {
+        if (!merged.some((item) => item.id === artifact.id)) {
+          merged.push(artifact);
+        }
+      }
+      nextInputs[index] = { ...currentInput, supportingArtifacts: merged };
+      updateSession({
+        manualInputs: nextInputs,
+        success: rejectedNames.length ? `Skipped unsupported files: ${rejectedNames.join(', ')}` : 'Supporting files added.'
+      });
+    } else if (rejectedNames.length) {
+      updateSession({ error: `Only text-based files up to 300 KB are supported here. Skipped: ${rejectedNames.join(', ')}` });
+    }
+
+    event.target.value = '';
+  };
+
+  const renderSupportingArtifacts = (artifacts: SupportingArtifact[], onRemove: (artifactId: string) => void) => (
+    <div className="space-y-2">
+      {artifacts.map((artifact) => (
+        <div key={artifact.id} className="flex items-start justify-between gap-3 rounded-[1rem] border border-[var(--border-soft)] bg-[var(--surface-soft)] px-3 py-2.5">
+          <div className="min-w-0">
+            <div className="text-[11px] font-bold text-[var(--text-primary)] truncate">{artifact.name}</div>
+            <div className="text-[10px] text-[var(--text-muted)]">{artifact.type || 'text/plain'} • {Math.max(1, Math.round(artifact.size / 1024))} KB</div>
+          </div>
+          <button
+            type="button"
+            onClick={() => onRemove(artifact.id)}
+            className="flex h-7 w-7 items-center justify-center rounded-full border border-[var(--border-soft)] text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+            aria-label={`Remove ${artifact.name}`}
+          >
+            <X size={12} />
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+
   const supportingContextPanel = (
     <div className="space-y-3">
       <div className="space-y-1.5">
@@ -261,26 +356,7 @@ const MainView: React.FC = () => {
         <p className="text-[11px] text-[var(--text-muted)] leading-relaxed">
           Upload text logs, JSON, markdown, CSV, or config snippets. These are included as AI support context for bug generation and refinement.
         </p>
-        {session.supportingArtifacts.length > 0 && (
-          <div className="space-y-2">
-            {session.supportingArtifacts.map((artifact) => (
-              <div key={artifact.id} className="flex items-start justify-between gap-3 rounded-[1rem] border border-[var(--border-soft)] bg-[var(--surface-soft)] px-3 py-2.5">
-                <div className="min-w-0">
-                  <div className="text-[11px] font-bold text-[var(--text-primary)] truncate">{artifact.name}</div>
-                  <div className="text-[10px] text-[var(--text-muted)]">{artifact.type || 'text/plain'} • {Math.max(1, Math.round(artifact.size / 1024))} KB</div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => removeSupportingArtifact(artifact.id)}
-                  className="flex h-7 w-7 items-center justify-center rounded-full border border-[var(--border-soft)] text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-                  aria-label={`Remove ${artifact.name}`}
-                >
-                  <X size={12} />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
+        {session.supportingArtifacts.length > 0 && renderSupportingArtifacts(session.supportingArtifacts, removeSupportingArtifact)}
       </div>
     </div>
   );
@@ -709,7 +785,7 @@ const MainView: React.FC = () => {
                             Add one or more bug descriptions. Each input will be structured as a separate Jira-ready bug report.
                           </p>
                           <div className="space-y-3">
-                            {manualInputs.map((manualInput, index) => (
+                            {manualInputs.map((manualInput: ManualBugInput, index) => (
                               <div key={`manual-input-${index}`} className="space-y-2">
                                 <div className="flex items-center justify-between">
                                   <label className="context-label uppercase tracking-wider block ml-1">Bug Input {index + 1}</label>
@@ -726,13 +802,47 @@ const MainView: React.FC = () => {
                                 <AutoResizeTextarea
                                   className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-[1rem] p-3 text-sm outline-none focus:border-[var(--border-active)] min-h-[96px]"
                                   placeholder="Describe the issue in plain English. This input becomes one bug."
-                                  value={manualInput}
+                                  value={manualInput.text}
                                   onChange={e => updateManualInput(index, e.target.value)}
                                 />
+                                <div className="space-y-3 rounded-[1rem] border border-[var(--border-soft)] bg-[var(--surface-soft)]/65 p-3">
+                                  <div className="space-y-1.5">
+                                    <label className="context-label uppercase tracking-wider block ml-1">Bug-Specific Logs / Notes</label>
+                                    <AutoResizeTextarea
+                                      value={manualInput.supportingContext}
+                                      onChange={e => updateManualSupportingContext(index, e.target.value)}
+                                      className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-[1rem] p-3 text-xs text-[var(--text-secondary)] outline-none min-h-[72px]"
+                                      placeholder="Stack traces, log excerpts, environment details, or anything specific to this bug."
+                                    />
+                                  </div>
+                                  <div className="space-y-2">
+                                    <div className="flex items-center justify-between gap-3">
+                                      <label className="context-label uppercase tracking-wider block ml-1">Bug-Specific Files</label>
+                                      <label
+                                        htmlFor={`manual-artifacts-${index}`}
+                                        className="flex cursor-pointer items-center gap-1 rounded-full border border-[var(--border-soft)] bg-[var(--bg-input)] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--text-primary)]"
+                                      >
+                                        <Paperclip size={12} />
+                                        Add Files
+                                      </label>
+                                      <input
+                                        id={`manual-artifacts-${index}`}
+                                        type="file"
+                                        multiple
+                                        accept=".txt,.log,.md,.json,.csv,.xml,.yaml,.yml,text/*,application/json"
+                                        className="hidden"
+                                        onChange={(event) => { void handleManualSupportingFiles(index, event); }}
+                                      />
+                                    </div>
+                                    {(manualInput.supportingArtifacts || []).length > 0 && renderSupportingArtifacts(
+                                      manualInput.supportingArtifacts || [],
+                                      (artifactId) => removeManualSupportingArtifact(index, artifactId)
+                                    )}
+                                  </div>
+                                </div>
                               </div>
                             ))}
                           </div>
-                          {supportingContextPanel}
                           <ActionButton onClick={addManualInput} variant="secondary" className="h-10 w-full text-[12px]">
                             <Plus size={15} />
                             Add Another Bug
@@ -740,7 +850,7 @@ const MainView: React.FC = () => {
                           <ActionButton
                             onClick={() => handleManualGenerate()}
                             variant="primary"
-                            disabled={session.loading || manualInputs.every(input => !input.trim())}
+                            disabled={session.loading || manualInputs.every(input => !input.text.trim())}
                             className="h-11"
                           >
                             <Zap size={16} />
@@ -815,7 +925,7 @@ const MainView: React.FC = () => {
                   <h3 className="text-lg font-bold text-[var(--text-primary)]">{session.testCases.length} Test Assets</h3>
                   <div className="flex gap-4">
                     <button 
-                      onClick={() => updateSession({ testCases: [], coverageScore: null, error: null, createdIssues: [], xrayWarnings: [], mainWorkflow: 'home' })} 
+                      onClick={() => updateSession({ testCases: [], coverageScore: null, gapAnalysisSummary: null, error: null, createdIssues: [], xrayWarnings: [], mainWorkflow: 'home' })} 
                       className="text-xs font-bold text-[var(--error)]"
                     >
                       Clear
@@ -968,11 +1078,100 @@ const MainView: React.FC = () => {
                 </div>
               </div>            ) : (
               <div className="space-y-4">
+                {session.gapAnalysisSummary && (
+                  <SurfaceCard className="space-y-5">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <div className="w-8 h-8 rounded-[0.9rem] bg-[var(--surface-accent-strong)] flex items-center justify-center text-[var(--primary-blue)] border border-[var(--border-soft)]">
+                            <ClipboardList size={16} />
+                          </div>
+                          <div>
+                            <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--text-muted)]">Gap Analysis Summary</div>
+                            <h3 className="workflow-card-title text-[16px]">{session.gapAnalysisSummary.summary_headline || 'Structured risk summary'}</h3>
+                          </div>
+                        </div>
+                        {session.gapAnalysisSummary.issue_type_mode && (
+                          <StatusBadge tone="info">{session.gapAnalysisSummary.issue_type_mode}</StatusBadge>
+                        )}
+                      </div>
+                      {session.coverageScore !== null && (
+                        <div className="rounded-[1rem] border border-[var(--card-border)] bg-[var(--surface-soft)] px-3 py-2 text-right">
+                          <div className="text-[9px] font-bold uppercase tracking-[0.18em] text-[var(--text-muted)]">AC Coverage</div>
+                          <div className="text-lg font-black text-[var(--text-primary)]">{Math.round(session.coverageScore)}%</div>
+                        </div>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {session.gapAnalysisSummary.highest_risk_area && (
+                        <div className="rounded-[1rem] border border-[var(--border-soft)] bg-[var(--bg-input)] px-3 py-3">
+                          <div className="text-[9px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)]">Highest Risk Area</div>
+                          <div className="mt-1 text-[12px] font-bold text-[var(--text-primary)]">{session.gapAnalysisSummary.highest_risk_area}</div>
+                        </div>
+                      )}
+                      {session.gapAnalysisSummary.recommended_next_action && (
+                        <div className="rounded-[1rem] border border-[var(--border-soft)] bg-[var(--bg-input)] px-3 py-3">
+                          <div className="text-[9px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)]">Recommended Next Action</div>
+                          <div className="mt-1 text-[12px] font-bold text-[var(--text-primary)]">{session.gapAnalysisSummary.recommended_next_action}</div>
+                        </div>
+                      )}
+                    </div>
+                    {session.gapAnalysisSummary.grouped_risks.length > 0 && (
+                      <div className="space-y-2">
+                        <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--text-muted)]">Grouped Risks</div>
+                        <div className="grid grid-cols-1 gap-3">
+                          {session.gapAnalysisSummary.grouped_risks.map((risk) => (
+                            <div key={`${risk.group}-${risk.title}`} className="rounded-[1rem] border border-[var(--border-soft)] bg-[var(--surface-soft)] px-3 py-3">
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="text-[12px] font-bold text-[var(--text-primary)]">{risk.title}</div>
+                                <StatusBadge tone="warning">{risk.count} finding{risk.count === 1 ? '' : 's'}</StatusBadge>
+                              </div>
+                              <div className="mt-1 text-[11px] text-[var(--text-secondary)]">{risk.description}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {session.gapAnalysisSummary.missing_ac_recommendations.length > 0 && (
+                      <div className="space-y-2">
+                        <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--text-muted)]">Missing AC Recommendations</div>
+                        <div className="space-y-2">
+                          {session.gapAnalysisSummary.missing_ac_recommendations.map((item, idx) => (
+                            <div key={`${item}-${idx}`} className="rounded-[1rem] border border-[var(--border-soft)] bg-[var(--bg-input)] px-3 py-2.5 text-[11px] text-[var(--text-secondary)]">
+                              {item}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {session.gapAnalysisSummary.ac_coverage_map.length > 0 && (
+                      <div className="space-y-2">
+                        <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--text-muted)]">AC Coverage Map</div>
+                        <div className="space-y-2">
+                          {session.gapAnalysisSummary.ac_coverage_map.map((item: AnalysisCoverageItem, idx: number) => (
+                            <div key={`${item.reference}-${idx}`} className="rounded-[1rem] border border-[var(--border-soft)] bg-[var(--bg-input)] px-3 py-3">
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="text-[12px] font-bold text-[var(--text-primary)]">{item.reference}</div>
+                                <StatusBadge tone={coverageTone(item.status)}>{item.status}</StatusBadge>
+                              </div>
+                              <div className="mt-1 text-[11px] text-[var(--text-secondary)]">{item.rationale}</div>
+                              {item.related_bug_indexes.length > 0 && (
+                                <div className="mt-2 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--text-muted)]">
+                                  Related findings: {item.related_bug_indexes.join(', ')}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </SurfaceCard>
+                )}
                 <div className="flex justify-between items-center px-1">
                   <h3 className="text-lg font-bold text-[var(--text-primary)]">{(session.bugs || []).length} Analysis Findings</h3>
                   <div className="flex gap-4">
                     <button 
-                      onClick={() => updateSession({ bugs: [], testCases: [], coverageScore: null, error: null, mainWorkflow: 'home' })} 
+                      onClick={() => updateSession({ bugs: [], testCases: [], coverageScore: null, gapAnalysisSummary: null, error: null, mainWorkflow: 'home' })} 
                       className="text-xs font-bold text-[var(--error)]"
                     >
                       Clear

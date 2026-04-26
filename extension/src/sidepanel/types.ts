@@ -19,6 +19,36 @@ export interface SupportingArtifact {
   content: string;
 }
 
+export interface ManualBugInput {
+  text: string;
+  supportingContext: string;
+  supportingArtifacts: SupportingArtifact[];
+}
+
+export interface AnalysisCoverageItem {
+  reference: string;
+  status: string;
+  rationale: string;
+  related_bug_indexes: number[];
+}
+
+export interface RiskSummaryGroup {
+  group: string;
+  title: string;
+  description: string;
+  count: number;
+}
+
+export interface GapAnalysisSummary {
+  issue_type_mode?: string | null;
+  summary_headline?: string | null;
+  highest_risk_area?: string | null;
+  recommended_next_action?: string | null;
+  grouped_risks: RiskSummaryGroup[];
+  missing_ac_recommendations: string[];
+  ac_coverage_map: AnalysisCoverageItem[];
+}
+
 export interface CreatedIssue {
   id: string;
   key: string;
@@ -114,10 +144,11 @@ export interface TabSession {
   expandedBug: number | null;
   testCases: TestCase[];
   coverageScore: number | null;
+  gapAnalysisSummary: GapAnalysisSummary | null;
   bugGenerationCount: number;
   generationSupportingContext: string;
   supportingArtifacts: SupportingArtifact[];
-  manualInputs: string[];
+  manualInputs: ManualBugInput[];
   jiraMetadata: JiraMetadata | null;
   issueTypes: IssueType[];
   selectedIssueType: IssueType | null;
@@ -234,10 +265,11 @@ export const INITIAL_SESSION: TabSession = {
   expandedBug: null,
   testCases: [],
   coverageScore: null,
+  gapAnalysisSummary: null,
   bugGenerationCount: 5,
   generationSupportingContext: '',
   supportingArtifacts: [],
-  manualInputs: [''],
+  manualInputs: [{ text: '', supportingContext: '', supportingArtifacts: [] }],
   jiraMetadata: null,
   issueTypes: [],
   selectedIssueType: null,

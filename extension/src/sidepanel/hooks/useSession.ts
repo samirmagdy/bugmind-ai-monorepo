@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { TabSession, INITIAL_SESSION } from '../types';
+import { TabSession, INITIAL_SESSION, ManualBugInput, SupportingArtifact } from '../types';
 import { dbService } from '../services/db';
 import { TIMEOUTS } from '../constants';
 
@@ -22,6 +22,51 @@ function stripEphemeralJiraState(session: Partial<TabSession>): Partial<TabSessi
   delete sanitized.resolvedPayload;
 
   return sanitized;
+}
+
+function normalizeSupportingArtifacts(value: unknown): SupportingArtifact[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is SupportingArtifact =>
+      Boolean(item) &&
+      typeof item === 'object' &&
+      typeof (item as SupportingArtifact).id === 'string' &&
+      typeof (item as SupportingArtifact).name === 'string' &&
+      typeof (item as SupportingArtifact).type === 'string' &&
+      typeof (item as SupportingArtifact).size === 'number' &&
+      typeof (item as SupportingArtifact).content === 'string'
+    );
+}
+
+function normalizeManualInputs(value: unknown): ManualBugInput[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    return INITIAL_SESSION.manualInputs;
+  }
+
+  const normalized = value
+    .map((item): ManualBugInput | null => {
+      if (typeof item === 'string') {
+        return { text: item, supportingContext: '', supportingArtifacts: [] };
+      }
+
+      if (!item || typeof item !== 'object') return null;
+
+      const text = typeof (item as { text?: unknown }).text === 'string'
+        ? (item as { text: string }).text
+        : '';
+      const supportingContext = typeof (item as { supportingContext?: unknown }).supportingContext === 'string'
+        ? (item as { supportingContext: string }).supportingContext
+        : '';
+
+      return {
+        text,
+        supportingContext,
+        supportingArtifacts: normalizeSupportingArtifacts((item as { supportingArtifacts?: unknown }).supportingArtifacts)
+      };
+    })
+    .filter((item): item is ManualBugInput => Boolean(item));
+
+  return normalized.length > 0 ? normalized : INITIAL_SESSION.manualInputs;
 }
 
 export function useSession(log?: (tag: string, msg: string) => void) {
@@ -99,6 +144,7 @@ export function useSession(log?: (tag: string, msg: string) => void) {
       let sessionData: TabSession = { 
         ...INITIAL_SESSION, 
         ...rawSession,
+        manualInputs: normalizeManualInputs((rawSession as Partial<TabSession>).manualInputs),
         // Always respect the global onboarding flag so new tabs don't re-show onboarding
         onboardingCompleted: globalOnboardingDone || (rawSession.onboardingCompleted ?? false)
       };

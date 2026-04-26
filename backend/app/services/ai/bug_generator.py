@@ -160,6 +160,7 @@ class BugGenerator:
         self,
         context_text: str,
         current_fields_schema: list,
+        issue_type_name: Optional[str] = None,
         model: str = None,
         user_description: str = None,
         custom_instructions: str = None,
@@ -180,6 +181,21 @@ class BugGenerator:
             len(json.dumps(current_fields_schema)),
             len(schema_json),
         )
+
+        issue_type_label = (issue_type_name or "Generic Story").strip()
+        issue_type_lower = issue_type_label.lower()
+        if any(keyword in issue_type_lower for keyword in ["api", "service", "backend", "integration"]):
+            issue_type_mode = "API and backend reliability analysis"
+        elif any(keyword in issue_type_lower for keyword in ["mobile", "ios", "android", "app"]):
+            issue_type_mode = "Mobile workflow and device-context analysis"
+        elif any(keyword in issue_type_lower for keyword in ["epic", "story", "feature", "user story"]):
+            issue_type_mode = "User workflow and acceptance-criteria gap analysis"
+        elif any(keyword in issue_type_lower for keyword in ["task", "subtask"]):
+            issue_type_mode = "Implementation-task and regression-risk analysis"
+        elif any(keyword in issue_type_lower for keyword in ["bug", "defect", "incident"]):
+            issue_type_mode = "Root-cause and regression-expansion analysis"
+        else:
+            issue_type_mode = "General product-quality gap analysis"
 
         mode_instruction = ""
         target_bug_count = max(1, min(int(bug_count or 5), 10))
@@ -210,6 +226,7 @@ class BugGenerator:
         You are BugMind, a Senior QA Lead. 
         Your task is to synthesize a professional Jira bug report.
         {instruction_block}
+        Active analysis mode: {issue_type_mode}
         
         {mode_instruction}
         
@@ -224,6 +241,14 @@ class BugGenerator:
         - Each bug must include a "category" like Functional Gap, Edge Case, Validation, Permissions, Workflow, Data Integrity, UX, or Regression Risk.
         - Each bug must include "acceptance_criteria_refs" as a short list of AC references or story sections that support the finding.
         - Each bug must include "evidence" as a short list of quoted or paraphrased signals from the story or user notes.
+        - You must produce an "analysis_summary" object with:
+          - "issue_type_mode"
+          - "summary_headline"
+          - "highest_risk_area"
+          - "recommended_next_action"
+          - "grouped_risks": grouped themes with count
+          - "missing_ac_recommendations": concise AC additions or clarifications
+          - "ac_coverage_map": coverage status for the main acceptance criteria or story expectations
         - Each bug's "custom_fields" dictionary: Scrutinize the schema below. If you can confidently predict a value for any of these fields (like Priority, Severity, or Component) based on the context, populate the key with the field ID and the value with the appropriate Jira object (e.g. {{"id": "..."}}).
 
         CRITICAL:
@@ -256,7 +281,32 @@ class BugGenerator:
                 }}
             ],
             "ac_coverage": 85.0,
-            "warnings": ["Optional short warning if context is ambiguous"]
+            "warnings": ["Optional short warning if context is ambiguous"],
+            "analysis_summary": {{
+                "issue_type_mode": "{issue_type_mode}",
+                "summary_headline": "Short executive summary",
+                "highest_risk_area": "Most exposed workflow or domain",
+                "recommended_next_action": "What the team should do next",
+                "grouped_risks": [
+                    {{
+                        "group": "Validation",
+                        "title": "Validation gaps",
+                        "description": "What class of risk is under-specified",
+                        "count": 2
+                    }}
+                ],
+                "missing_ac_recommendations": [
+                    "Add an acceptance criterion for invalid input handling"
+                ],
+                "ac_coverage_map": [
+                    {{
+                        "reference": "AC1",
+                        "status": "partial",
+                        "rationale": "Covered by the story, but error paths are missing",
+                        "related_bug_indexes": [1, 2]
+                    }}
+                ]
+            }}
         }}
         """
 

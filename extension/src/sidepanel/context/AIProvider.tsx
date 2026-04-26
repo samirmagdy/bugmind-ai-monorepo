@@ -1,5 +1,5 @@
 import React, { useState, useRef, useMemo, useCallback } from 'react';
-import { TabSession, BugReport, Usage, INITIAL_SESSION, TestCase, MissingField, IssueContextPayload, SupportingArtifact } from '../types';
+import { TabSession, BugReport, Usage, INITIAL_SESSION, TestCase, MissingField, IssueContextPayload, SupportingArtifact, ManualBugInput, GapAnalysisSummary } from '../types';
 import { ApiError, apiRequest, getErrorMessage, readJsonResponse, throwApiErrorResponse } from '../services/api';
 import {
   AIGenerationRequestPayload,
@@ -172,6 +172,52 @@ export const AIProvider: React.FC<{
     }
   }), [buildDefaultExtraFields, sanitizeExtraFields]);
 
+  const normalizeGapAnalysisSummary = useCallback((summary: GapAnalysisSummary | null | undefined): GapAnalysisSummary | null => {
+    if (!summary || typeof summary !== 'object') return null;
+
+    const grouped_risks = Array.isArray(summary.grouped_risks)
+      ? summary.grouped_risks.filter((risk): risk is GapAnalysisSummary['grouped_risks'][number] =>
+        Boolean(risk) &&
+        typeof risk === 'object' &&
+        typeof risk.group === 'string' &&
+        typeof risk.title === 'string' &&
+        typeof risk.description === 'string' &&
+        typeof risk.count === 'number'
+      )
+      : [];
+
+    const missing_ac_recommendations = Array.isArray(summary.missing_ac_recommendations)
+      ? summary.missing_ac_recommendations.filter((item): item is string => typeof item === 'string')
+      : [];
+
+    const ac_coverage_map = Array.isArray(summary.ac_coverage_map)
+      ? summary.ac_coverage_map
+        .filter((item): item is GapAnalysisSummary['ac_coverage_map'][number] =>
+          Boolean(item) &&
+          typeof item === 'object' &&
+          typeof item.reference === 'string' &&
+          typeof item.status === 'string' &&
+          typeof item.rationale === 'string'
+        )
+        .map((item) => ({
+          ...item,
+          related_bug_indexes: Array.isArray(item.related_bug_indexes)
+            ? item.related_bug_indexes.filter((index): index is number => typeof index === 'number')
+            : []
+        }))
+      : [];
+
+    return {
+      issue_type_mode: summary.issue_type_mode || null,
+      summary_headline: summary.summary_headline || null,
+      highest_risk_area: summary.highest_risk_area || null,
+      recommended_next_action: summary.recommended_next_action || null,
+      grouped_risks,
+      missing_ac_recommendations,
+      ac_coverage_map
+    };
+  }, []);
+
   const buildIssueContext = useCallback((): IssueContextPayload => buildIssueContextPayload(session.issueData), [session.issueData]);
   const getProjectRequestParams = useCallback(() => {
     const { project_key, project_id } = buildProjectRequestParams(session.issueData);
@@ -257,15 +303,17 @@ export const AIProvider: React.FC<{
     return `Use these user-corrected bug drafting preferences as guidance:\n${hints.join('\n')}`;
   }, [session.bugs]);
 
-  const buildArtifactContext = useCallback(() => {
-    const artifacts = (session.supportingArtifacts || []).map((artifact: SupportingArtifact) => {
+  const buildArtifactContextFromList = useCallback((artifactsInput: SupportingArtifact[]) => {
+    const artifacts = (artifactsInput || []).map((artifact: SupportingArtifact) => {
       const truncated = artifact.content.length > 4000
         ? `${artifact.content.slice(0, 4000)}\n... (artifact truncated) ...`
         : artifact.content;
       return `Attachment: ${artifact.name} (${artifact.type || 'text/plain'}, ${artifact.size} bytes)\n${truncated}`;
     });
     return artifacts.join('\n\n');
-  }, [session.supportingArtifacts]);
+  }, []);
+
+  const buildArtifactContext = useCallback(() => buildArtifactContextFromList(session.supportingArtifacts || []), [buildArtifactContextFromList, session.supportingArtifacts]);
 
   // Phase 5: Streaming Implementation
   const generateBugs = useCallback(async () => {
@@ -280,7 +328,7 @@ export const AIProvider: React.FC<{
       return;
     }
     generateBugsInFlightRef.current = true;
-    updateSession({ loading: true, error: null, bugs: [], testCases: [], coverageScore: null });
+    updateSession({ loading: true, error: null, bugs: [], testCases: [], coverageScore: null, gapAnalysisSummary: null });
     logDebug('AI-START', `Analyzing ${session.issueData.key}...`);
 
     try {
@@ -292,6 +340,7 @@ export const AIProvider: React.FC<{
         project_key: projectKey,
         project_id: projectId,
         issue_type_id: session.selectedIssueType.id,
+        issue_type_name: session.selectedIssueType.name,
         bug_count: session.bugGenerationCount,
         supporting_context: [session.generationSupportingContext, buildGenerationLearningHints(), buildArtifactContext()].filter(Boolean).join('\n\n')
       };
@@ -313,6 +362,7 @@ export const AIProvider: React.FC<{
         bugs,
         testCases: [],
         coverageScore: data.ac_coverage ?? null,
+        gapAnalysisSummary: normalizeGapAnalysisSummary(data.analysis_summary),
         success: data.warnings?.length ? data.warnings.join(' ') : null,
       }, currentTabId);
       logDebug('AI-OK', `Analysis complete for ${session.issueData.key}.`);
@@ -324,7 +374,7 @@ export const AIProvider: React.FC<{
       generateBugsInFlightRef.current = false;
       updateSession({ loading: false }, currentTabId);
     }
-  }, [apiBase, authToken, buildArtifactContext, buildGenerationLearningHints, buildIssueContext, currentTabId, getProjectRequestParams, logDebug, refreshAuthToken, session.bugGenerationCount, session.generationSupportingContext, session.instanceUrl, session.issueData, session.jiraConnectionId, session.selectedIssueType, toFrontendBug, updateSession]);
+  }, [apiBase, authToken, buildArtifactContext, buildGenerationLearningHints, buildIssueContext, currentTabId, getProjectRequestParams, logDebug, normalizeGapAnalysisSummary, refreshAuthToken, session.bugGenerationCount, session.generationSupportingContext, session.instanceUrl, session.issueData, session.jiraConnectionId, session.selectedIssueType, toFrontendBug, updateSession]);
 
   const generateTestCases = useCallback(async () => {
     if (generateTestsInFlightRef.current) return;
@@ -334,7 +384,7 @@ export const AIProvider: React.FC<{
       return;
     }
     generateTestsInFlightRef.current = true;
-    updateSession({ loading: true, error: null, bugs: [], testCases: [] }, currentTabId);
+    updateSession({ loading: true, error: null, bugs: [], testCases: [], gapAnalysisSummary: null }, currentTabId);
     try {
       const { projectKey, projectId } = getProjectRequestParams();
       const payload: AIGenerationRequestPayload = {
@@ -359,6 +409,7 @@ export const AIProvider: React.FC<{
         bugs: [],
         testCases: data.test_cases || [],
         coverageScore: data.coverage_score ?? null,
+        gapAnalysisSummary: null,
         xrayFolderPath: session.issueData.key,
         xrayWarnings: [],
         createdIssues: []
@@ -427,7 +478,7 @@ export const AIProvider: React.FC<{
 
   const handleManualGenerate = useCallback(async () => {
     if (manualGenerateInFlightRef.current) return;
-    const manualInputs = (session.manualInputs || []).map((item) => item.trim()).filter(Boolean);
+    const manualInputs = (session.manualInputs || []).filter((item: ManualBugInput) => item.text.trim());
     if (!manualInputs.length || !session.jiraConnectionId) return;
     if (!session.selectedIssueType?.id) {
       updateSession({ error: 'MISSING_ISSUE_TYPE' });
@@ -435,7 +486,7 @@ export const AIProvider: React.FC<{
       return;
     }
     manualGenerateInFlightRef.current = true;
-    updateSession({ loading: true, error: null, testCases: [], coverageScore: null });
+    updateSession({ loading: true, error: null, testCases: [], coverageScore: null, gapAnalysisSummary: null });
     logDebug('MANUAL-START', `Structuring ${manualInputs.length} manual finding(s)...`);
     try {
       const { projectKey, projectId } = getProjectRequestParams();
@@ -444,15 +495,20 @@ export const AIProvider: React.FC<{
       for (const manualInput of manualInputs) {
         const payload: AIGenerationRequestPayload = {
           issue_context: session.issueData ? buildIssueContext() : undefined,
-          selected_text: session.issueData ? undefined : manualInput,
+          selected_text: session.issueData ? undefined : manualInput.text,
           jira_connection_id: session.jiraConnectionId,
           instance_url: session.instanceUrl,
           project_key: projectKey || 'MANUAL',
           project_id: projectId,
           issue_type_id: session.selectedIssueType.id,
-          user_description: manualInput,
+          issue_type_name: session.selectedIssueType.name,
+          user_description: manualInput.text,
           bug_count: 1,
-          supporting_context: [session.generationSupportingContext, buildGenerationLearningHints(), buildArtifactContext()].filter(Boolean).join('\n\n')
+          supporting_context: [
+            manualInput.supportingContext,
+            buildGenerationLearningHints(),
+            buildArtifactContextFromList(manualInput.supportingArtifacts || [])
+          ].filter(Boolean).join('\n\n')
         };
         const res = await apiRequest(`${apiBase}/ai/generate`, {
           method: 'POST',
@@ -477,7 +533,8 @@ export const AIProvider: React.FC<{
         bugs: [...existing, ...generatedBugs],
         testCases: [],
         coverageScore: null,
-        manualInputs: [''],
+        gapAnalysisSummary: null,
+        manualInputs: [{ text: '', supportingContext: '', supportingArtifacts: [] }],
         mainWorkflow: 'home',
         expandedBug: existing.length
       });
@@ -488,7 +545,7 @@ export const AIProvider: React.FC<{
       manualGenerateInFlightRef.current = false;
       updateSession({ loading: false });
     }
-  }, [apiBase, authToken, buildArtifactContext, buildGenerationLearningHints, buildIssueContext, fetchUsage, getProjectRequestParams, logDebug, refreshAuthToken, session.bugs, session.generationSupportingContext, session.instanceUrl, session.issueData, session.jiraConnectionId, session.manualInputs, session.selectedIssueType?.id, toFrontendBug, updateSession]);
+  }, [apiBase, authToken, buildArtifactContextFromList, buildGenerationLearningHints, buildIssueContext, fetchUsage, getProjectRequestParams, logDebug, refreshAuthToken, session.bugs, session.instanceUrl, session.issueData, session.jiraConnectionId, session.manualInputs, session.selectedIssueType?.id, session.selectedIssueType?.name, toFrontendBug, updateSession]);
 
   const regenerateBug = useCallback(async (index: number, refinementPrompt?: string) => {
     const bug = session.bugs[index];
@@ -503,6 +560,7 @@ export const AIProvider: React.FC<{
         project_key: projectKey,
         project_id: projectId,
         issue_type_id: session.selectedIssueType.id,
+        issue_type_name: session.selectedIssueType.name,
         bug_count: 1,
         focus_bug_summary: bug.summary,
         refinement_prompt: refinementPrompt || `Refine this finding as a stronger ${bug.category || 'functional'} bug with severity ${bug.severity}.`,

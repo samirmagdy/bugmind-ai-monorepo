@@ -16,6 +16,7 @@ class BugGenerationRequest(BaseModel):
     project_key: str
     project_id: Optional[str] = None
     issue_type_id: str
+    issue_type_name: Optional[str] = None
     model: Optional[str] = None
     user_description: Optional[str] = None
     custom_instructions: Optional[str] = None
@@ -44,10 +45,35 @@ class GeneratedBugResponse(BaseModel):
     fields: Dict[str, Any]
 
 
+class AnalysisCoverageItem(BaseModel):
+    reference: str
+    status: str
+    rationale: str
+    related_bug_indexes: List[int] = []
+
+
+class RiskSummaryGroup(BaseModel):
+    group: str
+    title: str
+    description: str
+    count: int = 0
+
+
+class GapAnalysisSummary(BaseModel):
+    issue_type_mode: Optional[str] = None
+    summary_headline: Optional[str] = None
+    highest_risk_area: Optional[str] = None
+    recommended_next_action: Optional[str] = None
+    grouped_risks: List[RiskSummaryGroup] = []
+    missing_ac_recommendations: List[str] = []
+    ac_coverage_map: List[AnalysisCoverageItem] = []
+
+
 class BugGenerationResponse(BaseModel):
     bugs: List[GeneratedBugResponse]
     ac_coverage: float
     warnings: List[str] = []
+    analysis_summary: Optional[GapAnalysisSummary] = None
 
 
 class BugDraft(BaseModel):

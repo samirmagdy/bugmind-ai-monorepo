@@ -6,6 +6,7 @@ import {
   JiraBootstrapContext,
   JiraConnection,
   MissingField,
+  GapAnalysisSummary,
   ResolvedPayload,
   TestCase,
   Usage,
@@ -62,6 +63,7 @@ export interface AIGenerationRequestPayload extends ProjectRequestParams {
   jira_connection_id: number;
   instance_url?: string | null;
   issue_type_id: string;
+  issue_type_name?: string;
   user_description?: string;
   bug_count?: number;
   focus_bug_summary?: string;
@@ -154,6 +156,7 @@ export interface AIGenerationResponsePayload {
   bugs: GeneratedBugResponsePayload[];
   ac_coverage?: number;
   warnings?: string[];
+  analysis_summary?: GapAnalysisSummary | null;
 }
 
 export interface AITestCasesResponsePayload {

@@ -392,6 +392,7 @@ async def generate_bug_report(
     ai_raw = await generator.generate_bug(
         story_context,
         schema, 
+        issue_type_name=req.issue_type_name,
         model=req.model or current_user.custom_ai_model,
         user_description=req.user_description,
         custom_instructions=req.custom_instructions,
@@ -453,10 +454,15 @@ async def generate_bug_report(
     elif not isinstance(ai_warnings, list):
         ai_warnings = []
 
+    analysis_summary = ai_raw.get("analysis_summary")
+    if not isinstance(analysis_summary, dict):
+        analysis_summary = None
+
     response = BugGenerationResponse(
         bugs=resolved_bugs,
         ac_coverage=ai_raw.get("ac_coverage", 0.0),
         warnings=list(dict.fromkeys([*ai_warnings, *overlap_warnings])),
+        analysis_summary=analysis_summary,
     )
     log_audit(
         "ai.generate",
