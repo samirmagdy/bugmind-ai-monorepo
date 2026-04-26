@@ -157,6 +157,17 @@ const PreviewView: React.FC = () => {
     : bug?.summary ?? '';
   const previewDescription = bug?.description ?? '';
   const previewSteps = formatStepsForPreview(bug?.steps_to_reproduce);
+  const returnToFindings = (expandedBug: number | null = null) => {
+    updateSession({
+      view: 'main',
+      mainWorkflow: session.gapAnalysisSummary ? 'analysis' : session.mainWorkflow,
+      expandedBug,
+      previewBugIndex: null,
+      resolvedPayload: null,
+      validationErrors: [],
+      error: null
+    });
+  };
 
   useEffect(() => {
     if (session.view !== 'preview' || bugIndex === null || !bug) {
@@ -178,7 +189,7 @@ const PreviewView: React.FC = () => {
         <h3 className="text-lg font-bold text-[var(--text-main)]">Issue Not Found</h3>
         <p className="text-xs text-[var(--text-muted)] mt-2">Could not find the draft for review.</p>
         <button 
-          onClick={() => updateSession({ view: 'main' })}
+          onClick={() => returnToFindings()}
           className="mt-6 rounded-full border border-[var(--card-border)] bg-[var(--surface-soft)] px-4 py-2 text-[var(--status-info)] font-black uppercase text-[10px] tracking-[0.18em]"
         >
           Return to List
@@ -196,7 +207,7 @@ const PreviewView: React.FC = () => {
       {/* Header */}
       <SurfaceCard className="flex items-center justify-between px-4 py-3.5">
         <button 
-          onClick={() => updateSession({ view: 'main' })}
+          onClick={() => returnToFindings()}
           className="flex items-center gap-2 rounded-full border border-[var(--card-border)] bg-[var(--surface-soft)] px-4 py-2 text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors group"
         >
           <ArrowLeft size={16} className="group-hover:-translate-x-1 transition-transform" />
@@ -389,7 +400,7 @@ const PreviewView: React.FC = () => {
       <div className="fixed bottom-12 left-0 w-full px-4 pt-6 pb-3 bg-gradient-to-t from-[var(--bg-app)] via-[var(--bg-app)]/96 to-transparent z-[60]">
         <div className="flex gap-3">
           <ActionButton
-            onClick={() => updateSession({ view: 'main', expandedBug: bugIndex })}
+            onClick={() => returnToFindings(bugIndex)}
             variant="secondary"
             tone="neutral"
             className="flex-1 h-12 rounded-[1.35rem] text-[10px]"

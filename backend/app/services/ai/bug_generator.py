@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+from collections import Counter
 from typing import Dict, Any, Optional
 
 from app.services.ai.openrouter_client import OpenRouterClient
@@ -197,6 +198,119 @@ class BugGenerator:
         if len(text) > max_chars:
             return text[:max_chars] + "\n... (text truncated due to length) ..."
         return text
+
+    def _extract_acceptance_targets(self, context_text: str) -> list[str]:
+        if not context_text:
+            return []
+
+        lines = [line.strip(" -\t") for line in context_text.splitlines()]
+        targets: list[str] = []
+        capture = False
+
+        for raw_line in lines:
+            line = raw_line.strip()
+            if not line:
+                continue
+
+            lower = line.lower()
+            if "acceptance criteria" in lower:
+                capture = True
+                continue
+
+            if capture:
+                if re.match(r"^(description|summary|supporting context|user's bug observation)\b", lower):
+                    break
+                if len(line) > 6:
+                    targets.append(line)
+                    if len(targets) >= 8:
+                        break
+
+        if targets:
+            return targets
+
+        fallback = [line for line in lines if len(line) > 24]
+        return fallback[:5]
+
+    def _synthesize_analysis_summary(
+        self,
+        bugs: list[Dict[str, Any]],
+        issue_type_mode: str,
+        context_text: str,
+    ) -> Dict[str, Any]:
+        category_counter = Counter(
+            str(bug.get("category") or "Functional Gap").strip()
+            for bug in bugs
+            if isinstance(bug, dict)
+        )
+        grouped_risks = [
+            {
+                "group": category.lower().replace(" ", "_"),
+                "title": category,
+                "description": f"{count} finding{'s' if count != 1 else ''} clustered around {category.lower()}.",
+                "count": count,
+            }
+            for category, count in category_counter.most_common(4)
+        ]
+
+        top_category = grouped_risks[0]["title"] if grouped_risks else "Functional Gap"
+        highest_risk_bug = max(
+            bugs,
+            key=lambda bug: {"critical": 4, "high": 3, "medium": 2, "low": 1}.get(str(bug.get("severity", "medium")).lower(), 0),
+            default={},
+        )
+        highest_risk_area = (
+            str(highest_risk_bug.get("summary")).strip()
+            or f"{top_category} risk area"
+        )
+
+        targets = self._extract_acceptance_targets(context_text)
+        refs_and_evidence = "\n".join(
+            [
+                *[str(ref) for bug in bugs for ref in (bug.get("acceptance_criteria_refs") or [])],
+                *[str(ev) for bug in bugs for ev in (bug.get("evidence") or [])],
+            ]
+        ).lower()
+
+        ac_coverage_map = []
+        missing_ac_recommendations = []
+        for index, target in enumerate(targets, start=1):
+            target_lower = target.lower()
+            significant_words = [word for word in re.findall(r"[a-z0-9]{4,}", target_lower) if word not in {"shall", "should", "with", "that", "when", "then"}]
+            matched = any(word in refs_and_evidence for word in significant_words[:4]) if significant_words else False
+            has_ac_ref = f"ac{index}" in refs_and_evidence or f"ac {index}" in refs_and_evidence
+            status = "covered" if has_ac_ref or matched else "missing"
+            rationale = (
+                "Referenced by one or more generated findings."
+                if status == "covered"
+                else "No generated finding clearly covered this expectation."
+            )
+            related_bug_indexes = [
+                bug_index + 1
+                for bug_index, bug in enumerate(bugs)
+                if any(
+                    str(ref).lower() in {f"ac{index}", f"ac {index}", target_lower}
+                    or target_lower[:32] in str(ref).lower()
+                    for ref in (bug.get("acceptance_criteria_refs") or [])
+                )
+            ]
+            ac_coverage_map.append({
+                "reference": f"AC{index}: {target[:96]}",
+                "status": status,
+                "rationale": rationale,
+                "related_bug_indexes": related_bug_indexes,
+            })
+            if status == "missing":
+                missing_ac_recommendations.append(f"Add or clarify an acceptance criterion for: {target[:120]}")
+
+        return {
+            "issue_type_mode": issue_type_mode,
+            "summary_headline": f"Generated {len(bugs)} finding{'s' if len(bugs) != 1 else ''} across {len(grouped_risks) or 1} risk theme{'s' if (len(grouped_risks) or 1) != 1 else ''}.",
+            "highest_risk_area": highest_risk_area,
+            "recommended_next_action": "Review the uncovered acceptance criteria first, then publish the highest-risk findings.",
+            "grouped_risks": grouped_risks,
+            "missing_ac_recommendations": missing_ac_recommendations[:5],
+            "ac_coverage_map": ac_coverage_map,
+        }
         
     async def generate_bug(
         self,
@@ -352,6 +466,34 @@ class BugGenerator:
         }}
         """
 
+        fallback_prompt = f"""
+        You are BugMind, a Senior QA Lead.
+        Active analysis mode: {issue_type_mode}
+
+        {mode_instruction}
+
+        Return valid JSON only in this exact format:
+        {{
+            "bugs": [
+                {{
+                    "summary": "Concise Bug Title",
+                    "description": "Professional summary of the problem and impact.",
+                    "steps": ["Step 1", "Step 2"],
+                    "expected": "Expected behavior",
+                    "actual": "Actual behavior",
+                    "severity": "High",
+                    "confidence": 80,
+                    "category": "Validation",
+                    "acceptance_criteria_refs": ["AC1"],
+                    "evidence": ["Signal from story"],
+                    "custom_fields": {{}}
+                }}
+            ],
+            "ac_coverage": 80.0,
+            "warnings": []
+        }}
+        """
+
         try:
             truncated_context = self._truncate_context(self._sanitize_for_ai(context_text))
             user_prompt = f"Story Context:\n{truncated_context}"
@@ -359,7 +501,20 @@ class BugGenerator:
                 user_prompt += f"\n\nUser's Bug Observation:\n{self._truncate_context(self._sanitize_for_ai(user_description), 2000)}"
             if supporting_context:
                 user_prompt += f"\n\nSupporting Context:\n{self._truncate_context(self._sanitize_for_ai(supporting_context), 3000)}"
-            return await self._generate_with_json_retry(system_prompt, user_prompt, model=model)
+            try:
+                return await self._generate_with_json_retry(system_prompt, user_prompt, model=model)
+            except HTTPException as exc:
+                if exc.status_code != 502:
+                    raise
+                simplified = await self._generate_with_json_retry(fallback_prompt, user_prompt, model=model)
+                if not isinstance(simplified.get("bugs"), list):
+                    raise
+                simplified["analysis_summary"] = self._synthesize_analysis_summary(
+                    simplified.get("bugs", []),
+                    issue_type_mode,
+                    context_text,
+                )
+                return simplified
         except HTTPException:
             raise
         except Exception as e:
