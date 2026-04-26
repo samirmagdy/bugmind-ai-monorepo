@@ -470,24 +470,23 @@ const MainView: React.FC = () => {
     <div className="space-y-4 animate-in fade-in duration-500">
       {/* Issue Context Card */}
       <SurfaceCard className="relative group animate-in slide-in-from-top-4 duration-700">
-        <div className="absolute top-4 right-4">
-          <button 
-            onClick={() => refreshIssue()} 
-            title="Refresh Context"
-            className={`p-1.5 text-[var(--text-muted)] hover:text-[var(--primary-blue)] transition-colors ${session.loading ? 'opacity-50 cursor-not-allowed' : ''}`}
-          >
-            <RefreshCw size={14} className={session.loading ? 'animate-spin' : ''} /> 
-          </button>
-        </div>
-
         {session.issueData ? (
           <div className="space-y-2.5">
-            <div className="flex items-center gap-2">
-              <span className="connected-badge">
-                <div className="w-1 h-1 rounded-full bg-[var(--success)] animate-pulse" />
-                Connected
-              </span>
-              <span className="text-[var(--text-muted)] text-[11px] font-bold">{session.issueData.key}</span>
+            <div className="flex items-start justify-between gap-3">
+              <span className="text-[var(--text-muted)] text-[11px] font-bold pt-1">{session.issueData.key}</span>
+              <div className="flex items-center gap-2">
+                <span className="connected-badge">
+                  <div className="w-1 h-1 rounded-full bg-[var(--success)] animate-pulse" />
+                  Connected
+                </span>
+                <button 
+                  onClick={() => refreshIssue()} 
+                  title="Refresh Context"
+                  className={`p-1.5 text-[var(--text-muted)] hover:text-[var(--primary-blue)] transition-colors ${session.loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  <RefreshCw size={14} className={session.loading ? 'animate-spin' : ''} /> 
+                </button>
+              </div>
             </div>
             <h2 className="text-[13px] font-bold text-[var(--text-primary)] leading-tight pr-7">
               {session.issueData.summary}
