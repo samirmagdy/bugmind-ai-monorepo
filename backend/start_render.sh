@@ -12,4 +12,7 @@ if [ -z "${ENVIRONMENT:-}" ] && [ -n "${RENDER:-}" ]; then
     export ENVIRONMENT=production
 fi
 
+echo "Running database migrations..."
+python -m alembic upgrade head
+
 exec uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-10000}"

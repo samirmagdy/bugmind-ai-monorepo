@@ -5,6 +5,27 @@ import { ArrowRight, KeyRound, Lock, Mail, ShieldCheck } from 'lucide-react';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+const GoogleLogo: React.FC = () => (
+  <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4">
+    <path
+      fill="#4285F4"
+      d="M21.805 12.23c0-.75-.067-1.47-.191-2.16H12v4.09h5.498a4.704 4.704 0 0 1-2.04 3.086v2.563h3.305c1.935-1.782 3.042-4.408 3.042-7.579Z"
+    />
+    <path
+      fill="#34A853"
+      d="M12 22c2.754 0 5.062-.913 6.749-2.472l-3.305-2.563c-.913.612-2.08.973-3.444.973-2.648 0-4.893-1.787-5.697-4.188H2.887v2.644A9.997 9.997 0 0 0 12 22Z"
+    />
+    <path
+      fill="#FBBC05"
+      d="M6.303 13.75A5.995 5.995 0 0 1 5.984 12c0-.608.11-1.198.319-1.75V7.606H2.887A9.997 9.997 0 0 0 2 12c0 1.612.386 3.138 1.07 4.394l3.233-2.644Z"
+    />
+    <path
+      fill="#EA4335"
+      d="M12 6.063c1.497 0 2.84.515 3.898 1.526l2.923-2.923C17.058 3.03 14.75 2 12 2a9.997 9.997 0 0 0-9.113 5.606l3.416 2.644C7.107 7.85 9.352 6.063 12 6.063Z"
+    />
+  </svg>
+);
+
 const AuthView: React.FC = () => {
   const {
     auth: {
@@ -86,6 +107,7 @@ const AuthView: React.FC = () => {
           {(isLogin || isRegister) && (
             <div className="mb-6">
               <ActionButton type="button" variant="secondary" className="h-11 w-full text-sm font-bold" onClick={handleGoogleLogin}>
+                <GoogleLogo />
                 Continue with Google
               </ActionButton>
               <div className="mt-4 flex items-center gap-3 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)]">
