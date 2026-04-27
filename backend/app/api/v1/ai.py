@@ -262,6 +262,31 @@ def _merge_saved_field_defaults(
     return merged_fields
 
 
+def _extract_ai_custom_fields(raw_bug: dict, schema: list) -> dict:
+    schema_keys = {field.get("key") for field in schema}
+    custom_fields = raw_bug.get("custom_fields")
+    if not isinstance(custom_fields, dict):
+        custom_fields = raw_bug.get("fields") if isinstance(raw_bug.get("fields"), dict) else {}
+
+    return {
+        key: value
+        for key, value in custom_fields.items()
+        if key in schema_keys and key not in STANDARD_ISSUE_FIELDS and key not in NON_CREATABLE_ISSUE_FIELDS
+    }
+
+
+def _normalize_percentage(value: object, default: float = 0.0) -> float:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        numeric = default
+    return max(0.0, min(100.0, numeric))
+
+
+def _normalize_confidence(value: object, default: int = 75) -> int:
+    return int(round(_normalize_percentage(value, default)))
+
+
 def _is_missing_jira_value(field: dict, value: object) -> bool:
     if value is None or value == "":
         return True
@@ -395,6 +420,8 @@ async def _generate_findings_response(
             continue
 
         jira_payload = resolver.resolve(raw_bug)
+        ai_custom_fields = resolver.resolve_explicit_fields(_extract_ai_custom_fields(raw_bug, schema))
+        jira_payload["fields"].update(ai_custom_fields)
         jira_payload["fields"] = _merge_saved_field_defaults(jira_payload["fields"], mapping_record, schema)
 
         steps_list = raw_bug.get("steps", [])
@@ -408,21 +435,34 @@ async def _generate_findings_response(
         else:
             steps_text = str(steps_list)
 
+        summary = str(raw_bug.get("summary") or "").strip()
+        description = str(raw_bug.get("description") or "").strip()
+        expected = str(raw_bug.get("expected") or "").strip()
+        actual = str(raw_bug.get("actual") or "").strip()
+        if not (summary and description and steps_text.strip() and expected and actual):
+            continue
+
         resolved_bugs.append({
-            "summary": raw_bug.get("summary", ""),
-            "description": raw_bug.get("description", ""),
+            "summary": summary,
+            "description": description,
             "steps_to_reproduce": steps_text,
-            "expected_result": raw_bug.get("expected", ""),
-            "actual_result": raw_bug.get("actual", ""),
-            "severity": raw_bug.get("severity", "Medium"),
-            "confidence": raw_bug.get("confidence", 75),
-            "category": raw_bug.get("category", "Functional Gap"),
+            "expected_result": expected,
+            "actual_result": actual,
+            "severity": str(raw_bug.get("severity") or "Medium").strip() or "Medium",
+            "confidence": _normalize_confidence(raw_bug.get("confidence"), 75),
+            "category": str(raw_bug.get("category") or "Functional Gap").strip() or "Functional Gap",
             "acceptance_criteria_refs": raw_bug.get("acceptance_criteria_refs", []) or [],
             "evidence": raw_bug.get("evidence", []) or [],
             "duplicate_group": raw_bug.get("duplicate_group"),
             "overlap_warning": raw_bug.get("overlap_warning"),
             "fields": jira_payload["fields"],
         })
+
+    if not resolved_bugs:
+        raise HTTPException(
+            status_code=502,
+            detail="AI returned no usable findings. Please try again with more story detail or supporting context."
+        )
 
     ai_warnings = ai_raw.get("warnings", [])
     if isinstance(ai_warnings, str):
@@ -434,10 +474,14 @@ async def _generate_findings_response(
     if include_analysis_summary:
         analysis_summary = ai_raw.get("analysis_summary")
         if not isinstance(analysis_summary, dict):
-            analysis_summary = None
+            analysis_summary = generator._synthesize_analysis_summary(
+                resolved_bugs,
+                "Gap analysis",
+                story_context,
+            )
         return GapAnalysisResponse(
             bugs=resolved_bugs,
-            ac_coverage=ai_raw.get("ac_coverage", 0.0),
+            ac_coverage=_normalize_percentage(ai_raw.get("ac_coverage"), 0.0),
             warnings=warnings,
             analysis_summary=analysis_summary,
         )

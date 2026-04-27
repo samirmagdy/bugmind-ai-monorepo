@@ -129,6 +129,7 @@ export const AIProvider: React.FC<{
   const [clearCustomKeyRequested, setClearCustomKeyRequested] = useState(false);
   const searchControllerRef = useRef<AbortController | null>(null);
   const generateBugsInFlightRef = useRef(false);
+  const generateBugsRequestRef = useRef(0);
   const generateTestsInFlightRef = useRef(false);
   const manualGenerateInFlightRef = useRef(false);
   const submitBugsInFlightRef = useRef(false);
@@ -345,6 +346,12 @@ export const AIProvider: React.FC<{
       return;
     }
     generateBugsInFlightRef.current = true;
+    const requestId = generateBugsRequestRef.current + 1;
+    generateBugsRequestRef.current = requestId;
+    const requestTabId = currentTabId;
+    const requestIssueKey = session.issueData.key;
+    const requestJiraConnectionId = session.jiraConnectionId;
+    const requestIssueTypeId = session.selectedIssueType.id;
     updateSession({ loading: true, error: null, success: null, testCases: [], coverageScore: null, gapAnalysisSummary: null }, currentTabId);
     logDebug('AI-START', `Analyzing ${session.issueData.key}...`);
 
@@ -374,25 +381,67 @@ export const AIProvider: React.FC<{
 
       const data = await readJsonResponse<GapAnalysisResponsePayload>(res);
       const bugs = (data.bugs || []).map(toFrontendBug);
+      if (!bugs.length) {
+        throw new Error('AI returned no usable findings. Please try again with more story detail or supporting context.');
+      }
+      const rawCoverageScore = data.ac_coverage === undefined || data.ac_coverage === null
+        ? null
+        : Number(data.ac_coverage);
+      const coverageScore = rawCoverageScore === null || !Number.isFinite(rawCoverageScore)
+        ? null
+        : Math.max(0, Math.min(100, rawCoverageScore));
 
-      updateSession({
-        bugs,
-        testCases: [],
-        coverageScore: data.ac_coverage ?? null,
-        gapAnalysisSummary: normalizeGapAnalysisSummary(data.analysis_summary),
-        success: data.warnings?.length ? data.warnings.join(' ') : null,
-      }, currentTabId);
-      fetchUsage();
+      let applied = false;
+      setTabSessions(prev => {
+        const curr = prev[requestTabId] || INITIAL_SESSION;
+        if (
+          generateBugsRequestRef.current !== requestId ||
+          curr.issueData?.key !== requestIssueKey ||
+          curr.jiraConnectionId !== requestJiraConnectionId ||
+          curr.selectedIssueType?.id !== requestIssueTypeId
+        ) {
+          return prev;
+        }
+        applied = true;
+        return {
+          ...prev,
+          [requestTabId]: {
+            ...curr,
+            bugs,
+            testCases: [],
+            coverageScore,
+            gapAnalysisSummary: normalizeGapAnalysisSummary(data.analysis_summary),
+            success: data.warnings?.length ? data.warnings.join(' ') : null,
+          }
+        };
+      });
+      if (applied) fetchUsage();
       logDebug('AI-OK', `Analysis complete for ${session.issueData.key}.`);
 
     } catch (err: unknown) {
       logDebug('AI-ERR', String(err));
-      updateSession({ error: getErrorMessage(err) }, currentTabId);
+      setTabSessions(prev => {
+        const curr = prev[requestTabId] || INITIAL_SESSION;
+        if (
+          generateBugsRequestRef.current !== requestId ||
+          curr.issueData?.key !== requestIssueKey ||
+          curr.jiraConnectionId !== requestJiraConnectionId ||
+          curr.selectedIssueType?.id !== requestIssueTypeId
+        ) {
+          return prev;
+        }
+        return { ...prev, [requestTabId]: { ...curr, error: getErrorMessage(err) } };
+      });
     } finally {
       generateBugsInFlightRef.current = false;
-      updateSession({ loading: false }, currentTabId);
+      if (generateBugsRequestRef.current === requestId) {
+        setTabSessions(prev => {
+          const curr = prev[requestTabId] || INITIAL_SESSION;
+          return { ...prev, [requestTabId]: { ...curr, loading: false } };
+        });
+      }
     }
-  }, [apiBase, authToken, buildArtifactContext, buildGenerationLearningHints, buildIssueContext, currentTabId, fetchUsage, getProjectRequestParams, logDebug, normalizeGapAnalysisSummary, refreshAuthToken, session.bugGenerationCount, session.generationSupportingContext, session.instanceUrl, session.issueData, session.jiraConnectionId, session.selectedIssueType, toFrontendBug, updateSession]);
+  }, [apiBase, authToken, buildArtifactContext, buildGenerationLearningHints, buildIssueContext, currentTabId, fetchUsage, getProjectRequestParams, logDebug, normalizeGapAnalysisSummary, refreshAuthToken, session.bugGenerationCount, session.generationSupportingContext, session.instanceUrl, session.issueData, session.jiraConnectionId, session.selectedIssueType, setTabSessions, toFrontendBug, updateSession]);
 
   const generateTestCases = useCallback(async () => {
     if (generateTestsInFlightRef.current) return;

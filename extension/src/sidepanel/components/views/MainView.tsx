@@ -869,6 +869,7 @@ const MainView: React.FC = () => {
                                   key={count}
                                   type="button"
                                   onClick={() => updateSession({ bugGenerationCount: count })}
+                                  disabled={session.loading}
                                   className={`rounded-[0.95rem] border px-3 py-2 text-[11px] font-bold ${
                                     session.bugGenerationCount === count
                                       ? 'border-[var(--border-active)] bg-[var(--surface-accent)] text-[var(--text-primary)]'
@@ -885,7 +886,7 @@ const MainView: React.FC = () => {
                             onClick={generateBugs}
                             variant="primary"
                             className="h-11 text-[13px]"
-                            disabled={requiresIssueType}
+                            disabled={requiresIssueType || session.loading}
                           >
                             <Zap size={16} />
                             Run Gap Analysis
@@ -1177,6 +1178,7 @@ const MainView: React.FC = () => {
                     </button>
                     <button 
                       onClick={generateBugs} 
+                      disabled={requiresIssueType || session.loading}
                       className="text-xs font-bold text-[var(--primary-blue)]"
                     >
                       Retry

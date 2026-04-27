@@ -182,9 +182,8 @@ class BugGenerator:
             if "allowed_values" in field:
                 av = field["allowed_values"]
                 if isinstance(av, list):
-                    # Truncate to first 3 items (minified)
-                    f["allowed_values"] = av[:3]
-                    if len(av) > 3:
+                    f["allowed_values"] = av[:10]
+                    if len(av) > 10:
                         f["allowed_values"].append({"id": "...", "name": "..."})
             
             cleaned.append(f)
@@ -405,10 +404,11 @@ class BugGenerator:
           - "grouped_risks": grouped themes with count
           - "missing_ac_recommendations": concise AC additions or clarifications
           - "ac_coverage_map": coverage status for the main acceptance criteria or story expectations
-        - Each bug's "custom_fields" dictionary: Scrutinize the schema below. If you can confidently predict a value for any of these fields (like Priority, Severity, or Component) based on the context, populate the key with the field ID and the value with the appropriate Jira object (e.g. {{"id": "..."}}).
+        - Each bug's "custom_fields" dictionary: Only populate Jira fields shown in the schema below when you can confidently choose a valid value. Use the Jira field key as the dictionary key and a valid Jira value object/string as the value.
 
         CRITICAL:
-        - YOU MUST PROVIDE VALUES FOR ALL FIELDS FOR EVERY BUG.
+        - YOU MUST PROVIDE VALUES FOR ALL CORE BUG FIELDS FOR EVERY BUG.
+        - For Jira custom fields, do not invent fields or option values that are not present in the schema.
         - If "steps" are missing, use logic to create them.
         - If "expected" or "actual" results are not explicitly provided by the user, you MUST infer them based on the context.
         - NEVER return null or empty strings for these core fields.
@@ -433,7 +433,7 @@ class BugGenerator:
                     "category": "Validation",
                     "acceptance_criteria_refs": ["AC1", "Checkout flow"],
                     "evidence": ["Story requires X", "Acceptance criteria mention Y"],
-                    "custom_fields": {{ "field_id": {{ "id": "value_id" }} or "string_value" }}
+                    "custom_fields": {{ "customfield_12345": {{ "id": "10001" }} }}
                 }}
             ],
             "ac_coverage": 85.0,
@@ -500,7 +500,7 @@ class BugGenerator:
             if user_description:
                 user_prompt += f"\n\nUser's Bug Observation:\n{self._truncate_context(self._sanitize_for_ai(user_description), 2000)}"
             if supporting_context:
-                user_prompt += f"\n\nSupporting Context:\n{self._truncate_context(self._sanitize_for_ai(supporting_context), 3000)}"
+                user_prompt += f"\n\nSupporting Context:\n{self._truncate_context(self._sanitize_for_ai(supporting_context), 10000)}"
             try:
                 return await self._generate_with_json_retry(system_prompt, user_prompt, model=model)
             except HTTPException as exc:
