@@ -165,7 +165,21 @@ const MainView: React.FC = () => {
         : 'Recommended: I Found a Bug for quick reporting';
 
   const setWorkflow = (mainWorkflow: 'home' | 'manual' | 'analysis' | 'tests') => {
-    updateSession({ mainWorkflow, error: null });
+    let nextIssueType = session.selectedIssueType;
+    if (mainWorkflow === 'manual' && session.defaultBugIssueType) {
+      nextIssueType = session.defaultBugIssueType;
+    } else if (mainWorkflow === 'analysis' && session.defaultGapAnalysisIssueType) {
+      nextIssueType = session.defaultGapAnalysisIssueType;
+    } else if (mainWorkflow === 'tests' && session.defaultTestCaseIssueType) {
+      nextIssueType = session.defaultTestCaseIssueType;
+    }
+
+    if (nextIssueType && session.selectedIssueType?.id !== nextIssueType.id) {
+      updateSession({ mainWorkflow, selectedIssueType: nextIssueType, jiraMetadata: null, error: null });
+      void bootstrapJiraConfig(nextIssueType.id, { force: true, loading: true, logTag: 'WORKFLOW-TYPE-SWITCH' });
+    } else {
+      updateSession({ mainWorkflow, error: null });
+    }
   };
 
   const splitListInput = (value: string) => value.split(/[\n,]+/).map(item => item.trim()).filter(Boolean);
@@ -642,7 +656,7 @@ const MainView: React.FC = () => {
                     Re-Scan Issue
                   </ActionButton>
                 }
-                className="shadow-[var(--shadow-card)] max-w-[260px]"
+                className="shadow-[var(--shadow-card)] w-full"
               />
             </div>
           )}
@@ -664,7 +678,7 @@ const MainView: React.FC = () => {
                     Check Jira Connection
                   </ActionButton>
                 }
-                className="shadow-[var(--shadow-card)] max-w-[300px]"
+                className="shadow-[var(--shadow-card)] w-full"
               />
             </div>
           )}
@@ -1065,12 +1079,12 @@ const MainView: React.FC = () => {
                         <input
                           value={testCase.priority}
                           onChange={e => handleUpdateTestCase(idx, { priority: e.target.value })}
-                          className="w-20 bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-[0.85rem] px-2 py-1 text-[10px] font-bold text-[var(--primary-blue)] text-right"
+                          className="w-20 bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-full px-3 py-1.5 text-[10px] font-bold text-[var(--primary-blue)] text-center transition-all focus:border-[var(--primary-blue)]/50 focus:ring-2 focus:ring-[var(--primary-blue)]/10 outline-none"
                         />
                         <input
                           value={testCase.test_type || 'Manual'}
                           onChange={e => handleUpdateTestCase(idx, { test_type: e.target.value })}
-                          className="w-28 bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-[0.85rem] px-2 py-1 text-[10px] font-bold text-[var(--text-secondary)] text-right"
+                          className="w-28 bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-full px-3 py-1.5 text-[10px] font-bold text-[var(--text-secondary)] text-center transition-all focus:border-[var(--primary-blue)]/50 focus:ring-2 focus:ring-[var(--primary-blue)]/10 outline-none"
                           placeholder="Test type"
                         />
                       </div>

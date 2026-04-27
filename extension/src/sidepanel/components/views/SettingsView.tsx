@@ -641,9 +641,9 @@ const SettingsView: React.FC = () => {
               <input 
                 type="url" 
                 value={apiBase} 
-                onChange={e => {
+                onChange={e => setApiBase(e.target.value)}
+                onBlur={e => {
                   const val = e.target.value;
-                  setApiBase(val);
                   chrome.storage.local.set({ 'bugmind_api_base': val.trim().replace(/\/+$/, '') });
                 }}
                 className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-2xl px-4 py-3 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)] focus:ring-4 focus:ring-[var(--primary-blue)]/10 transition-all"
@@ -738,8 +738,10 @@ const SettingsView: React.FC = () => {
           </div>
 
           {showAddConnection && (
-            <SurfaceCard className="p-4 space-y-3">
+            <SurfaceCard className="p-4">
+              <div className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)] mb-3">Add New Connection</div>
               <form
+                className="space-y-3"
                 onSubmit={async (e) => {
                   e.preventDefault();
                   setIsCreatingConnection(true);
@@ -770,7 +772,7 @@ const SettingsView: React.FC = () => {
                   }
                 }}
               >
-              <div className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Add New Connection</div>
+
               <div className="space-y-1">
                 <div className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)] ml-1">Authentication Protocol</div>
                 <LuxurySearchableSelect
@@ -821,22 +823,24 @@ const SettingsView: React.FC = () => {
                 />
                 Verify SSL certificates
               </label>
-              <div className="flex gap-2">
-                <button
+              <div className="flex gap-2 pt-2">
+                <ActionButton
                   type="submit"
                   disabled={isCreatingConnection}
-                  className="flex-1 bg-[var(--primary-gradient)] text-white font-bold py-2.5 rounded-2xl text-[11px] flex items-center justify-center gap-2 disabled:opacity-60 shadow-[var(--shadow-button)]"
+                  variant="primary"
+                  className="flex-[2] h-10 text-[11px]"
                 >
-                  <Save size={12} />
+                  <Save size={12} className="mr-1.5" />
                   {isCreatingConnection ? 'Saving...' : 'Add New Connection'}
-                </button>
-                <button
+                </ActionButton>
+                <ActionButton
                   type="button"
                   onClick={() => setShowAddConnection(false)}
-                  className="px-3 bg-[var(--bg-input)] border border-[var(--border-main)] rounded-2xl text-[11px]"
+                  variant="secondary"
+                  className="flex-1 h-10 text-[11px]"
                 >
                   Cancel
-                </button>
+                </ActionButton>
               </div>
               </form>
             </SurfaceCard>
@@ -1007,14 +1011,23 @@ const SettingsView: React.FC = () => {
                         />
                         Verify SSL certificates
                       </label>
-                      <div className="flex gap-2">
-                        <button type="submit" className="flex-1 bg-[var(--primary-gradient)] text-white font-bold py-2.5 rounded-2xl text-[11px] flex items-center justify-center gap-2 shadow-[var(--shadow-button)]">
-                          <Save size={12} />
+                      <div className="flex gap-2 pt-2">
+                        <ActionButton
+                          type="submit"
+                          variant="primary"
+                          className="flex-[2] h-10 text-[11px]"
+                        >
+                          <Save size={12} className="mr-1.5" />
                           Save Connection
-                        </button>
-                        <button type="button" onClick={() => setEditingConnectionId(null)} className="px-3 bg-[var(--bg-input)] border border-[var(--border-main)] rounded-2xl text-[11px]">
+                        </ActionButton>
+                        <ActionButton
+                          type="button"
+                          onClick={() => setEditingConnectionId(null)}
+                          variant="secondary"
+                          className="flex-1 h-10 text-[11px]"
+                        >
                           Cancel
-                        </button>
+                        </ActionButton>
                       </div>
                     </form>
                   )}
@@ -1025,6 +1038,58 @@ const SettingsView: React.FC = () => {
         </div>
       ) : (
         <div className="space-y-5 animate-in fade-in slide-in-from-bottom-4 duration-500">
+          <SurfaceCard className="space-y-4">
+            <div className="space-y-1 mb-4">
+              <p className="text-[10px] text-[var(--text-muted)] uppercase font-black tracking-[0.18em]">Workflow Defaults</p>
+              <h3 className="text-sm font-bold text-[var(--text-primary)]">Reporting Issue Types</h3>
+            </div>
+            
+            <div className="space-y-2">
+              <label className="context-label uppercase tracking-wider block ml-1">Bug Generation</label>
+              <LuxurySearchableSelect 
+                options={session.issueTypes.map((type: IssueType) => ({ id: type.id, name: type.name, avatar: type.icon_url }))}
+                value={session.defaultBugIssueType || undefined}
+                placeholder="Select default issue type..."
+                onChange={(type) => {
+                  if (type && !Array.isArray(type)) {
+                    const selectedType = session.issueTypes.find((issueType) => issueType.id === (isSelectOption(type) ? String(type.id ?? '') : String(type)));
+                    if (selectedType) updateSession({ defaultBugIssueType: selectedType });
+                  }
+                }}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="context-label uppercase tracking-wider block ml-1">Test Cases</label>
+              <LuxurySearchableSelect 
+                options={session.issueTypes.map((type: IssueType) => ({ id: type.id, name: type.name, avatar: type.icon_url }))}
+                value={session.defaultTestCaseIssueType || undefined}
+                placeholder="Select default issue type..."
+                onChange={(type) => {
+                  if (type && !Array.isArray(type)) {
+                    const selectedType = session.issueTypes.find((issueType) => issueType.id === (isSelectOption(type) ? String(type.id ?? '') : String(type)));
+                    if (selectedType) updateSession({ defaultTestCaseIssueType: selectedType });
+                  }
+                }}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="context-label uppercase tracking-wider block ml-1">AI Gap Analysis</label>
+              <LuxurySearchableSelect 
+                options={session.issueTypes.map((type: IssueType) => ({ id: type.id, name: type.name, avatar: type.icon_url }))}
+                value={session.defaultGapAnalysisIssueType || undefined}
+                placeholder="Select default issue type..."
+                onChange={(type) => {
+                  if (type && !Array.isArray(type)) {
+                    const selectedType = session.issueTypes.find((issueType) => issueType.id === (isSelectOption(type) ? String(type.id ?? '') : String(type)));
+                    if (selectedType) updateSession({ defaultGapAnalysisIssueType: selectedType });
+                  }
+                }}
+              />
+            </div>
+          </SurfaceCard>
+
           <SurfaceCard className="space-y-3">
             <div className="flex items-center justify-between gap-3">
               <div className="space-y-1">

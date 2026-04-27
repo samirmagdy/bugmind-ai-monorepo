@@ -95,13 +95,13 @@ const AuthView: React.FC = () => {
 
   return (
     <div className="flex flex-col h-full animate-in fade-in duration-700">
-      <div className="flex-1 flex flex-col justify-center px-6 py-12">
-        <div className="space-y-2 mb-10 text-center">
+      <div className="flex-1 flex flex-col justify-center px-4 py-8">
+        <div className="space-y-2 mb-6 text-center">
           <h1 className="text-3xl font-bold text-[var(--text-primary)] tracking-tight">{title}</h1>
           <p className="text-[var(--text-secondary)] text-sm">{subtitle}</p>
         </div>
 
-        <SurfaceCard className="p-8 relative overflow-hidden">
+        <SurfaceCard className="p-6 relative overflow-hidden">
           <div className="absolute top-0 left-0 w-full h-1 bg-[var(--primary-gradient)]" />
 
           {(isLogin || isRegister) && (
@@ -229,12 +229,20 @@ const AuthView: React.FC = () => {
             )}
 
             {isLogin && (
-              <div className="flex items-center gap-2.5 px-1 group cursor-pointer" onClick={() => setRememberMe(!rememberMe)}>
-                <div className={`w-4 h-4 rounded border transition-all flex items-center justify-center ${rememberMe ? 'bg-[var(--primary-blue)] border-[var(--primary-blue)]' : 'border-[var(--border-soft)] bg-[var(--bg-elevated)] group-hover:border-[var(--primary-blue)]'}`}>
-                  {rememberMe && <div className="w-1.5 h-1.5 bg-white rounded-sm" />}
+              <label className="flex items-center gap-2.5 px-1 group cursor-pointer w-fit">
+                <div className="relative flex items-center justify-center">
+                  <input
+                    type="checkbox"
+                    className="peer sr-only"
+                    checked={rememberMe}
+                    onChange={(e) => setRememberMe(e.target.checked)}
+                  />
+                  <div className={`w-4 h-4 rounded border transition-all flex items-center justify-center peer-focus-visible:ring-2 peer-focus-visible:ring-offset-1 peer-focus-visible:ring-[var(--primary-blue)] ${rememberMe ? 'bg-[var(--primary-blue)] border-[var(--primary-blue)]' : 'border-[var(--border-soft)] bg-[var(--bg-elevated)] group-hover:border-[var(--primary-blue)]'}`}>
+                    {rememberMe && <div className="w-1.5 h-1.5 bg-white rounded-sm" />}
+                  </div>
                 </div>
-                <span className="text-[11px] font-medium text-[var(--text-secondary)]">Stay signed in</span>
-              </div>
+                <span className="text-[11px] font-medium text-[var(--text-secondary)] select-none">Stay signed in</span>
+              </label>
             )}
 
             <ActionButton

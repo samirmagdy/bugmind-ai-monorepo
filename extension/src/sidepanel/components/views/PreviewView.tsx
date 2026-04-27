@@ -256,7 +256,7 @@ const PreviewView: React.FC = () => {
 
       {/* Validation Panel */}
       {!isValid && (
-        <StatusPanel icon={AlertTriangle} title="Mandatory Fields Missing" tone="danger" className="rounded-[2rem]">
+        <StatusPanel icon={AlertTriangle} title="Mandatory Fields Missing" tone="danger" className="rounded-[1.5rem]">
           <ul className="space-y-1">
             {session.validationErrors.map((err, i) => (
               <li key={i} className="text-[11px] text-[var(--status-danger)] font-medium">• {err}</li>
@@ -266,7 +266,7 @@ const PreviewView: React.FC = () => {
       )}
 
       {/* High Fidelity Preview Card */}
-      <SurfaceCard className="space-y-6 rounded-[2rem] p-7 pb-16 shadow-[var(--shadow-card)] relative overflow-hidden">
+      <SurfaceCard className="space-y-6 rounded-[1.5rem] p-7 pb-16 shadow-[var(--shadow-card)] relative overflow-hidden">
         <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-transparent via-[var(--status-info)]/30 to-transparent"></div>
         
         {/* Issue Type Header */}

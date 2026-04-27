@@ -90,7 +90,7 @@ export default function App() {
 
         <main className="relative z-[1] flex-1 overflow-hidden">
           <div className="flex h-full items-start justify-center px-2.5 pt-4 pb-4">
-            <div className="context-card w-full max-w-[420px] rounded-[1.75rem] px-5 py-6">
+            <div className="context-card w-full rounded-[1.5rem] px-5 py-6">
               <div className="flex items-start gap-4">
                 <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[1.1rem] border border-[var(--card-border)] bg-[var(--surface-accent-strong)] text-[var(--primary-blue)]">
                   <Loader2 className="animate-spin" size={22} />

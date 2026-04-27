@@ -159,6 +159,9 @@ export interface TabSession {
   jiraMetadata: JiraMetadata | null;
   issueTypes: IssueType[];
   selectedIssueType: IssueType | null;
+  defaultBugIssueType: IssueType | null;
+  defaultTestCaseIssueType: IssueType | null;
+  defaultGapAnalysisIssueType: IssueType | null;
   visibleFields: string[];
   aiMapping: Record<string, string>;
   fieldDefaults: Record<string, unknown>;
@@ -281,6 +284,9 @@ export const INITIAL_SESSION: TabSession = {
   jiraMetadata: null,
   issueTypes: [],
   selectedIssueType: null,
+  defaultBugIssueType: null,
+  defaultTestCaseIssueType: null,
+  defaultGapAnalysisIssueType: null,
   visibleFields: [],
   aiMapping: {},
   fieldDefaults: {},

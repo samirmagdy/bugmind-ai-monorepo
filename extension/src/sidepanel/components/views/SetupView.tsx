@@ -99,9 +99,9 @@ const SetupView: React.FC = () => {
               <input 
                 type="url" 
                 value={apiBase} 
-                onChange={e => {
+                onChange={e => setApiBase(e.target.value)}
+                onBlur={e => {
                   const val = e.target.value;
-                  setApiBase(val);
                   chrome.storage.local.set({ 'bugmind_api_base': val.trim().replace(/\/+$/, '') });
                 }}
                 className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-2xl pl-9 pr-4 py-2.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)] transition-all"
@@ -116,28 +116,22 @@ const SetupView: React.FC = () => {
         <div className="space-y-2">
           <label className="context-label uppercase tracking-wider block ml-1">Deployment Type</label>
           <div className="grid grid-cols-2 gap-2">
-            <button
+            <ActionButton
               type="button"
               onClick={() => setPlatform('cloud')}
-              className={`py-3 rounded-xl text-xs font-bold border transition-all ${
-                platform === 'cloud'
-                  ? 'bg-[var(--primary-gradient)] text-white border-transparent shadow-[var(--shadow-button)]'
-                  : 'bg-[var(--surface-soft)] text-[var(--text-secondary)] border-[var(--card-border)] hover:border-[var(--primary-blue)] hover:text-[var(--primary-blue)]'
-              }`}
+              variant={platform === 'cloud' ? 'primary' : 'secondary'}
+              className="py-3 text-xs"
             >
               Atlassian Cloud
-            </button>
-            <button
+            </ActionButton>
+            <ActionButton
               type="button"
               onClick={() => setPlatform('server')}
-              className={`py-3 rounded-xl text-xs font-bold border transition-all ${
-                platform === 'server'
-                  ? 'bg-[var(--primary-gradient)] text-white border-transparent shadow-[var(--shadow-button)]'
-                  : 'bg-[var(--surface-soft)] text-[var(--text-secondary)] border-[var(--card-border)] hover:border-[var(--primary-blue)] hover:text-[var(--primary-blue)]'
-              }`}
+              variant={platform === 'server' ? 'primary' : 'secondary'}
+              className="py-3 text-xs"
             >
               Data Center
-            </button>
+            </ActionButton>
           </div>
         </div>
 
