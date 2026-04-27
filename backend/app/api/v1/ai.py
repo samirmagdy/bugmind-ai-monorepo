@@ -467,8 +467,9 @@ async def generate_bug_report(
     current_user: User = Depends(deps.get_current_user)
 ):
     rate_limiter.check("ai.generate", str(current_user.id), limit=10, window_seconds=60)
-    LimitChecker.check_and_increment(db, current_user.id, "/generate", 0)
+    LimitChecker.check_allowed(db, current_user.id)
     response = await _generate_findings_response(req, db, current_user, include_analysis_summary=True)
+    LimitChecker.record_usage(db, current_user.id, "/generate", 0)
     log_audit(
         "ai.generate",
         current_user.id,
@@ -489,9 +490,10 @@ async def generate_manual_bug_report(
     current_user: User = Depends(deps.get_current_user)
 ):
     rate_limiter.check("ai.generate", str(current_user.id), limit=10, window_seconds=60)
-    LimitChecker.check_and_increment(db, current_user.id, "/generate", 0)
+    LimitChecker.check_allowed(db, current_user.id)
 
     response = await _generate_findings_response(req, db, current_user, include_analysis_summary=False)
+    LimitChecker.record_usage(db, current_user.id, "/generate", 0)
     log_audit(
         "ai.generate.manual",
         current_user.id,
@@ -515,7 +517,7 @@ async def generate_test_suite(
     Analyzes story context and generates a suite of test cases.
     """
     rate_limiter.check("ai.test_cases", str(current_user.id), limit=5, window_seconds=60)
-    LimitChecker.check_and_increment(db, current_user.id, "/test-cases", 0)
+    LimitChecker.check_allowed(db, current_user.id)
 
     custom_api_key = None
     if current_user.encrypted_ai_api_key:
@@ -529,6 +531,7 @@ async def generate_test_suite(
         custom_instructions=req.custom_instructions
     )
     response = TestSuiteResponse(**suite)
+    LimitChecker.record_usage(db, current_user.id, "/test-cases", 0)
     log_audit(
         "ai.test_cases",
         current_user.id,
@@ -597,36 +600,41 @@ async def submit_bugs(
 ):
     rate_limiter.check("ai.submit", str(current_user.id), limit=10, window_seconds=60)
     idem_key = request.headers.get("Idempotency-Key")
+    request_payload = req.model_dump()
     cached_response = idempotency_store.replay_or_reserve(
         "ai.submit",
         str(current_user.id),
         idem_key,
-        req.model_dump(),
+        request_payload,
     )
     if cached_response is not None:
         return SubmitBugsResponse(**cached_response)
 
-    conn = _get_owned_connection(db, current_user.id, req.jira_connection_id)
-    _assert_connection_matches_instance(conn, req.instance_url)
-    adapter = get_adapter(conn)
-    prefer_project_key = isinstance(adapter, JiraServerAdapter)
-    if not (req.project_id or req.project_key) or not req.issue_type_id:
-        raise HTTPException(
-            status_code=400,
-            detail="Missing Jira context (Project or Issue Type). Submission aborted."
-        )
-
-    schema_project_id = req.project_id or req.project_key
-    engine = JiraMetadataEngine(adapter)
     try:
-        schema = engine.get_field_schema(schema_project_id, req.issue_type_id)
-    except HTTPException as e:
-        if e.status_code == 400:
-             raise HTTPException(
+        conn = _get_owned_connection(db, current_user.id, req.jira_connection_id)
+        _assert_connection_matches_instance(conn, req.instance_url)
+        adapter = get_adapter(conn)
+        prefer_project_key = isinstance(adapter, JiraServerAdapter)
+        if not (req.project_id or req.project_key) or not req.issue_type_id:
+            raise HTTPException(
                 status_code=400,
-                detail=f"Failed to fetch Jira configurations for submission. Project '{schema_project_id}' or issue type '{req.issue_type_id}' may be invalid or inaccessible."
+                detail="Missing Jira context (Project or Issue Type). Submission aborted."
             )
-        raise e
+
+        schema_project_id = req.project_id or req.project_key
+        engine = JiraMetadataEngine(adapter)
+        try:
+            schema = engine.get_field_schema(schema_project_id, req.issue_type_id)
+        except HTTPException as e:
+            if e.status_code == 400:
+                 raise HTTPException(
+                    status_code=400,
+                    detail=f"Failed to fetch Jira configurations for submission. Project '{schema_project_id}' or issue type '{req.issue_type_id}' may be invalid or inaccessible."
+                )
+            raise e
+    except Exception:
+        idempotency_store.clear_reservation("ai.submit", str(current_user.id), idem_key, request_payload)
+        raise
     created_issues: List[XrayPublishedTest] = []
     created_issue_keys_for_rollback: List[str] = []
     warnings: List[str] = []

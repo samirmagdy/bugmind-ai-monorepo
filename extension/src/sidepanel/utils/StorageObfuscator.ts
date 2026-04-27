@@ -17,7 +17,7 @@ export const obfuscate = (text: string): string => {
   }
   try {
     return btoa(result);
-  } catch (e) {
+  } catch {
     // Fallback for non-latin chars if any
     return btoa(encodeURIComponent(result));
   }
@@ -32,7 +32,7 @@ export const deobfuscate = (encoded: string): string => {
     let decoded = '';
     try {
       decoded = atob(encoded);
-    } catch (e) {
+    } catch {
       decoded = decodeURIComponent(atob(encoded));
     }
     

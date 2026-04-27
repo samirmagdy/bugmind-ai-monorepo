@@ -776,7 +776,7 @@ export const AIProvider: React.FC<{
       }
       
       return results;
-    } catch (err) {
+    } catch {
       if (bugIndex !== undefined) handleUpdateBug(bugIndex, { userSearchResults: [], isSearchingUsers: false });
     }
   }, [apiBase, authToken, getProjectRequestParams, refreshAuthToken, handleUpdateBug, session.bugs, session.jiraConnectionId, session.selectedIssueType]);

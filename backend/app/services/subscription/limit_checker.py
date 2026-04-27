@@ -1,6 +1,5 @@
 from sqlalchemy.orm import Session
-from datetime import datetime, timedelta
-import calendar
+from datetime import datetime
 from app.models.subscription import Subscription, PlanType
 from app.models.usage import UsageLog
 from fastapi import HTTPException
@@ -9,7 +8,7 @@ class LimitChecker:
     FREE_LIMIT = 5
     
     @staticmethod
-    def check_and_increment(db: Session, user_id: int, endpoint: str, tokens: int = 0):
+    def check_allowed(db: Session, user_id: int):
         sub = db.query(Subscription).filter(Subscription.user_id == user_id).first()
         
         if not sub:
@@ -27,8 +26,14 @@ class LimitChecker:
             
             if usage_count >= LimitChecker.FREE_LIMIT:
                 raise HTTPException(status_code=402, detail="Free tier limit reached. Please upgrade to Pro.")
-                
-        # Log usage
+
+    @staticmethod
+    def record_usage(db: Session, user_id: int, endpoint: str, tokens: int = 0):
         usage = UsageLog(user_id=user_id, endpoint=endpoint, tokens_used=tokens)
         db.add(usage)
         db.commit()
+
+    @staticmethod
+    def check_and_increment(db: Session, user_id: int, endpoint: str, tokens: int = 0):
+        LimitChecker.check_allowed(db, user_id)
+        LimitChecker.record_usage(db, user_id, endpoint, tokens)

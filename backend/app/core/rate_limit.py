@@ -33,6 +33,8 @@ class RateLimiter:
                     },
                 )
         except RedisError:
+            if settings.is_production:
+                raise HTTPException(status_code=503, detail="Rate limiting service unavailable")
             return
 
 

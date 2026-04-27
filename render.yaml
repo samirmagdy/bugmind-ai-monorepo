@@ -5,6 +5,11 @@ databases:
     user: bugmind_admin
 
 services:
+  - type: redis
+    name: bugmind-redis
+    plan: free
+    ipAllowList: []
+
   - type: web
     name: bugmind-backend
     runtime: python
@@ -26,7 +31,10 @@ services:
       - key: LOG_LEVEL
         value: INFO
       - key: REDIS_URL
-        value: redis://localhost:6379/0
+        fromService:
+          type: redis
+          name: bugmind-redis
+          property: connectionString
       - key: SECRET_KEY
         sync: true  # Changed from false to true
       - key: ENCRYPTION_KEY
@@ -40,7 +48,7 @@ services:
       - key: ALLOWED_HOSTS
         sync: true  # Changed from false to true
       - key: RATE_LIMITS_ENABLED
-        value: "false"
+        value: "true"
       - key: ALLOW_PRIVATE_JIRA_HOSTS
         value: "false"
       - key: ALLOW_INSECURE_JIRA_SSL

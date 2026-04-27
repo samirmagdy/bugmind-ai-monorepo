@@ -434,17 +434,18 @@ def delete_connection(
     conn = db.query(JiraConnection).filter(JiraConnection.id == conn_id, JiraConnection.user_id == current_user.id).first()
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
-    
-    db.delete(conn)
-    db.commit()
-    log_audit("jira.connection_delete", current_user.id, db=db, connection_id=conn_id)
 
-    if conn.is_active:
+    was_active = bool(conn.is_active)
+    db.delete(conn)
+
+    if was_active:
         replacement = db.query(JiraConnection).filter(JiraConnection.user_id == current_user.id).order_by(JiraConnection.id.asc()).first()
         if replacement:
             replacement.is_active = True
             db.add(replacement)
-            db.commit()
+
+    db.commit()
+    log_audit("jira.connection_delete", current_user.id, db=db, connection_id=conn_id)
     return None
 
 @router.get("/connections/{conn_id}/projects")
@@ -709,7 +710,16 @@ def publish_xray_test_suite(
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
 
-    if conn.auth_type == JiraAuthType.CLOUD:
-        return _publish_xray_cloud_test_suite(req, current_user, db, request)
+    try:
+        if conn.auth_type == JiraAuthType.CLOUD:
+            return _publish_xray_cloud_test_suite(req, current_user, db, request)
 
-    return _publish_xray_server_test_suite(conn_id, req, current_user, db, request)
+        return _publish_xray_server_test_suite(conn_id, req, current_user, db, request)
+    except Exception:
+        idempotency_store.clear_reservation(
+            "jira.xray_publish",
+            str(current_user.id),
+            idem_key,
+            req.model_dump(),
+        )
+        raise

@@ -9,10 +9,10 @@ from app.core.config import settings
 logger = logging.getLogger("bugmind.http")
 
 
-def send_password_reset_code(*, to_email: str, code: str) -> None:
+def send_password_reset_code(*, to_email: str, code: str) -> bool:
     if not settings.SMTP_HOST or not settings.SMTP_FROM_EMAIL:
-        logger.warning("password_reset_email_skipped smtp_not_configured email=%s code=%s", to_email, code)
-        return
+        logger.warning("password_reset_email_skipped smtp_not_configured email=%s", to_email)
+        return False
 
     message = EmailMessage()
     message["Subject"] = "Your BugMind password reset code"
@@ -37,3 +37,4 @@ def send_password_reset_code(*, to_email: str, code: str) -> None:
         if settings.SMTP_USERNAME and settings.SMTP_PASSWORD:
             smtp.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
         smtp.send_message(message)
+    return True

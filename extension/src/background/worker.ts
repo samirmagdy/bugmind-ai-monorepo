@@ -133,7 +133,7 @@ async function ensureContentScript(tabId: number): Promise<boolean> {
 
     tabScriptInjectionInFlight.set(tabId, injectPromise);
     return injectPromise;
-  } catch (e) {
+  } catch {
     // Expected if script is not injected yet
   }
   return false;
@@ -159,7 +159,7 @@ async function refreshTabContext(tabId: number, url?: string, force: boolean = f
     try {
       const tab = await chrome.tabs.get(tabId);
       url = tab.url;
-    } catch (e) {
+    } catch {
       return null;
     }
   }
@@ -308,7 +308,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
       }
       db.close();
     };
-  } catch (e) {
+  } catch {
     // Non-critical cleanup failure
   }
 });

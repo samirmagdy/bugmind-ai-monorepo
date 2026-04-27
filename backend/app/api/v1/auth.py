@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import logging
 import secrets
 from typing import Dict, Optional
 
@@ -34,6 +35,7 @@ from app.services.auth.google import verify_google_id_token
 from app.services.auth.mail import send_password_reset_code
 
 router = APIRouter()
+logger = logging.getLogger("bugmind.http")
 
 
 def _ensure_active_user(user: User) -> User:
@@ -156,9 +158,9 @@ def google_login_config():
 
 @router.post("/google", response_model=Token)
 def google_login(request: GoogleLoginRequest, http_request: Request, db: Session = Depends(deps.get_db)):
+    rate_limiter.check("auth.google.ip", get_client_ip(http_request), limit=10, window_seconds=300)
     google_profile = verify_google_id_token(request.id_token)
     normalized_email = google_profile["email"]
-    rate_limiter.check("auth.google.ip", get_client_ip(http_request), limit=10, window_seconds=300)
     rate_limiter.check("auth.google.user", normalized_email, limit=10, window_seconds=300)
 
     user = db.query(User).filter(User.google_subject == google_profile["google_subject"]).first()
@@ -264,8 +266,11 @@ def forgot_password(request: ForgotPasswordRequest, http_request: Request, db: S
                 expires_at=now + timedelta(minutes=security.settings.PASSWORD_RESET_CODE_EXPIRE_MINUTES),
             )
         )
+        if not send_password_reset_code(to_email=normalized_email, code=code):
+            db.rollback()
+            logger.warning("password_reset_code_not_persisted email=%s reason=email_not_sent", normalized_email)
+            return ForgotPasswordResponse(message="If an account exists for that email, a reset code has been sent.")
         db.commit()
-        send_password_reset_code(to_email=normalized_email, code=code)
         log_audit("auth.password_forgot", user.id, db=db, request_path=str(http_request.url.path))
 
     return ForgotPasswordResponse(message="If an account exists for that email, a reset code has been sent.")

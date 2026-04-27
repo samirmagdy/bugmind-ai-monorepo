@@ -185,7 +185,7 @@ export interface FindingGenerationResponsePayload {
   warnings?: string[];
 }
 
-export interface ManualBugGenerationResponsePayload extends FindingGenerationResponsePayload {}
+export type ManualBugGenerationResponsePayload = FindingGenerationResponsePayload;
 
 export interface GapAnalysisResponsePayload extends FindingGenerationResponsePayload {
   ac_coverage?: number;
