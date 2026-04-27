@@ -162,7 +162,7 @@ export const apiRequest = async (
       return await fetch(url, { ...fetchOptions, headers: requestHeaders, signal: controller.signal });
     } catch (err: unknown) {
       if (didTimeout) {
-        throw new Error(`Request timed out after ${timeoutMs}ms`);
+        throw new Error(`Request timed out after ${timeoutMs}ms`, { cause: err });
       }
       throw err;
     } finally {
