@@ -49,3 +49,19 @@ services:
         sync: true  # Changed from false to true
       - key: STRIPE_WEBHOOK_SECRET
         sync: true  # Changed from false to true
+      - key: GOOGLE_OAUTH_CLIENT_ID
+        sync: true
+      - key: SMTP_HOST
+        sync: true
+      - key: SMTP_PORT
+        sync: true
+      - key: SMTP_USERNAME
+        sync: true
+      - key: SMTP_PASSWORD
+        sync: true
+      - key: SMTP_FROM_EMAIL
+        sync: true
+      - key: SMTP_USE_TLS
+        value: "true"
+      - key: PASSWORD_RESET_CODE_EXPIRE_MINUTES
+        value: "15"

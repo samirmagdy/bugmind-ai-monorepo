@@ -21,6 +21,13 @@ configure_logging()
 logger = logging.getLogger("bugmind.http")
 
 
+REQUIRED_TABLES = ["users", "audit_logs", "jira_connections"]
+REQUIRED_COLUMNS = {
+    "users": {"google_subject", "email_verified_at"},
+    "password_reset_codes": {"email", "code_hash", "expires_at", "used_at"},
+}
+
+
 def _normalize_request_origin(raw_origin: str) -> str:
     if not raw_origin:
         return ""
@@ -152,12 +159,27 @@ async def startup_event():
         tables = inspector.get_table_names()
         logger.info("DATABASE TABLES FOUND: %s", ", ".join(tables) if tables else "NONE")
         
-        required_tables = ["users", "audit_logs", "jira_connections"]
-        missing_tables = [t for t in required_tables if t not in tables]
+        missing_tables = [t for t in REQUIRED_TABLES if t not in tables]
         if missing_tables:
             logger.error("CRITICAL: Missing core tables: %s. Migrations did not run successfully.", ", ".join(missing_tables))
             import sys
             sys.exit(1)
+
+        for table_name, required_columns in REQUIRED_COLUMNS.items():
+            if table_name not in tables:
+                logger.error("CRITICAL: Missing required table: %s. Latest migrations are not applied.", table_name)
+                import sys
+                sys.exit(1)
+            existing_columns = {column["name"] for column in inspector.get_columns(table_name)}
+            missing_columns = sorted(required_columns - existing_columns)
+            if missing_columns:
+                logger.error(
+                    "CRITICAL: Missing required columns on %s: %s. Latest migrations are not applied.",
+                    table_name,
+                    ", ".join(missing_columns),
+                )
+                import sys
+                sys.exit(1)
     except Exception as e:
         logger.error("CRITICAL DATABASE CONNECTION FAILURE: %s", str(e))
         logger.error("The application cannot start without a valid database connection.")
