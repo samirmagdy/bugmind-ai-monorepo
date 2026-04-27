@@ -131,6 +131,7 @@ export const AIProvider: React.FC<{
   const generateBugsInFlightRef = useRef(false);
   const generateBugsRequestRef = useRef(0);
   const generateTestsInFlightRef = useRef(false);
+  const generateTestsRequestRef = useRef(0);
   const manualGenerateInFlightRef = useRef(false);
   const submitBugsInFlightRef = useRef(false);
   const publishXrayInFlightRef = useRef(false);
@@ -152,11 +153,11 @@ export const AIProvider: React.FC<{
     return sanitized;
   }, []);
 
-  const buildIdempotencyKey = useCallback(() => {
+  const buildIdempotencyKey = useCallback((prefix = 'request') => {
     const randomId = typeof crypto !== 'undefined' && 'randomUUID' in crypto
       ? crypto.randomUUID()
       : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    return `ai-submit-${currentTabId ?? 'tab'}-${randomId}`;
+    return `${prefix}-${currentTabId ?? 'tab'}-${randomId}`;
   }, [currentTabId]);
 
   const buildDefaultExtraFields = useCallback(() => {
@@ -182,6 +183,19 @@ export const AIProvider: React.FC<{
       ...sanitizeExtraFields((bug.fields || {}) as BugReport['extra_fields'])
     }
   }), [buildDefaultExtraFields, sanitizeExtraFields]);
+
+  const normalizeFrontendTestCase = useCallback((testCase: TestCase): TestCase => ({
+    title: testCase.title || 'Untitled test case',
+    steps: Array.isArray(testCase.steps) ? testCase.steps.filter(Boolean) : [],
+    expected_result: testCase.expected_result || '',
+    priority: testCase.priority || 'Medium',
+    selected: testCase.selected !== false,
+    test_type: testCase.test_type || 'Manual',
+    preconditions: testCase.preconditions || '',
+    acceptance_criteria_refs: Array.isArray(testCase.acceptance_criteria_refs) ? testCase.acceptance_criteria_refs : [],
+    labels: Array.isArray(testCase.labels) ? testCase.labels : [],
+    components: Array.isArray(testCase.components) ? testCase.components : []
+  }), []);
 
   const normalizeGapAnalysisSummary = useCallback((summary: GapAnalysisSummary | null | undefined): GapAnalysisSummary | null => {
     if (!summary || typeof summary !== 'object') return null;
@@ -451,7 +465,13 @@ export const AIProvider: React.FC<{
       return;
     }
     generateTestsInFlightRef.current = true;
-    updateSession({ loading: true, error: null, bugs: [], testCases: [], gapAnalysisSummary: null }, currentTabId);
+    const requestId = generateTestsRequestRef.current + 1;
+    generateTestsRequestRef.current = requestId;
+    const requestTabId = currentTabId;
+    const requestIssueKey = session.issueData.key;
+    const requestJiraConnectionId = session.jiraConnectionId;
+    const requestIssueTypeId = session.selectedIssueType.id;
+    updateSession({ loading: true, error: null, success: null, gapAnalysisSummary: null }, currentTabId);
     try {
       const { projectKey, projectId } = getProjectRequestParams();
       const payload: AIGenerationRequestPayload = {
@@ -460,7 +480,13 @@ export const AIProvider: React.FC<{
         instance_url: session.instanceUrl,
         project_key: projectKey,
         project_id: projectId,
-        issue_type_id: session.selectedIssueType.id
+        issue_type_id: session.selectedIssueType.id,
+        issue_type_name: session.selectedIssueType.name,
+        supporting_context: [
+          session.testGenerationTypes?.length ? `Requested test coverage types: ${session.testGenerationTypes.join(', ')}` : '',
+          session.generationSupportingContext,
+          buildArtifactContext()
+        ].filter(Boolean).join('\n\n')
       };
       const res = await apiRequest(`${apiBase}/ai/test-cases`, {
         method: 'POST',
@@ -472,23 +498,69 @@ export const AIProvider: React.FC<{
         await throwApiErrorResponse(res, `Failed to generate test cases (${res.status})`);
       }
       const data = await readJsonResponse<AITestCasesResponsePayload>(res);
-      updateSession({
-        bugs: [],
-        testCases: data.test_cases || [],
-        coverageScore: data.coverage_score ?? null,
-        gapAnalysisSummary: null,
-        xrayFolderPath: session.issueData.key,
-        xrayWarnings: [],
-        createdIssues: []
-      }, currentTabId);
-      fetchUsage();
+      const testCases = (data.test_cases || []).map(normalizeFrontendTestCase);
+      if (!testCases.length) {
+        throw new Error('AI returned no usable test cases. Please try again with more story detail or supporting context.');
+      }
+      const rawCoverageScore = data.coverage_score === undefined || data.coverage_score === null
+        ? null
+        : Number(data.coverage_score);
+      const coverageScore = rawCoverageScore === null || !Number.isFinite(rawCoverageScore)
+        ? null
+        : Math.max(0, Math.min(100, rawCoverageScore));
+      let applied = false;
+      setTabSessions(prev => {
+        const curr = prev[requestTabId] || INITIAL_SESSION;
+        if (
+          generateTestsRequestRef.current !== requestId ||
+          curr.issueData?.key !== requestIssueKey ||
+          curr.jiraConnectionId !== requestJiraConnectionId ||
+          curr.selectedIssueType?.id !== requestIssueTypeId
+        ) {
+          return prev;
+        }
+        applied = true;
+        return {
+          ...prev,
+          [requestTabId]: {
+            ...curr,
+            bugs: [],
+            testCases,
+            coverageScore,
+            gapAnalysisSummary: null,
+            xrayFolderPath: requestIssueKey,
+            xrayWarnings: [],
+            createdIssues: [],
+            xrayProjects: [],
+            xrayTargetProjectId: null,
+            xrayTargetProjectKey: null
+          }
+        };
+      });
+      if (applied) fetchUsage();
     } catch (err) {
-      updateSession({ error: getErrorMessage(err) }, currentTabId);
+      setTabSessions(prev => {
+        const curr = prev[requestTabId] || INITIAL_SESSION;
+        if (
+          generateTestsRequestRef.current !== requestId ||
+          curr.issueData?.key !== requestIssueKey ||
+          curr.jiraConnectionId !== requestJiraConnectionId ||
+          curr.selectedIssueType?.id !== requestIssueTypeId
+        ) {
+          return prev;
+        }
+        return { ...prev, [requestTabId]: { ...curr, error: getErrorMessage(err) } };
+      });
     } finally {
       generateTestsInFlightRef.current = false;
-      updateSession({ loading: false }, currentTabId);
+      if (generateTestsRequestRef.current === requestId) {
+        setTabSessions(prev => {
+          const curr = prev[requestTabId] || INITIAL_SESSION;
+          return { ...prev, [requestTabId]: { ...curr, loading: false } };
+        });
+      }
     }
-  }, [apiBase, authToken, buildIssueContext, currentTabId, fetchUsage, getProjectRequestParams, refreshAuthToken, session.instanceUrl, session.issueData, session.jiraConnectionId, session.selectedIssueType, updateSession]);
+  }, [apiBase, authToken, buildArtifactContext, buildIssueContext, currentTabId, fetchUsage, getProjectRequestParams, normalizeFrontendTestCase, refreshAuthToken, session.generationSupportingContext, session.instanceUrl, session.issueData, session.jiraConnectionId, session.selectedIssueType, session.testGenerationTypes, setTabSessions, updateSession]);
 
   const publishTestCasesToXray = useCallback(async () => {
     if (publishXrayInFlightRef.current) return;
@@ -501,6 +573,11 @@ export const AIProvider: React.FC<{
       updateSession({ error: 'Please choose an Xray target project before publishing.' }, currentTabId);
       return;
     }
+    const selectedTestCases = session.testCases.filter((testCase) => testCase.selected !== false);
+    if (!selectedTestCases.length) {
+      updateSession({ error: 'Select at least one test case before publishing.' }, currentTabId);
+      return;
+    }
 
     publishXrayInFlightRef.current = true;
     updateSession({ loading: true, error: null, success: null }, currentTabId);
@@ -511,7 +588,7 @@ export const AIProvider: React.FC<{
         story_issue_key: session.issueData.key,
         xray_project_id: session.xrayTargetProjectId,
         xray_project_key: session.xrayTargetProjectKey,
-        test_cases: session.testCases,
+        test_cases: selectedTestCases.map(normalizeFrontendTestCase),
         test_issue_type_id: undefined,
         test_issue_type_name: session.xrayTestIssueTypeName || 'Test',
         repository_path_field_id: session.xrayRepositoryPathFieldId || undefined,
@@ -522,6 +599,7 @@ export const AIProvider: React.FC<{
         method: 'POST',
         token: authToken,
         onUnauthorized: refreshAuthToken,
+        headers: { 'Idempotency-Key': buildIdempotencyKey('xray-publish') },
         body: JSON.stringify(payload)
       });
 
@@ -541,7 +619,7 @@ export const AIProvider: React.FC<{
       publishXrayInFlightRef.current = false;
       updateSession({ loading: false }, currentTabId);
     }
-  }, [apiBase, authToken, currentTabId, refreshAuthToken, session.issueData, session.jiraConnectionId, session.testCases, session.xrayFolderPath, session.xrayLinkType, session.xrayPublishSupported, session.xrayRepositoryPathFieldId, session.xrayTargetProjectId, session.xrayTargetProjectKey, session.xrayTestIssueTypeName, session.xrayUnsupportedReason, updateSession]);
+  }, [apiBase, authToken, buildIdempotencyKey, currentTabId, normalizeFrontendTestCase, refreshAuthToken, session.issueData, session.jiraConnectionId, session.testCases, session.xrayFolderPath, session.xrayLinkType, session.xrayPublishSupported, session.xrayRepositoryPathFieldId, session.xrayTargetProjectId, session.xrayTargetProjectKey, session.xrayTestIssueTypeName, session.xrayUnsupportedReason, updateSession]);
 
   const handleManualGenerate = useCallback(async () => {
     if (manualGenerateInFlightRef.current) return;
@@ -808,7 +886,7 @@ export const AIProvider: React.FC<{
         method: 'POST',
         token: authToken,
         onUnauthorized: refreshAuthToken,
-        headers: { 'Idempotency-Key': buildIdempotencyKey() },
+        headers: { 'Idempotency-Key': buildIdempotencyKey('ai-submit') },
         body: JSON.stringify(payload)
       });
 

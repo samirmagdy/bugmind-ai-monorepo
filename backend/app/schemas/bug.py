@@ -133,6 +133,12 @@ class TestCase(BaseModel):
     steps: List[str]
     expected_result: str
     priority: str
+    selected: Optional[bool] = True
+    test_type: Optional[str] = "Manual"
+    preconditions: Optional[str] = None
+    acceptance_criteria_refs: List[str] = []
+    labels: List[str] = []
+    components: List[str] = []
 
 class TestSuiteResponse(BaseModel):
     test_cases: List[TestCase]

@@ -3,7 +3,8 @@ import { useBugMind } from '../../hooks/useBugMind';
 import { 
   Plus, ChevronDown, Bug,
   Loader2, Send, AlertCircle, Zap, RefreshCw,
-  Compass, ArrowRight, Check, Layout, AlertTriangle, BrainCircuit, Paperclip, X, ClipboardList
+  Compass, ArrowRight, Check, Layout, AlertTriangle, BrainCircuit, Paperclip, X, ClipboardList,
+  Trash2, Copy, ArrowUp, ArrowDown, Square, CheckSquare
 } from 'lucide-react';
 import { BugReport, JiraField, JiraFieldOption, JiraUser, SupportingArtifact, TestCase, ManualBugInput, AnalysisCoverageItem } from '../../types';
 import AutoResizeTextarea from '../common/AutoResizeTextarea';
@@ -165,6 +166,61 @@ const MainView: React.FC = () => {
 
   const setWorkflow = (mainWorkflow: 'home' | 'manual' | 'analysis' | 'tests') => {
     updateSession({ mainWorkflow, error: null });
+  };
+
+  const splitListInput = (value: string) => value.split(/[\n,]+/).map(item => item.trim()).filter(Boolean);
+  const selectedTestCaseCount = session.testCases.filter(testCase => testCase.selected !== false).length;
+
+  const addTestCase = () => {
+    updateSession({
+      testCases: [
+        ...session.testCases,
+        {
+          title: 'New test case',
+          steps: [''],
+          expected_result: '',
+          priority: 'Medium',
+          selected: true,
+          test_type: 'Manual',
+          preconditions: '',
+          acceptance_criteria_refs: [],
+          labels: [],
+          components: []
+        }
+      ]
+    });
+  };
+
+  const removeTestCase = (index: number) => {
+    updateSession({ testCases: session.testCases.filter((_, idx) => idx !== index) });
+  };
+
+  const duplicateTestCase = (index: number) => {
+    const source = session.testCases[index];
+    if (!source) return;
+    const next = [...session.testCases];
+    next.splice(index + 1, 0, { ...source, title: `${source.title} (copy)`, steps: [...source.steps] });
+    updateSession({ testCases: next });
+  };
+
+  const moveTestCase = (index: number, direction: -1 | 1) => {
+    const nextIndex = index + direction;
+    if (nextIndex < 0 || nextIndex >= session.testCases.length) return;
+    const next = [...session.testCases];
+    [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+    updateSession({ testCases: next });
+  };
+
+  const setAllTestCasesSelected = (selected: boolean) => {
+    updateSession({ testCases: session.testCases.map(testCase => ({ ...testCase, selected })) });
+  };
+
+  const toggleTestGenerationType = (type: string) => {
+    const current = session.testGenerationTypes || [];
+    const next = current.includes(type)
+      ? current.filter(item => item !== type)
+      : [...current, type];
+    updateSession({ testGenerationTypes: next.length ? next : [type] });
   };
 
   const updateManualInput = (index: number, value: string) => {
@@ -442,16 +498,18 @@ const MainView: React.FC = () => {
   }, [session.bugs, session.instanceUrl, session.issueData, debug, searchUsers]);
 
   useEffect(() => {
-    if (!session.testCases.length || !session.jiraConnectionId || session.xrayProjects.length > 0) return;
+    const issueKey = session.issueData?.key || '';
+    if (!session.testCases.length || !session.jiraConnectionId) return;
+    if (session.xrayProjects.length > 0 && session.xrayFolderPath === issueKey) return;
 
     let cancelled = false;
-    jira.fetchXrayDefaults(session.jiraConnectionId, session.issueData?.key || undefined).then(defaults => {
+    jira.fetchXrayDefaults(session.jiraConnectionId, issueKey || undefined).then(defaults => {
       if (cancelled || !defaults) return;
       updateSession({
         xrayProjects: defaults.projects || [],
         xrayTargetProjectId: session.xrayTargetProjectId || defaults.target_project_id || null,
         xrayTargetProjectKey: session.xrayTargetProjectKey || defaults.target_project_key || null,
-        xrayFolderPath: session.xrayFolderPath || defaults.folder_path || session.issueData?.key || '',
+        xrayFolderPath: defaults.folder_path || issueKey || '',
         xrayTestIssueTypeName: session.xrayTestIssueTypeName || defaults.test_issue_type_name || 'Test',
         xrayLinkType: session.xrayLinkType || defaults.link_type || 'Tests',
         xrayRepositoryPathFieldId: session.xrayRepositoryPathFieldId || defaults.repository_path_field_id || '',
@@ -897,11 +955,32 @@ const MainView: React.FC = () => {
                           <p className="text-[12px] text-[var(--text-secondary)] leading-relaxed">
                             Generate comprehensive QA-ready test cases from the current story and prepare them for direct Jira Xray publishing.
                           </p>
+                          <div className="space-y-2">
+                            <label className="context-label uppercase tracking-wider mb-1.5 block ml-1">Test Coverage Types</label>
+                            <div className="grid grid-cols-2 gap-2">
+                              {['Positive', 'Negative', 'Edge', 'Regression', 'Security', 'Accessibility', 'Integration', 'Permissions'].map((type) => (
+                                <button
+                                  key={type}
+                                  type="button"
+                                  onClick={() => toggleTestGenerationType(type)}
+                                  disabled={session.loading}
+                                  className={`rounded-[0.95rem] border px-3 py-2 text-[10px] font-bold ${
+                                    (session.testGenerationTypes || []).includes(type)
+                                      ? 'border-[var(--border-active)] bg-[var(--surface-accent)] text-[var(--text-primary)]'
+                                      : 'border-[var(--border-soft)] bg-[var(--bg-input)] text-[var(--text-secondary)]'
+                                  }`}
+                                >
+                                  {type}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          {supportingContextPanel}
                           <ActionButton 
                             onClick={generateTestCases}
                             variant="primary"
                             className="h-11 text-[13px]"
-                            disabled={requiresIssueType}
+                            disabled={requiresIssueType || session.loading}
                           >
                             <Check size={16} />
                             Generate Test Cases
@@ -924,6 +1003,18 @@ const MainView: React.FC = () => {
                 <div className="flex justify-between items-center px-1">
                   <h3 className="text-lg font-bold text-[var(--text-primary)]">{session.testCases.length} Test Assets</h3>
                   <div className="flex gap-4">
+                    <button
+                      onClick={() => setAllTestCasesSelected(selectedTestCaseCount !== session.testCases.length)}
+                      className="text-xs font-bold text-[var(--text-muted)]"
+                    >
+                      {selectedTestCaseCount === session.testCases.length ? 'Unselect All' : 'Select All'}
+                    </button>
+                    <button
+                      onClick={addTestCase}
+                      className="text-xs font-bold text-[var(--primary-blue)]"
+                    >
+                      Add
+                    </button>
                     <button 
                       onClick={() => updateSession({ testCases: [], coverageScore: null, gapAnalysisSummary: null, error: null, createdIssues: [], xrayWarnings: [], mainWorkflow: 'home' })} 
                       className="text-xs font-bold text-[var(--error)]"
@@ -932,6 +1023,7 @@ const MainView: React.FC = () => {
                     </button>
                     <button 
                       onClick={generateTestCases} 
+                      disabled={session.loading || requiresIssueType}
                       className="text-xs font-bold text-[var(--primary-blue)]"
                     >
                       Retry
@@ -943,11 +1035,43 @@ const MainView: React.FC = () => {
                   {session.testCases.map((testCase: TestCase, idx: number) => (
                     <SurfaceCard key={`${testCase.title}-${idx}`} className="space-y-3">
                       <div className="flex items-center justify-between">
-                        <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider">Test Case {idx + 1}</span>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateTestCase(idx, { selected: testCase.selected === false })}
+                            className="flex h-7 w-7 items-center justify-center rounded-full border border-[var(--border-soft)] text-[var(--text-muted)]"
+                            aria-label={testCase.selected === false ? 'Select test case' : 'Unselect test case'}
+                          >
+                            {testCase.selected === false ? <Square size={14} /> : <CheckSquare size={14} />}
+                          </button>
+                          <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider">Test Case {idx + 1}</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button type="button" onClick={() => moveTestCase(idx, -1)} disabled={idx === 0} className="flex h-7 w-7 items-center justify-center rounded-full border border-[var(--border-soft)] text-[var(--text-muted)] disabled:opacity-30" aria-label="Move test case up">
+                            <ArrowUp size={12} />
+                          </button>
+                          <button type="button" onClick={() => moveTestCase(idx, 1)} disabled={idx === session.testCases.length - 1} className="flex h-7 w-7 items-center justify-center rounded-full border border-[var(--border-soft)] text-[var(--text-muted)] disabled:opacity-30" aria-label="Move test case down">
+                            <ArrowDown size={12} />
+                          </button>
+                          <button type="button" onClick={() => duplicateTestCase(idx)} className="flex h-7 w-7 items-center justify-center rounded-full border border-[var(--border-soft)] text-[var(--text-muted)]" aria-label="Duplicate test case">
+                            <Copy size={12} />
+                          </button>
+                          <button type="button" onClick={() => removeTestCase(idx)} className="flex h-7 w-7 items-center justify-center rounded-full border border-[var(--border-soft)] text-[var(--error)]" aria-label="Delete test case">
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
                         <input
                           value={testCase.priority}
                           onChange={e => handleUpdateTestCase(idx, { priority: e.target.value })}
                           className="w-20 bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-[0.85rem] px-2 py-1 text-[10px] font-bold text-[var(--primary-blue)] text-right"
+                        />
+                        <input
+                          value={testCase.test_type || 'Manual'}
+                          onChange={e => handleUpdateTestCase(idx, { test_type: e.target.value })}
+                          className="w-28 bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-[0.85rem] px-2 py-1 text-[10px] font-bold text-[var(--text-secondary)] text-right"
+                          placeholder="Test type"
                         />
                       </div>
                       <AutoResizeTextarea
@@ -969,11 +1093,39 @@ const MainView: React.FC = () => {
                         />
                       </div>
                       <div className="space-y-1.5">
+                        <label className="context-label uppercase tracking-widest block">Preconditions</label>
+                        <AutoResizeTextarea
+                          value={testCase.preconditions || ''}
+                          onChange={e => handleUpdateTestCase(idx, { preconditions: e.target.value })}
+                          className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-[0.9rem] p-2.5 text-xs text-[var(--text-secondary)] outline-none"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
                         <label className="context-label uppercase tracking-widest block">Expected Result</label>
                         <AutoResizeTextarea
                           value={testCase.expected_result}
                           onChange={e => handleUpdateTestCase(idx, { expected_result: e.target.value })}
                           className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-[0.9rem] p-2.5 text-xs text-[var(--text-secondary)] outline-none"
+                        />
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <input
+                          value={(testCase.acceptance_criteria_refs || []).join(', ')}
+                          onChange={e => handleUpdateTestCase(idx, { acceptance_criteria_refs: splitListInput(e.target.value) })}
+                          className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-[0.9rem] px-2.5 py-2 text-xs text-[var(--text-secondary)] outline-none"
+                          placeholder="AC refs"
+                        />
+                        <input
+                          value={(testCase.labels || []).join(', ')}
+                          onChange={e => handleUpdateTestCase(idx, { labels: splitListInput(e.target.value) })}
+                          className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-[0.9rem] px-2.5 py-2 text-xs text-[var(--text-secondary)] outline-none"
+                          placeholder="Labels"
+                        />
+                        <input
+                          value={(testCase.components || []).join(', ')}
+                          onChange={e => handleUpdateTestCase(idx, { components: splitListInput(e.target.value) })}
+                          className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-[0.9rem] px-2.5 py-2 text-xs text-[var(--text-secondary)] outline-none"
+                          placeholder="Components"
                         />
                       </div>
                     </SurfaceCard>
@@ -1069,11 +1221,11 @@ const MainView: React.FC = () => {
 
                   <ActionButton
                     onClick={publishTestCasesToXray}
-                    disabled={!session.xrayTargetProjectId || session.testCases.length === 0 || session.loading || !session.xrayPublishSupported}
+                    disabled={!session.xrayTargetProjectId || selectedTestCaseCount === 0 || session.loading || !session.xrayPublishSupported}
                     variant="primary"
                   >
                     <Send size={16} />
-                    Publish Selected to Xray
+                    Publish {selectedTestCaseCount} Selected to Xray
                   </ActionButton>
                 </div>
               </div>            ) : (

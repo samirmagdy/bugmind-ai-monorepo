@@ -61,6 +61,12 @@ export interface TestCase {
   steps: string[];
   expected_result: string;
   priority: string;
+  selected?: boolean;
+  test_type?: string;
+  preconditions?: string;
+  acceptance_criteria_refs?: string[];
+  labels?: string[];
+  components?: string[];
 }
 
 export interface XrayPublishResult {
@@ -146,6 +152,7 @@ export interface TabSession {
   coverageScore: number | null;
   gapAnalysisSummary: GapAnalysisSummary | null;
   bugGenerationCount: number;
+  testGenerationTypes: string[];
   generationSupportingContext: string;
   supportingArtifacts: SupportingArtifact[];
   manualInputs: ManualBugInput[];
@@ -267,6 +274,7 @@ export const INITIAL_SESSION: TabSession = {
   coverageScore: null,
   gapAnalysisSummary: null,
   bugGenerationCount: 5,
+  testGenerationTypes: ['Positive', 'Negative', 'Edge', 'Regression'],
   generationSupportingContext: '',
   supportingArtifacts: [],
   manualInputs: [{ text: '', supportingContext: '', supportingArtifacts: [] }],

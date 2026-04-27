@@ -180,12 +180,62 @@ def _resolve_link_type_candidates(link_type: Optional[str], available_types: lis
 
 def _format_test_issue_description(story_issue_key: str, test_case: dict) -> str:
     steps = test_case.get("steps", []) or []
-    lines = [f"Source Story: {story_issue_key}", "", "Steps:"]
+    lines = [f"Source Story: {story_issue_key}"]
+    if test_case.get("test_type"):
+        lines.extend(["", f"Test Type: {str(test_case.get('test_type')).strip()}"])
+    if test_case.get("preconditions"):
+        lines.extend(["", "Preconditions:", str(test_case.get("preconditions", "")).strip()])
+    refs = test_case.get("acceptance_criteria_refs") or []
+    if refs:
+        lines.extend(["", "Acceptance Criteria References:", ", ".join(str(ref) for ref in refs)])
+    lines.extend(["", "Steps:"])
     for idx, step in enumerate(steps, start=1):
         lines.append(f"{idx}. {step}")
     lines.extend(["", "Expected Result:", str(test_case.get("expected_result", "")).strip()])
     lines.extend(["", f"Priority: {str(test_case.get('priority', '')).strip()}"])
+    labels = test_case.get("labels") or []
+    components = test_case.get("components") or []
+    if labels:
+        lines.extend(["", "Labels:", ", ".join(str(label) for label in labels)])
+    if components:
+        lines.extend(["", "Components:", ", ".join(str(component) for component in components)])
     return "\n".join(lines).strip()
+
+
+def _field_key_by_name(fields: list[dict], names: tuple[str, ...]) -> Optional[str]:
+    normalized_names = {name.strip().lower() for name in names}
+    for field in fields:
+        key = field.get("key") or field.get("id")
+        name = str(field.get("name", "")).strip().lower()
+        if key in normalized_names or name in normalized_names:
+            return str(key)
+    return None
+
+
+def _apply_optional_xray_fields(fields_payload: dict, test_fields: list[dict], test_case: dict) -> None:
+    field_keys = {str(field.get("key") or field.get("id")) for field in test_fields}
+
+    priority = str(test_case.get("priority") or "").strip()
+    if priority and "priority" in field_keys:
+        fields_payload["priority"] = {"name": priority}
+
+    labels = [str(label).strip() for label in (test_case.get("labels") or []) if str(label).strip()]
+    if labels and "labels" in field_keys:
+        fields_payload["labels"] = labels
+
+    components = [str(component).strip() for component in (test_case.get("components") or []) if str(component).strip()]
+    if components and "components" in field_keys:
+        fields_payload["components"] = [{"name": component} for component in components]
+
+    test_type = str(test_case.get("test_type") or "").strip()
+    test_type_field = _field_key_by_name(test_fields, ("test type", "xray test type"))
+    if test_type and test_type_field:
+        fields_payload[test_type_field] = {"value": test_type}
+
+    preconditions = str(test_case.get("preconditions") or "").strip()
+    precondition_field = _field_key_by_name(test_fields, ("precondition", "preconditions"))
+    if preconditions and precondition_field:
+        fields_payload[precondition_field] = preconditions
 
 
 def resolve_jira_bootstrap_context(
@@ -522,11 +572,9 @@ def get_xray_defaults(
         for project in projects
     ]
 
-    publish_supported = conn.auth_type != JiraAuthType.CLOUD
+    publish_supported = True
     publish_mode = "xray_cloud" if conn.auth_type == JiraAuthType.CLOUD else "jira_server"
     unsupported_reason = None
-    if conn.auth_type == JiraAuthType.CLOUD:
-        unsupported_reason = "Xray Cloud publishing is not enabled in this build. Use Jira Server/DC for Jira-native Xray publishing, or add a dedicated Xray Cloud external API implementation."
 
     return XrayDefaultsResponse(
         projects=projects_response,
@@ -612,11 +660,7 @@ def _publish_xray_cloud_test_suite(
     db: Session,
     request: Request,
 ) -> XrayTestSuitePublishResponse:
-    _get_xray_cloud_access_token()
-    raise HTTPException(
-        status_code=501,
-        detail="Xray Cloud publishing is now separated from Jira issue creation and requires dedicated external API mapping that is not configured yet",
-    )
+    return _publish_xray_server_test_suite(req.jira_connection_id, req, current_user, db, request)
 
 
 def _publish_xray_server_test_suite(
@@ -653,32 +697,50 @@ def _publish_xray_server_test_suite(
     warnings: list[str] = []
     link_type_used: Optional[str] = None
 
-    for test_case in req.test_cases:
-        fields = {
-            "project": {"key": req.xray_project_key} if req.xray_project_key else {"id": req.xray_project_id},
-            "summary": test_case.title,
-            "description": _format_test_issue_description(req.story_issue_key, test_case.model_dump()),
-            "issuetype": {"id": test_issue_type_id},
-        }
-        if repository_path_field_id:
-            fields[repository_path_field_id] = folder_path
+    try:
+        for test_case in req.test_cases:
+            test_case_payload = test_case.model_dump()
+            fields = {
+                "project": {"key": req.xray_project_key} if req.xray_project_key else {"id": req.xray_project_id},
+                "summary": test_case.title,
+                "description": _format_test_issue_description(req.story_issue_key, test_case_payload),
+                "issuetype": {"id": test_issue_type_id},
+            }
+            _apply_optional_xray_fields(fields, test_fields, test_case_payload)
+            if repository_path_field_id:
+                fields[repository_path_field_id] = folder_path
 
-        issue_key = adapter.create_issue({"fields": fields})
-        created_tests.append(XrayPublishedTest(id=issue_key, key=issue_key, self=""))
+            issue_key = adapter.create_issue({"fields": fields})
+            created_tests.append(XrayPublishedTest(id=issue_key, key=issue_key, self=""))
 
-        linked = False
-        for candidate in link_candidates:
+            linked = False
+            for candidate in link_candidates:
+                try:
+                    adapter.link_issues(issue_key, candidate, req.story_issue_key)
+                    linked = True
+                    if not link_type_used:
+                        link_type_used = candidate
+                    break
+                except HTTPException:
+                    continue
+
+            if not linked:
+                warnings.append(f"Created {issue_key} but could not link it to {req.story_issue_key}")
+    except HTTPException as exc:
+        rollback_failed_keys: list[str] = []
+        for created_test in reversed(created_tests):
             try:
-                adapter.link_issues(issue_key, candidate, req.story_issue_key)
-                linked = True
-                if not link_type_used:
-                    link_type_used = candidate
-                break
+                adapter.delete_issue(created_test.key)
             except HTTPException:
-                continue
-
-        if not linked:
-            warnings.append(f"Created {issue_key} but could not link it to {req.story_issue_key}")
+                rollback_failed_keys.append(created_test.key)
+        detail = exc.detail
+        if rollback_failed_keys:
+            detail = {
+                "error": "Xray test publish failed and some created tests could not be rolled back.",
+                "jira_error": exc.detail,
+                "rollback_failed_issue_keys": rollback_failed_keys,
+            }
+        raise HTTPException(status_code=exc.status_code, detail=detail) from exc
 
     if not repository_path_field_id:
         warnings.append("Created tests without setting an Xray repository path because no repository path field was detected")
@@ -728,19 +790,19 @@ def publish_xray_test_suite(
     if cached_response is not None:
         return XrayTestSuitePublishResponse(**cached_response)
 
-    if conn_id != req.jira_connection_id:
-        raise HTTPException(status_code=400, detail="Connection mismatch for Xray publish request")
-    if not req.test_cases:
-        raise HTTPException(status_code=400, detail="No test cases were provided for Xray publishing")
-
-    conn = db.query(JiraConnection).filter(
-        JiraConnection.id == conn_id,
-        JiraConnection.user_id == current_user.id
-    ).first()
-    if not conn:
-        raise HTTPException(status_code=404, detail="Connection not found")
-
     try:
+        if conn_id != req.jira_connection_id:
+            raise HTTPException(status_code=400, detail="Connection mismatch for Xray publish request")
+        if not req.test_cases:
+            raise HTTPException(status_code=400, detail="No test cases were provided for Xray publishing")
+
+        conn = db.query(JiraConnection).filter(
+            JiraConnection.id == conn_id,
+            JiraConnection.user_id == current_user.id
+        ).first()
+        if not conn:
+            raise HTTPException(status_code=404, detail="Connection not found")
+
         if conn.auth_type == JiraAuthType.CLOUD:
             return _publish_xray_cloud_test_suite(req, current_user, db, request)
 

@@ -287,6 +287,50 @@ def _normalize_confidence(value: object, default: int = 75) -> int:
     return int(round(_normalize_percentage(value, default)))
 
 
+def _normalize_string_list(value: object) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item or "").strip()]
+    if isinstance(value, str):
+        return [item.strip() for item in re.split(r"[,;\n]+", value) if item.strip()]
+    return []
+
+
+def _normalize_test_case(raw_test: object) -> Optional[dict]:
+    if not isinstance(raw_test, dict):
+        return None
+
+    title = str(raw_test.get("title") or "").strip()
+    expected_result = str(raw_test.get("expected_result") or raw_test.get("expected") or "").strip()
+    raw_steps = raw_test.get("steps") or []
+    if isinstance(raw_steps, str):
+        steps = [step.strip() for step in raw_steps.splitlines() if step.strip()]
+    elif isinstance(raw_steps, list):
+        steps = [str(step).strip() for step in raw_steps if str(step or "").strip()]
+    else:
+        steps = []
+
+    if not (title and steps and expected_result):
+        return None
+
+    priority = str(raw_test.get("priority") or "Medium").strip().title()
+    if priority not in {"Highest", "High", "Medium", "Low", "Lowest"}:
+        priority = "Medium"
+
+    test_type = str(raw_test.get("test_type") or raw_test.get("type") or "Manual").strip().title()
+    return {
+        "title": title,
+        "steps": steps,
+        "expected_result": expected_result,
+        "priority": priority,
+        "selected": bool(raw_test.get("selected", True)),
+        "test_type": test_type or "Manual",
+        "preconditions": str(raw_test.get("preconditions") or "").strip() or None,
+        "acceptance_criteria_refs": _normalize_string_list(raw_test.get("acceptance_criteria_refs") or raw_test.get("ac_refs")),
+        "labels": _normalize_string_list(raw_test.get("labels")),
+        "components": _normalize_string_list(raw_test.get("components")),
+    }
+
+
 def _is_missing_jira_value(field: dict, value: object) -> bool:
     if value is None or value == "":
         return True
@@ -581,6 +625,9 @@ async def generate_test_suite(
     rate_limiter.check("ai.test_cases", str(current_user.id), limit=5, window_seconds=60)
     LimitChecker.check_allowed(db, current_user.id)
 
+    conn = _get_owned_connection(db, current_user.id, req.jira_connection_id)
+    _assert_connection_matches_instance(conn, req.instance_url)
+
     custom_api_key = None
     if current_user.encrypted_ai_api_key:
         custom_api_key = decrypt_credential(current_user.encrypted_ai_api_key)
@@ -590,9 +637,24 @@ async def generate_test_suite(
     suite = await generator.generate_test_cases(
         story_context,
         model=req.model or current_user.custom_ai_model,
-        custom_instructions=req.custom_instructions
+        custom_instructions=req.custom_instructions,
+        issue_type_name=req.issue_type_name,
+        supporting_context=req.supporting_context,
     )
-    response = TestSuiteResponse(**suite)
+    normalized_tests = [
+        normalized
+        for raw_test in (suite.get("test_cases") or [])
+        if (normalized := _normalize_test_case(raw_test))
+    ]
+    if not normalized_tests:
+        raise HTTPException(
+            status_code=502,
+            detail="AI returned no usable test cases. Please try again with more story detail or supporting context."
+        )
+    response = TestSuiteResponse(
+        test_cases=normalized_tests,
+        coverage_score=_normalize_percentage(suite.get("coverage_score"), 0.0),
+    )
     LimitChecker.record_usage(db, current_user.id, "/test-cases", 0)
     log_audit(
         "ai.test_cases",
