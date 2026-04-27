@@ -43,6 +43,7 @@ const LuxurySearchableSelect: React.FC<LuxurySearchableSelectProps> = ({
   const [isSearching, setIsSearching] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const lastSearchRef = useRef('');
+  const searchSeqRef = useRef(0);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -74,7 +75,9 @@ const LuxurySearchableSelect: React.FC<LuxurySearchableSelectProps> = ({
   // Async search handler
   useEffect(() => {
     if (!onSearchAsync || searchQuery.length < 2) {
+      searchSeqRef.current += 1;
       setAsyncResults([]);
+      setIsSearching(false);
       return;
     }
 
@@ -82,11 +85,21 @@ const LuxurySearchableSelect: React.FC<LuxurySearchableSelectProps> = ({
       if (searchQuery !== lastSearchRef.current) {
         setIsSearching(true);
         lastSearchRef.current = searchQuery;
+        const searchSeq = searchSeqRef.current + 1;
+        searchSeqRef.current = searchSeq;
         try {
           const results = await onSearchAsync(searchQuery);
-          if (results) setAsyncResults(results);
+          if (searchSeq === searchSeqRef.current) {
+            setAsyncResults(results || []);
+          }
+        } catch {
+          if (searchSeq === searchSeqRef.current) {
+            setAsyncResults([]);
+          }
         } finally {
-          setIsSearching(false);
+          if (searchSeq === searchSeqRef.current) {
+            setIsSearching(false);
+          }
         }
       }
     }, 400);
@@ -125,12 +138,19 @@ const LuxurySearchableSelect: React.FC<LuxurySearchableSelectProps> = ({
   });
 
   const displayOptions = onSearchAsync && searchQuery.length >= 2 ? asyncResults : filteredOptions;
+  const getOptionKey = (opt: SelectOption): string => String(opt.id ?? opt.value ?? opt.name ?? opt.label ?? '');
+  const valueMatchesOption = (v: SelectValue, opt: SelectOption): boolean => {
+    const optKey = getOptionKey(opt);
+    if (!optKey) return false;
+    if (typeof v === 'object' && v !== null) return getOptionKey(v) === optKey;
+    return String(v) === optKey;
+  };
 
   const handleToggle = (opt: SelectOption) => {
     if (isMulti) {
-      const isSelected = currentValues.some(v => (typeof v === 'object' && v !== null ? v.id === opt.id : v === opt.id));
+      const isSelected = currentValues.some(v => valueMatchesOption(v, opt));
       if (isSelected) {
-        onChange(currentValues.filter(v => (typeof v === 'object' && v !== null ? v.id !== opt.id : v !== opt.id)));
+        onChange(currentValues.filter(v => !valueMatchesOption(v, opt)));
       } else {
         onChange([...currentValues, opt]);
       }
@@ -245,10 +265,10 @@ const LuxurySearchableSelect: React.FC<LuxurySearchableSelectProps> = ({
           <div className="overflow-y-auto custom-scrollbar flex-1 py-1 bg-[var(--dropdown-bg)]">
             {displayOptions.length > 0 ? (
               displayOptions.map(opt => {
-                const isSelected = currentValues.some(v => (typeof v === 'object' && v !== null ? v.id === opt.id : v === opt.id));
+                const isSelected = currentValues.some(v => valueMatchesOption(v, opt));
                 return (
                   <button 
-                    key={opt.id}
+                    key={getOptionKey(opt)}
                     onClick={() => handleToggle(opt)}
                     className={`w-full min-h-[48px] flex items-center justify-between px-4 py-3 text-left transition-all group/item border-b border-[var(--dropdown-border)] last:border-0 ${
                       isSelected ? 'bg-[var(--status-info)]/10' : 'bg-[var(--dropdown-bg)] hover:bg-[var(--dropdown-bg-muted)]'

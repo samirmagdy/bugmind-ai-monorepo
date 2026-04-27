@@ -650,11 +650,12 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
       sessionData.updateSession({ loading: true, error: null, success: null });
       try {
         const payload: AISettingsUpdateRequestPayload = {};
-        if (ai.customModel.trim()) {
-          payload.custom_model = ai.customModel.trim();
-        }
+        payload.custom_model = ai.customModel.trim();
         if (ai.customKey.trim()) {
           payload.openrouter_key = ai.customKey.trim();
+        }
+        if (ai.clearCustomKeyRequested) {
+          payload.clear_openrouter_key = true;
         }
         const res = await apiRequest(`${auth.apiBase}/settings/ai`, {
           method: 'POST', token: auth.authToken, onUnauthorized: auth.refreshSession,
@@ -664,8 +665,9 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
           await throwApiErrorResponse(res, `Request failed with status ${res.status}`);
         }
         if (res.ok) {
-          ai.setHasCustomKeySaved(true);
+          ai.setHasCustomKeySaved(ai.clearCustomKeyRequested ? false : (ai.customKey.trim() ? true : ai.hasCustomKeySaved));
           ai.setCustomKey('');
+          ai.setClearCustomKeyRequested(false);
           sessionData.updateSession({ success: 'Saved' });
         }
       } catch (err) {

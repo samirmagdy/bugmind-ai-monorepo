@@ -47,6 +47,7 @@ export interface GoogleLoginRequestPayload {
 export interface AISettingsUpdateRequestPayload {
   custom_model?: string;
   openrouter_key?: string;
+  clear_openrouter_key?: boolean;
 }
 
 export interface AuthRefreshRequestPayload {

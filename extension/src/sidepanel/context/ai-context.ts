@@ -10,6 +10,8 @@ export interface AIContextType {
   setCustomKey: (k: string) => void;
   hasCustomKeySaved: boolean;
   setHasCustomKeySaved: (v: boolean) => void;
+  clearCustomKeyRequested: boolean;
+  setClearCustomKeyRequested: (v: boolean) => void;
   fetchAISettings: () => Promise<void>;
   generateBugs: () => Promise<void>;
   generateTestCases: () => Promise<void>;

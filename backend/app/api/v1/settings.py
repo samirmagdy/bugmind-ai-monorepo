@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
 from app.api import deps
 from app.models.user import User
 from app.models.jira import JiraFieldMapping
@@ -33,18 +32,23 @@ def update_ai_settings(
             current_user.custom_ai_model = normalized_model
             changed = True
     
-    if settings.openrouter_key:
-        incoming_key = settings.openrouter_key.strip()
-        existing_key = None
+    if settings.clear_openrouter_key:
         if current_user.encrypted_ai_api_key:
-            try:
-                existing_key = decrypt_credential(current_user.encrypted_ai_api_key)
-            except Exception:
-                existing_key = None
-
-        if existing_key != incoming_key:
-            current_user.encrypted_ai_api_key = encrypt_credential(incoming_key)
+            current_user.encrypted_ai_api_key = None
             changed = True
+    elif settings.openrouter_key is not None:
+        incoming_key = settings.openrouter_key.strip()
+        if incoming_key:
+            existing_key = None
+            if current_user.encrypted_ai_api_key:
+                try:
+                    existing_key = decrypt_credential(current_user.encrypted_ai_api_key)
+                except Exception:
+                    existing_key = None
+
+            if existing_key != incoming_key:
+                current_user.encrypted_ai_api_key = encrypt_credential(incoming_key)
+                changed = True
 
     if changed:
         db.commit()
@@ -58,14 +62,16 @@ def update_jira_settings(
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
-    mapping = db.query(JiraFieldMapping).filter(
+    query = db.query(JiraFieldMapping).filter(
         JiraFieldMapping.user_id == current_user.id,
-        or_(
-            JiraFieldMapping.project_key == settings.project_key,
-            JiraFieldMapping.project_id == settings.project_id
-        ),
+        JiraFieldMapping.project_key == settings.project_key,
         JiraFieldMapping.issue_type_id == settings.issue_type_id
-    ).first()
+    )
+    if settings.project_id is None:
+        query = query.filter(JiraFieldMapping.project_id.is_(None))
+    else:
+        query = query.filter(JiraFieldMapping.project_id == settings.project_id)
+    mapping = query.first()
 
     if not mapping:
         mapping = JiraFieldMapping(

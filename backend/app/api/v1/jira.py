@@ -50,6 +50,15 @@ def get_adapter(connection: JiraConnection):
     return JiraServerAdapter(safe_host_url, connection.username, token, verify_ssl=connection.verify_ssl)
 
 
+def _verify_connection_credentials(auth_type: JiraAuthType, host_url: str, username: str, token: str, verify_ssl: bool) -> None:
+    adapter = (
+        JiraCloudAdapter(host_url, username, token, verify_ssl=verify_ssl)
+        if auth_type == JiraAuthType.CLOUD
+        else JiraServerAdapter(host_url, username, token, verify_ssl=verify_ssl)
+    )
+    adapter.get_projects()
+
+
 def _normalize_instance_url(url: Optional[str]) -> str:
     trimmed = (url or "").strip().lower().rstrip("/")
     if not trimmed:
@@ -366,6 +375,7 @@ def create_connection(
         raise HTTPException(status_code=400, detail="API Token cannot be empty")
     enforce_secure_jira_ssl(conn_in.verify_ssl)
     safe_host_url = validate_connection_host(conn_in.host_url, conn_in.auth_type.value)
+    _verify_connection_credentials(conn_in.auth_type, safe_host_url, conn_in.username, conn_in.token, conn_in.verify_ssl)
 
     encrypted = security.encrypt_credential(conn_in.token)
     db.query(JiraConnection).filter(JiraConnection.user_id == current_user.id).update(
@@ -401,14 +411,32 @@ def update_connection(
     
     update_data = conn_in.model_dump(exclude_unset=True)
     effective_auth_type = update_data.get("auth_type", conn.auth_type)
+    effective_verify_ssl = update_data.get("verify_ssl", conn.verify_ssl)
+    effective_host_url = conn.host_url
+    effective_username = update_data.get("username", conn.username)
+    effective_token = None
     if "verify_ssl" in update_data and update_data["verify_ssl"] is not None:
         enforce_secure_jira_ssl(update_data["verify_ssl"])
     if "host_url" in update_data and update_data["host_url"]:
         update_data["host_url"] = validate_connection_host(update_data["host_url"], effective_auth_type.value)
+        effective_host_url = update_data["host_url"]
     if "token" in update_data:
         token_val = update_data.pop("token")
         if token_val and token_val.strip():
             update_data["encrypted_token"] = security.encrypt_credential(token_val)
+            effective_token = token_val.strip()
+
+    should_verify = any(key in update_data for key in ("auth_type", "host_url", "username", "verify_ssl", "encrypted_token"))
+    if should_verify:
+        if effective_token is None:
+            effective_token = security.decrypt_credential(conn.encrypted_token)
+        _verify_connection_credentials(
+            effective_auth_type,
+            effective_host_url,
+            effective_username,
+            effective_token,
+            effective_verify_ssl,
+        )
     
     if update_data.get("is_active") is True:
         db.query(JiraConnection).filter(

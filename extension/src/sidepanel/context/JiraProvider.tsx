@@ -289,6 +289,7 @@ export const JiraProvider: React.FC<{
   }, [apiBase, authToken, logDebug, refreshAuthToken, saveJiraConfig, session.instanceUrl, updateSession]);
 
   const setVerifySsl = useCallback(async (value: boolean) => {
+    const previousValue = verifySsl;
     setVerifySslState(value);
     saveJiraConfig({ verifySsl: value });
 
@@ -301,13 +302,17 @@ export const JiraProvider: React.FC<{
         onUnauthorized: refreshAuthToken,
         body: JSON.stringify({ verify_ssl: value })
       });
-      if (res.ok) {
-        await fetchConnections();
+      if (!res.ok) {
+        await throwApiErrorResponse(res, `Failed to update SSL verification (${res.status})`);
       }
+      await fetchConnections();
     } catch (err) {
+      setVerifySslState(previousValue);
+      saveJiraConfig({ verifySsl: previousValue });
+      updateSession({ error: getErrorMessage(err) });
       logDebug('CONN-SSL-ERR', String(err));
     }
-  }, [apiBase, authToken, fetchConnections, logDebug, refreshAuthToken, saveJiraConfig, session.jiraConnectionId]);
+  }, [apiBase, authToken, fetchConnections, logDebug, refreshAuthToken, saveJiraConfig, session.jiraConnectionId, updateSession, verifySsl]);
 
   const setActiveConnection = useCallback(async (id: number, hostUrl: string) => {
     if (!authToken) return;
@@ -319,10 +324,25 @@ export const JiraProvider: React.FC<{
         body: JSON.stringify({ is_active: true })
       });
       if (res.ok) {
-        updateSession({ jiraConnectionId: id, instanceUrl: hostUrl });
+        updateSession({
+          jiraConnectionId: id,
+          instanceUrl: hostUrl,
+          jiraMetadata: null,
+          issueTypes: [],
+          selectedIssueType: null,
+          visibleFields: [],
+          aiMapping: {},
+          fieldDefaults: {},
+          issueTypesFetched: false,
+          resolvedPayload: null,
+          validationErrors: []
+        });
         await fetchConnections();
+      } else {
+        await throwApiErrorResponse(res, `Failed to activate connection (${res.status})`);
       }
     } catch (err) {
+      updateSession({ error: getErrorMessage(err) });
       logDebug('CONN-ACTIVE-ERR', String(err));
     }
   }, [apiBase, authToken, fetchConnections, logDebug, refreshAuthToken, updateSession]);
@@ -350,15 +370,33 @@ export const JiraProvider: React.FC<{
         body: JSON.stringify(updates)
       });
       if (res.ok) {
+        const updated = await readJsonResponse<JiraConnection>(res);
+        if (session.jiraConnectionId === id) {
+          updateSession({
+            instanceUrl: typeof updates.host_url === 'string' ? updates.host_url : undefined,
+            jiraMetadata: null,
+            issueTypes: [],
+            selectedIssueType: null,
+            visibleFields: [],
+            aiMapping: {},
+            fieldDefaults: {},
+            issueTypesFetched: false,
+            resolvedPayload: null,
+            validationErrors: []
+          });
+          setVerifySslState(updated.verify_ssl ?? true);
+        }
         await fetchConnections();
         return true;
       }
+      await throwApiErrorResponse(res, `Failed to update connection (${res.status})`);
       return false;
     } catch (err) {
+      updateSession({ error: getErrorMessage(err) });
       logDebug('CONN-UPDATE-ERR', String(err));
       return false;
     }
-  }, [apiBase, authToken, fetchConnections, logDebug, refreshAuthToken, updateSession]);
+  }, [apiBase, authToken, fetchConnections, logDebug, refreshAuthToken, session.jiraConnectionId, updateSession]);
 
   const fetchProjects = useCallback(async (id: number): Promise<JiraProject[]> => {
     if (!authToken) return [];
@@ -461,12 +499,26 @@ export const JiraProvider: React.FC<{
       });
       if (res.ok) {
         if (session.jiraConnectionId === id) {
-          updateSession({ jiraConnectionId: null });
+          updateSession({
+            jiraConnectionId: null,
+            jiraMetadata: null,
+            issueTypes: [],
+            selectedIssueType: null,
+            visibleFields: [],
+            aiMapping: {},
+            fieldDefaults: {},
+            issueTypesFetched: false,
+            resolvedPayload: null,
+            validationErrors: []
+          });
         }
         await dbService.clearAllMetadata();
         await fetchConnections();
+      } else {
+        await throwApiErrorResponse(res, `Failed to delete connection (${res.status})`);
       }
     } catch (err) {
+      updateSession({ error: getErrorMessage(err) });
       logDebug('CONN-DELETE-ERR', String(err));
     }
   }, [apiBase, authToken, fetchConnections, logDebug, refreshAuthToken, session.jiraConnectionId, updateSession]);
@@ -505,8 +557,10 @@ export const JiraProvider: React.FC<{
         await fetchConnections();
         return true;
       }
+      await throwApiErrorResponse(res, `Failed to create Jira connection (${res.status})`);
       return false;
     } catch (err) {
+      updateSession({ error: getErrorMessage(err) });
       logDebug('JIRA-ERR', String(err));
       return false;
     } finally {

@@ -126,6 +126,7 @@ export const AIProvider: React.FC<{
   const [customModel, setCustomModel] = useState('');
   const [customKey, setCustomKey] = useState('');
   const [hasCustomKeySaved, setHasCustomKeySaved] = useState(false);
+  const [clearCustomKeyRequested, setClearCustomKeyRequested] = useState(false);
   const searchControllerRef = useRef<AbortController | null>(null);
   const generateBugsInFlightRef = useRef(false);
   const generateTestsInFlightRef = useRef(false);
@@ -786,6 +787,7 @@ export const AIProvider: React.FC<{
     customModel, setCustomModel,
     customKey, setCustomKey,
     hasCustomKeySaved, setHasCustomKeySaved,
+    clearCustomKeyRequested, setClearCustomKeyRequested,
     fetchAISettings,
     generateBugs,
     generateTestCases,
@@ -798,7 +800,7 @@ export const AIProvider: React.FC<{
     publishTestCasesToXray,
     validateBug,
     preparePreviewBug
-  }), [usage, fetchUsage, customModel, customKey, hasCustomKeySaved, fetchAISettings, generateBugs, generateTestCases, handleManualGenerate, submitBugs, regenerateBug, searchUsers, handleUpdateBug, handleUpdateTestCase, publishTestCasesToXray, validateBug, preparePreviewBug]);
+  }), [usage, fetchUsage, customModel, customKey, hasCustomKeySaved, clearCustomKeyRequested, fetchAISettings, generateBugs, generateTestCases, handleManualGenerate, submitBugs, regenerateBug, searchUsers, handleUpdateBug, handleUpdateTestCase, publishTestCasesToXray, validateBug, preparePreviewBug]);
 
   return <AIContext.Provider value={value}>{children}</AIContext.Provider>;
 };

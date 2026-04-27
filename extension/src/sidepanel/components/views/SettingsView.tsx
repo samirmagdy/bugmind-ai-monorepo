@@ -339,18 +339,25 @@ const FieldRow: React.FC<{
                         return label.includes(s);
                       })
                       .map(opt => {
-                        const isSelected = Array.isArray(savedDefault) && savedDefault.some((v) => 
-                          (typeof v === 'object' ? v.id === opt.id : v === (opt.value || opt.name || opt.label))
+                        const optKey = String(opt.id ?? opt.value ?? opt.name ?? opt.label ?? '');
+                        const isSelected = Array.isArray(savedDefault) && savedDefault.some((v) =>
+                          (typeof v === 'object'
+                            ? String(v.id ?? v.value ?? v.name ?? v.label ?? '') === optKey
+                            : String(v) === optKey)
                         );
 
                         return (
                           <button 
-                            key={opt.id}
+                            key={optKey}
                             onClick={() => {
                               const item = { id: opt.id, value: opt.value, name: opt.name, label: opt.label };
                               const existing = Array.isArray(savedDefault) ? savedDefault : [];
                               if (isSelected) {
-                                updateFieldDefault(field, existing.filter((v) => (typeof v === 'object' ? v.id !== opt.id : v !== (opt.value || opt.name || opt.label))));
+                                updateFieldDefault(field, existing.filter((v) => (
+                                  typeof v === 'object'
+                                    ? String(v.id ?? v.value ?? v.name ?? v.label ?? '') !== optKey
+                                    : String(v) !== optKey
+                                )));
                               } else {
                                 updateFieldDefault(field, [...existing, item]);
                               }
@@ -445,7 +452,7 @@ const FieldRow: React.FC<{
 const SettingsView: React.FC = () => {
   const { 
     session, updateSession, handleSaveSettings, saveFieldSettings,
-    ai: { customKey, setCustomKey, hasCustomKeySaved, customModel, setCustomModel, searchUsers },
+    ai: { customKey, setCustomKey, hasCustomKeySaved, clearCustomKeyRequested, setClearCustomKeyRequested, customModel, setCustomModel, searchUsers },
     jira, refreshIssue, currentTabId,
     auth: { apiBase, setApiBase },
     debug: { log }
@@ -662,14 +669,31 @@ const SettingsView: React.FC = () => {
                 <input 
                   type="password" 
                   value={customKey} 
-                  onChange={e => setCustomKey(e.target.value)}
+                  onChange={e => {
+                    setCustomKey(e.target.value);
+                    if (e.target.value.trim()) setClearCustomKeyRequested(false);
+                  }}
                   className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-2xl px-4 py-3 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)] focus:ring-4 focus:ring-[var(--primary-blue)]/10 transition-all"
                   placeholder={hasCustomKeySaved ? "••••••••••••••••" : "sk-or-v1-..."}
                 />
                 {hasCustomKeySaved && (
-                  <div className="flex items-center gap-1.5 ml-1 mt-1">
-                    <Check size={12} className="text-[var(--success)]" />
-                    <p className="text-[10px] text-[var(--success)] font-bold">Custom key active</p>
+                  <div className="flex items-center justify-between gap-2 ml-1 mt-1">
+                    <div className="flex items-center gap-1.5">
+                      <Check size={12} className="text-[var(--success)]" />
+                      <p className="text-[10px] text-[var(--success)] font-bold">
+                        {clearCustomKeyRequested ? 'Custom key will be cleared' : 'Custom key active'}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setClearCustomKeyRequested(true);
+                        setCustomKey('');
+                      }}
+                      className="text-[10px] font-bold text-[var(--status-danger)] hover:underline"
+                    >
+                      Clear Key
+                    </button>
                   </div>
                 )}
               </div>
@@ -887,7 +911,11 @@ const SettingsView: React.FC = () => {
                         <FolderOpen size={14} />
                       </button>
                       <button 
-                        onClick={() => jira.deleteConnection(conn.id)}
+                        onClick={() => {
+                          if (window.confirm(`Delete Jira connection for ${conn.host_url}?`)) {
+                            jira.deleteConnection(conn.id);
+                          }
+                        }}
                         className="p-1.5 hover:bg-red-500/10 text-red-500 rounded-lg transition-all"
                         title="Delete connection"
                       >
@@ -1030,7 +1058,33 @@ const SettingsView: React.FC = () => {
           </SurfaceCard>
 
           {!session.jiraMetadata ? (
-              session.error?.includes('Jira fields') || session.error?.includes('issue types') ? (
+              !session.issueData || !session.instanceUrl ? (
+                <StatusPanel
+                  icon={AlertCircle}
+                  tone="warning"
+                  title="No Jira Issue Context"
+                  description="Open a Jira issue tab, then refresh the page context to configure field mappings."
+                  className="animate-in zoom-in duration-500"
+                  action={(
+                    <ActionButton onClick={() => refreshIssue(true)} variant="secondary" className="h-10 text-[11px]">
+                      Refresh Context
+                    </ActionButton>
+                  )}
+                />
+              ) : !session.jiraConnectionId ? (
+                <StatusPanel
+                  icon={AlertCircle}
+                  tone="warning"
+                  title="No Active Jira Connection"
+                  description="Add or activate a Jira connection before configuring project field mappings."
+                  className="animate-in zoom-in duration-500"
+                  action={(
+                    <ActionButton onClick={() => updateSession({ settingsTab: 'connections' })} variant="secondary" className="h-10 text-[11px]">
+                      Manage Connections
+                    </ActionButton>
+                  )}
+                />
+              ) : session.error?.includes('Jira fields') || session.error?.includes('issue types') ? (
                 <StatusPanel
                   icon={AlertCircle}
                   tone="danger"

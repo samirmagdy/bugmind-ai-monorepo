@@ -8,6 +8,7 @@ class AISettingsResponse(BaseModel):
 class AISettingsUpdate(BaseModel):
     custom_model: Optional[str] = None
     openrouter_key: Optional[str] = None
+    clear_openrouter_key: bool = False
 
 class JiraSettingsUpdate(BaseModel):
     jira_connection_id: int
