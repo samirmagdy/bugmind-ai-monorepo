@@ -1013,28 +1013,19 @@ const SettingsView: React.FC = () => {
           <SurfaceCard className="space-y-4">
             <div className="space-y-2">
               <label className="context-label uppercase tracking-wider block ml-1">Issue Type</label>
-              <div className="relative flex items-center gap-3">
-                {session.selectedIssueType?.icon_url && (
-                  <div className="w-11 h-11 rounded-[1rem] bg-[var(--bg-input)] flex items-center justify-center border border-[var(--border-main)] shrink-0 group">
-                    <img src={session.selectedIssueType.icon_url} className="w-6 h-6 group-hover:scale-110 transition-transform" alt="" />
-                  </div>
-                )}
-                <div className="flex-1">
-                  <LuxurySearchableSelect 
-                    options={session.issueTypes.map((type: IssueType) => ({ id: type.id, name: type.name, avatar: type.icon_url }))}
-                    value={session.selectedIssueType}
-                    placeholder="Select issue type..."
-                    onChange={(type) => {
-                      if (type && !Array.isArray(type) && session.jiraConnectionId && session.issueData) {
-                        const selectedType = session.issueTypes.find((issueType) => issueType.id === (isSelectOption(type) ? String(type.id ?? '') : String(type)));
-                        if (!selectedType) return;
-                        updateSession({ selectedIssueType: selectedType, jiraMetadata: null });
-                        void bootstrapJiraConfig(selectedType.id, { force: true, loading: true, logTag: 'SETTINGS-TYPE' });
-                      }
-                    }}
-                  />
-                </div>
-              </div>
+              <LuxurySearchableSelect 
+                options={session.issueTypes.map((type: IssueType) => ({ id: type.id, name: type.name, avatar: type.icon_url }))}
+                value={session.selectedIssueType}
+                placeholder="Select issue type..."
+                onChange={(type) => {
+                  if (type && !Array.isArray(type) && session.jiraConnectionId && session.issueData) {
+                    const selectedType = session.issueTypes.find((issueType) => issueType.id === (isSelectOption(type) ? String(type.id ?? '') : String(type)));
+                    if (!selectedType) return;
+                    updateSession({ selectedIssueType: selectedType, jiraMetadata: null });
+                    void bootstrapJiraConfig(selectedType.id, { force: true, loading: true, logTag: 'SETTINGS-TYPE' });
+                  }
+                }}
+              />
             </div>
           </SurfaceCard>
 
@@ -1230,20 +1221,40 @@ const SettingsView: React.FC = () => {
                     </div>
                   </div>
                   
-                  <div className="flex items-center justify-between bg-[var(--bg-input)] p-3 rounded-[1.25rem] border border-[var(--border-main)]">
+                  <div className="flex items-center justify-between gap-4 bg-[var(--surface-soft)] p-3 rounded-[1.25rem] border border-[var(--border-main)]">
                     <div className="flex flex-col">
                       <span className="text-[11px] font-black tracking-tight text-[var(--text-main)]">SSL Certificate Verification</span>
-                      <span className="text-[9px] text-[var(--text-muted)] uppercase font-bold tracking-tighter mt-0.5">TLS Enforcement</span>
+                      <span className="text-[9px] text-[var(--text-muted)] uppercase font-bold tracking-[0.18em] mt-1">TLS Enforcement</span>
                     </div>
                     <button
+                      type="button"
+                      aria-pressed={jira.verifySsl}
                       onClick={() => jira.setVerifySsl(!jira.verifySsl)}
-                      className={`relative w-10 h-6 rounded-full transition-all duration-300 border ${
-                        jira.verifySsl ? 'bg-[var(--status-success)] border-[var(--status-success)]' : 'bg-[var(--bg-card)] border-[var(--border-main)]'
+                      className={`group inline-flex min-w-[108px] items-center gap-2 rounded-full border px-2 py-1.5 transition-all duration-300 ${
+                        jira.verifySsl
+                          ? 'justify-end bg-[var(--status-success)]/12 border-[var(--status-success)] text-[var(--status-success)]'
+                          : 'justify-start bg-[var(--surface-soft)] border-[var(--border-main)] text-[var(--text-muted)]'
                       }`}
                     >
-                      <div className={`absolute top-1/2 -translate-y-1/2 w-4.5 h-4.5 rounded-full bg-[var(--bg-elevated)] transition-all duration-300 ${
-                        jira.verifySsl ? 'left-[19px]' : 'left-[3px]'
-                      }`} />
+                      {!jira.verifySsl && (
+                        <span className="text-[9px] font-black uppercase tracking-[0.16em]">Off</span>
+                      )}
+                      <span
+                        className={`relative flex h-6 w-11 items-center rounded-full border transition-all duration-300 ${
+                          jira.verifySsl
+                            ? 'bg-[var(--status-success)] border-[var(--status-success)]'
+                            : 'bg-[var(--disabled-bg)] border-[var(--border-main)]'
+                        }`}
+                      >
+                        <span
+                          className={`absolute top-1/2 h-4.5 w-4.5 -translate-y-1/2 rounded-full bg-white shadow-[0_2px_8px_rgba(15,23,42,0.16)] transition-all duration-300 ${
+                            jira.verifySsl ? 'left-[22px]' : 'left-[3px]'
+                          }`}
+                        />
+                      </span>
+                      {jira.verifySsl && (
+                        <span className="text-[9px] font-black uppercase tracking-[0.16em]">On</span>
+                      )}
                     </button>
                   </div>
                   
