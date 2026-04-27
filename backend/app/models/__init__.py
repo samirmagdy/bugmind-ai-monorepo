@@ -1,5 +1,5 @@
 from app.models.user import User
-from app.models.auth import RefreshSession
+from app.models.auth import RefreshSession, PasswordResetCode
 from app.models.audit import AuditLog
 from app.models.subscription import Subscription, PlanType
 from app.models.jira import JiraConnection, JiraFieldMapping, JiraAuthType
@@ -9,6 +9,7 @@ from app.core.database import Base
 __all__ = [
     "User",
     "RefreshSession",
+    "PasswordResetCode",
     "AuditLog",
     "Subscription",
     "PlanType",

@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from typing import Optional, Literal
 
 from app.schemas.jira import JiraBootstrapContextResponse
@@ -11,10 +11,33 @@ class Token(BaseModel):
 class RefreshTokenRequest(BaseModel):
     refresh_token: str
 
+
+class LogoutRequest(BaseModel):
+    refresh_token: Optional[str] = None
+
+
 class TokenPayload(BaseModel):
     sub: str = None
     type: Optional[str] = None
     jti: Optional[str] = None
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ForgotPasswordResponse(BaseModel):
+    message: str
+
+
+class ResetPasswordRequest(BaseModel):
+    email: EmailStr
+    code: str
+    new_password: str
+
+
+class GoogleLoginRequest(BaseModel):
+    id_token: str
 
 
 class AuthBootstrapRequest(BaseModel):

@@ -12,8 +12,7 @@ logger = logging.getLogger("bugmind.http")
 def get_database_engine(dsn: str):
     """Create appropriate engine based on database type."""
     if dsn.startswith("sqlite"):
-        # SQLite doesn't support connect_timeout or connection pooling
-        return create_engine(dsn)
+        return create_engine(dsn, connect_args={"check_same_thread": False})
     return create_engine(
         dsn,
         pool_pre_ping=True,

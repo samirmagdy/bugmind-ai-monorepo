@@ -35,9 +35,12 @@ export interface BugMindContextType {
   checkAuth: (token?: string) => Promise<void>;
   handleLogin: (e: React.FormEvent) => Promise<void>;
   handleRegister: (e: React.FormEvent) => Promise<void>;
+  handleForgotPassword: (e: React.FormEvent) => Promise<void>;
+  handleResetPassword: (e: React.FormEvent) => Promise<void>;
+  handleGoogleLogin: () => Promise<void>;
   handleSaveSettings: (e: React.FormEvent) => Promise<void>;
   saveFieldSettings: (nextFields?: string[], nextMapping?: Record<string, string>, nextDefaults?: Record<string, unknown>) => Promise<void>;
-  handleLogout: () => void;
+  handleLogout: () => Promise<void>;
   handleTabReload: () => void;
   completeOnboarding: () => Promise<void>;
   

@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import hashlib
 from typing import Any, Dict, Optional, Union
 from uuid import uuid4
 
@@ -98,3 +99,9 @@ def encrypt_credential(credential: str) -> str:
 
 def decrypt_credential(encrypted_credential: str) -> str:
     return cipher_suite.decrypt(encrypted_credential.encode()).decode()
+
+
+def hash_password_reset_code(email: str, code: str) -> str:
+    normalized_email = email.strip().lower()
+    digest = hashlib.sha256(f"{settings.SECRET_KEY}:{normalized_email}:{code}".encode()).hexdigest()
+    return digest

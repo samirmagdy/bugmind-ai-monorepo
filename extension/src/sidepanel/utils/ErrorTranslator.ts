@@ -83,7 +83,7 @@ export function translateError(error: unknown, context?: string): TranslatedErro
     };
   }
 
-  if (message.includes('Invalid credentials') || (context === 'login' && message.toLowerCase().includes('failed'))) {
+  if (message.includes('Invalid credentials') || message.includes('Incorrect email or password') || (context === 'login' && message.toLowerCase().includes('failed'))) {
     return {
       title: 'Login Failed',
       description: 'Invalid email or password. Please double-check your credentials and try again.'
@@ -101,6 +101,34 @@ export function translateError(error: unknown, context?: string): TranslatedErro
     return {
       title: 'Account Inactive',
       description: 'Your account is currently inactive. Contact support if you believe this is a mistake.'
+    };
+  }
+
+  if (message.includes('Invalid reset code')) {
+    return {
+      title: 'Reset Code Invalid',
+      description: 'The reset code is invalid or expired. Request a new code and try again.'
+    };
+  }
+
+  if (message.includes('Password must')) {
+    return {
+      title: 'Password Requirements',
+      description: message
+    };
+  }
+
+  if (message.includes('Passwords do not match')) {
+    return {
+      title: 'Passwords Do Not Match',
+      description: 'Enter the same password in both fields before continuing.'
+    };
+  }
+
+  if (message.includes('Google sign-in')) {
+    return {
+      title: 'Google Sign-In Failed',
+      description: message
     };
   }
 

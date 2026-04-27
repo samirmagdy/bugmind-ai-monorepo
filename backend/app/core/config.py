@@ -41,6 +41,14 @@ class Settings(BaseSettings):
     STRIPE_WEBHOOK_SECRET: Optional[str] = None
     XRAY_CLOUD_CLIENT_ID: Optional[str] = None
     XRAY_CLOUD_CLIENT_SECRET: Optional[str] = None
+    SMTP_HOST: Optional[str] = None
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: Optional[str] = None
+    SMTP_PASSWORD: Optional[str] = None
+    SMTP_FROM_EMAIL: Optional[str] = None
+    SMTP_USE_TLS: bool = True
+    PASSWORD_RESET_CODE_EXPIRE_MINUTES: int = 15
+    GOOGLE_OAUTH_CLIENT_ID: Optional[str] = None
 
     @field_validator("DATABASE_URL", mode="before")
     @classmethod

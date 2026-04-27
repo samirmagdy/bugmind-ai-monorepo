@@ -30,6 +30,20 @@ export interface RegisterRequestPayload {
   password: string;
 }
 
+export interface ForgotPasswordRequestPayload {
+  email: string;
+}
+
+export interface ResetPasswordRequestPayload {
+  email: string;
+  code: string;
+  new_password: string;
+}
+
+export interface GoogleLoginRequestPayload {
+  id_token: string;
+}
+
 export interface AISettingsUpdateRequestPayload {
   custom_model?: string;
   openrouter_key?: string;
@@ -37,6 +51,10 @@ export interface AISettingsUpdateRequestPayload {
 
 export interface AuthRefreshRequestPayload {
   refresh_token: string;
+}
+
+export interface AuthLogoutRequestPayload {
+  refresh_token?: string | null;
 }
 
 export interface JiraBootstrapRequestPayload extends ProjectRequestParams {
@@ -134,6 +152,16 @@ export interface AuthBootstrapResponsePayload {
     code: string;
     message: string;
   } | null;
+}
+
+export interface MessageResponsePayload {
+  message?: string;
+  success?: boolean;
+}
+
+export interface GoogleAuthConfigResponsePayload {
+  client_id?: string | null;
+  enabled: boolean;
 }
 
 export interface GeneratedFindingResponsePayload {

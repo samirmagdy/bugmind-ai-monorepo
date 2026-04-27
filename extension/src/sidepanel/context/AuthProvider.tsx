@@ -57,7 +57,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode, logDebug: (tag:
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [resetCode, setResetCode] = useState('');
+  const [authMode, setAuthMode] = useState<'login' | 'register' | 'forgot' | 'reset'>('login');
   const [rememberMe, setRememberMe] = useState(true);
 
   const setGlobalViewWithLog = useCallback((view: View) => {
@@ -132,6 +133,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode, logDebug: (tag:
       chrome.storage.session.set({ bugmind_token: secureAccessToken, bugmind_refresh_token: secureRefreshToken });
       if (rememberMe) {
         chrome.storage.local.set({ bugmind_token: secureAccessToken, bugmind_refresh_token: secureRefreshToken });
+      } else {
+        chrome.storage.local.remove(['bugmind_token', 'bugmind_refresh_token']);
       }
       return data.access_token;
     } catch (err) {
@@ -157,6 +160,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode, logDebug: (tag:
     email, setEmail,
     password, setPassword,
     confirmPassword, setConfirmPassword,
+    resetCode, setResetCode,
     authMode, setAuthMode,
     rememberMe, setRememberMe,
     handleLogout
@@ -164,7 +168,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode, logDebug: (tag:
     globalView, setGlobalViewWithLog, 
     initializing, authToken, refreshToken, refreshSession,
     storageLoaded, apiBase, email, 
-    password, confirmPassword, 
+    password, confirmPassword, resetCode,
     authMode, rememberMe, 
     handleLogout
   ]);

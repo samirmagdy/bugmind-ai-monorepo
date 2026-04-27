@@ -1,4 +1,5 @@
 import stripe
+from typing import Optional
 from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.models.subscription import Subscription, PlanType
@@ -6,7 +7,7 @@ from app.models.subscription import Subscription, PlanType
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
 
-def _set_subscription_state(sub: Subscription, *, customer_id: str | None = None, subscription_id: str | None = None, active: bool, plan: PlanType):
+def _set_subscription_state(sub: Subscription, *, customer_id: Optional[str] = None, subscription_id: Optional[str] = None, active: bool, plan: PlanType):
     if customer_id:
         sub.stripe_customer_id = customer_id
     if subscription_id:
@@ -15,7 +16,7 @@ def _set_subscription_state(sub: Subscription, *, customer_id: str | None = None
     sub.is_active = active
 
 
-def _find_subscription(db: Session, *, subscription_id: str | None = None, customer_id: str | None = None) -> Subscription | None:
+def _find_subscription(db: Session, *, subscription_id: Optional[str] = None, customer_id: Optional[str] = None) -> Optional[Subscription]:
     if subscription_id:
         match = db.query(Subscription).filter(Subscription.stripe_subscription_id == subscription_id).first()
         if match:

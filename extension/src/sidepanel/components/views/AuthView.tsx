@@ -1,17 +1,32 @@
 import React from 'react';
 import { useBugMind } from '../../hooks/useBugMind';
 import { ActionButton, StatusPanel, SurfaceCard } from '../common/DesignSystem';
-import { Mail, Lock, ShieldCheck, ArrowRight } from 'lucide-react';
+import { ArrowRight, KeyRound, Lock, Mail, ShieldCheck } from 'lucide-react';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const AuthView: React.FC = () => {
-  const { 
-    auth: { 
-      authMode, email, setEmail, password, setPassword, confirmPassword, setConfirmPassword, 
-      setAuthMode, rememberMe, setRememberMe
+  const {
+    auth: {
+      authMode,
+      email,
+      setEmail,
+      password,
+      setPassword,
+      confirmPassword,
+      setConfirmPassword,
+      resetCode,
+      setResetCode,
+      setAuthMode,
+      rememberMe,
+      setRememberMe
     },
-    handleLogin, handleRegister, updateSession
+    handleLogin,
+    handleRegister,
+    handleForgotPassword,
+    handleResetPassword,
+    handleGoogleLogin,
+    updateSession
   } = useBugMind();
 
   const emailValid = EMAIL_REGEX.test(email.trim());
@@ -21,37 +36,77 @@ const AuthView: React.FC = () => {
     { label: 'Lowercase letter', passed: /[a-z]/.test(password) },
     { label: 'Numeric digit', passed: /\d/.test(password) },
     { label: 'Special character', passed: /[^A-Za-z0-9]/.test(password) },
-    { label: 'Identity verified', passed: confirmPassword.length > 0 && password === confirmPassword },
+    { label: 'Passwords match', passed: confirmPassword.length > 0 && password === confirmPassword },
   ];
   const allPasswordChecksPassed = passwordChecks.every((check) => check.passed);
-  const registerFormValid = emailValid && allPasswordChecksPassed;
+
+  const isLogin = authMode === 'login';
+  const isRegister = authMode === 'register';
+  const isForgot = authMode === 'forgot';
+  const isReset = authMode === 'reset';
+  const registerOrResetValid = emailValid && allPasswordChecksPassed;
+
+  const title = isLogin
+    ? 'Welcome Back'
+    : isRegister
+      ? 'Create Account'
+      : isForgot
+        ? 'Reset Password'
+        : 'Enter Reset Code';
+
+  const subtitle = isLogin
+    ? 'Securely access your QA workspace'
+    : isRegister
+      ? 'Create your professional intelligence profile'
+      : isForgot
+        ? 'We will email a one-time code to your account'
+        : 'Choose a new password after entering the code';
+
+  const submitHandler = isLogin
+    ? handleLogin
+    : isRegister
+      ? handleRegister
+      : isForgot
+        ? handleForgotPassword
+        : handleResetPassword;
+
+  const clearAuthFeedback = () => updateSession({ error: null, success: null });
 
   return (
     <div className="flex flex-col h-full animate-in fade-in duration-700">
       <div className="flex-1 flex flex-col justify-center px-6 py-12">
         <div className="space-y-2 mb-10 text-center">
-          <h1 className="text-3xl font-bold text-[var(--text-primary)] tracking-tight">
-            {authMode === 'login' ? 'Welcome Back' : 'Get Started'}
-          </h1>
-          <p className="text-[var(--text-secondary)] text-sm">
-            {authMode === 'login' ? 'Securely access your QA workspace' : 'Create your professional intelligence profile'}
-          </p>
+          <h1 className="text-3xl font-bold text-[var(--text-primary)] tracking-tight">{title}</h1>
+          <p className="text-[var(--text-secondary)] text-sm">{subtitle}</p>
         </div>
 
         <SurfaceCard className="p-8 relative overflow-hidden">
           <div className="absolute top-0 left-0 w-full h-1 bg-[var(--primary-gradient)]" />
-          
-          <form onSubmit={authMode === 'login' ? handleLogin : handleRegister} className="space-y-6">
+
+          {(isLogin || isRegister) && (
+            <div className="mb-6">
+              <ActionButton type="button" variant="secondary" className="h-11 w-full text-sm font-bold" onClick={handleGoogleLogin}>
+                Continue with Google
+              </ActionButton>
+              <div className="mt-4 flex items-center gap-3 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                <div className="h-px flex-1 bg-[var(--border-soft)]" />
+                <span>or use email</span>
+                <div className="h-px flex-1 bg-[var(--border-soft)]" />
+              </div>
+            </div>
+          )}
+
+          <form onSubmit={submitHandler} className="space-y-6">
             <div className="space-y-1.5">
               <label className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider ml-1">Email Address</label>
               <div className="relative group">
                 <div className="absolute inset-y-0 left-4 flex items-center text-[var(--text-muted)] group-focus-within:text-[var(--primary-blue)] transition-colors">
                   <Mail size={16} />
                 </div>
-                <input 
-                  type="email" 
-                  value={email} 
-                  onChange={e => setEmail(e.target.value)}
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                   className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-2xl pl-12 pr-4 py-3 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)] focus:ring-4 focus:ring-[var(--primary-blue)]/5 transition-all"
                   placeholder="name@company.com"
                   required
@@ -59,29 +114,65 @@ const AuthView: React.FC = () => {
               </div>
             </div>
 
-            <div className="space-y-1.5">
-              <div className="flex justify-between items-center px-1">
-                <label className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider">Password</label>
-                {authMode === 'login' && (
-                  <button type="button" className="text-[10px] font-bold text-[var(--primary-blue)] hover:opacity-80">Forgot?</button>
-                )}
-              </div>
-              <div className="relative group">
-                <div className="absolute inset-y-0 left-4 flex items-center text-[var(--text-muted)] group-focus-within:text-[var(--primary-blue)] transition-colors">
-                  <Lock size={16} />
+            {!isForgot && (
+              <div className="space-y-1.5">
+                <div className="flex justify-between items-center px-1">
+                  <label className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider">
+                    {isReset ? 'New Password' : 'Password'}
+                  </label>
+                  {isLogin && (
+                    <button
+                      type="button"
+                      className="text-[10px] font-bold text-[var(--primary-blue)] hover:opacity-80"
+                      onClick={() => {
+                        clearAuthFeedback();
+                        setPassword('');
+                        setConfirmPassword('');
+                        setResetCode('');
+                        setAuthMode('forgot');
+                      }}
+                    >
+                      Forgot?
+                    </button>
+                  )}
                 </div>
-                <input 
-                  type="password" 
-                  value={password} 
-                  onChange={e => setPassword(e.target.value)}
-                  className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-2xl pl-12 pr-4 py-3 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)] focus:ring-4 focus:ring-[var(--primary-blue)]/5 transition-all"
-                  placeholder="••••••••••••"
-                  required
-                />
+                <div className="relative group">
+                  <div className="absolute inset-y-0 left-4 flex items-center text-[var(--text-muted)] group-focus-within:text-[var(--primary-blue)] transition-colors">
+                    <Lock size={16} />
+                  </div>
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-2xl pl-12 pr-4 py-3 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)] focus:ring-4 focus:ring-[var(--primary-blue)]/5 transition-all"
+                    placeholder="••••••••••••"
+                    required
+                  />
+                </div>
               </div>
-            </div>
+            )}
 
-            {authMode === 'register' && (
+            {isReset && (
+              <div className="space-y-1.5 animate-in slide-in-from-top-2">
+                <label className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider ml-1">Reset Code</label>
+                <div className="relative group">
+                  <div className="absolute inset-y-0 left-4 flex items-center text-[var(--text-muted)] group-focus-within:text-[var(--primary-blue)] transition-colors">
+                    <KeyRound size={16} />
+                  </div>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={resetCode}
+                    onChange={(e) => setResetCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-2xl pl-12 pr-4 py-3 text-sm tracking-[0.25em] text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)] focus:ring-4 focus:ring-[var(--primary-blue)]/5 transition-all"
+                    placeholder="123456"
+                    required
+                  />
+                </div>
+              </div>
+            )}
+
+            {(isRegister || isReset) && (
               <div className="space-y-4 animate-in slide-in-from-top-2">
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider ml-1">Confirm Password</label>
@@ -89,10 +180,10 @@ const AuthView: React.FC = () => {
                     <div className="absolute inset-y-0 left-4 flex items-center text-[var(--text-muted)] group-focus-within:text-[var(--primary-blue)] transition-colors">
                       <ShieldCheck size={16} />
                     </div>
-                    <input 
-                      type="password" 
-                      value={confirmPassword} 
-                      onChange={e => setConfirmPassword(e.target.value)}
+                    <input
+                      type="password"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
                       className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-2xl pl-12 pr-4 py-3 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)] focus:ring-4 focus:ring-[var(--primary-blue)]/5 transition-all"
                       placeholder="••••••••••••"
                       required
@@ -114,8 +205,8 @@ const AuthView: React.FC = () => {
                 </StatusPanel>
               </div>
             )}
-            
-            {authMode === 'login' && (
+
+            {isLogin && (
               <div className="flex items-center gap-2.5 px-1 group cursor-pointer" onClick={() => setRememberMe(!rememberMe)}>
                 <div className={`w-4 h-4 rounded border transition-all flex items-center justify-center ${rememberMe ? 'bg-[var(--primary-blue)] border-[var(--primary-blue)]' : 'border-[var(--border-soft)] bg-[var(--bg-elevated)] group-hover:border-[var(--primary-blue)]'}`}>
                   {rememberMe && <div className="w-1.5 h-1.5 bg-white rounded-sm" />}
@@ -126,27 +217,65 @@ const AuthView: React.FC = () => {
 
             <ActionButton
               type="submit"
-              disabled={authMode === 'register' && !registerFormValid}
+              disabled={(isRegister || isReset) ? !registerOrResetValid : !emailValid}
               variant="primary"
               className="h-11 text-sm font-bold"
             >
-              {authMode === 'login' ? 'Sign In' : 'Create Account'}
+              {isLogin ? 'Sign In' : isRegister ? 'Create Account' : isForgot ? 'Send Reset Code' : 'Update Password'}
               <ArrowRight size={18} />
             </ActionButton>
           </form>
         </SurfaceCard>
 
-        <div className="mt-8 text-center">
-          <button 
-            onClick={() => { setAuthMode(authMode === 'login' ? 'register' : 'login'); updateSession({ error: null }); }}
-            className="text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--primary-blue)] transition-colors"
-          >
-            {authMode === 'login' ? (
-              <>Don't have an account? <span className="text-[var(--primary-blue)] font-bold">Register here</span></>
-            ) : (
-              <>Already have an account? <span className="text-[var(--primary-blue)] font-bold">Sign in</span></>
-            )}
-          </button>
+        <div className="mt-8 text-center space-y-3">
+          {(isLogin || isRegister) && (
+            <button
+              onClick={() => {
+                clearAuthFeedback();
+                setPassword('');
+                setConfirmPassword('');
+                setResetCode('');
+                setAuthMode(isLogin ? 'register' : 'login');
+              }}
+              className="text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--primary-blue)] transition-colors"
+            >
+              {isLogin ? (
+                <>Don&apos;t have an account? <span className="text-[var(--primary-blue)] font-bold">Register here</span></>
+              ) : (
+                <>Already have an account? <span className="text-[var(--primary-blue)] font-bold">Sign in</span></>
+              )}
+            </button>
+          )}
+
+          {(isForgot || isReset) && (
+            <button
+              onClick={() => {
+                clearAuthFeedback();
+                setPassword('');
+                setConfirmPassword('');
+                setResetCode('');
+                setAuthMode('login');
+              }}
+              className="text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--primary-blue)] transition-colors"
+            >
+              Back to sign in
+            </button>
+          )}
+
+          {isReset && (
+            <button
+              onClick={() => {
+                clearAuthFeedback();
+                setResetCode('');
+                setPassword('');
+                setConfirmPassword('');
+                setAuthMode('forgot');
+              }}
+              className="text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--primary-blue)] transition-colors"
+            >
+              Resend reset code
+            </button>
+          )}
         </div>
       </div>
     </div>

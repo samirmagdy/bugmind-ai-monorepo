@@ -7,8 +7,14 @@ import {
   AISettingsUpdateRequestPayload,
   AuthBootstrapRequestPayload,
   AuthBootstrapResponsePayload,
+  AuthLogoutRequestPayload,
   AuthTokenResponsePayload,
+  ForgotPasswordRequestPayload,
+  GoogleAuthConfigResponsePayload,
+  GoogleLoginRequestPayload,
+  MessageResponsePayload,
   RegisterRequestPayload,
+  ResetPasswordRequestPayload,
   buildProjectRequestParams,
 } from '../services/contracts';
 import { BugMindContext, BugMindContextType } from '../hooks/useBugMind';
@@ -57,6 +63,9 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
   const staleRecoveryAttemptedRef = useRef<number | null>(null);
   const loginInFlightRef = useRef(false);
   const registerInFlightRef = useRef(false);
+  const forgotPasswordInFlightRef = useRef(false);
+  const resetPasswordInFlightRef = useRef(false);
+  const googleLoginInFlightRef = useRef(false);
   const saveSettingsInFlightRef = useRef(false);
 
   useEffect(() => {
@@ -207,6 +216,86 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
 
     return data.view;
   }, [auth.apiBase, currentTabId, fetchCurrentContext, jira, logDebug, session.selectedIssueType?.id, updateSession, withTimeout]);
+
+  const completeAuthenticatedSession = useCallback(async (
+    data: AuthTokenResponsePayload,
+    successMessages?: { main: string; setup: string }
+  ) => {
+    auth.setAuthToken(data.access_token);
+    if (data.refresh_token) auth.setRefreshToken(data.refresh_token);
+
+    const secureToken = obfuscate(data.access_token);
+    const secureRefreshToken = data.refresh_token ? obfuscate(data.refresh_token) : '';
+    if (auth.rememberMe) {
+      chrome.storage.local.set({
+        bugmind_token: secureToken,
+        bugmind_refresh_token: secureRefreshToken,
+        bugmind_email: auth.email,
+        bugmind_remember_me: true
+      });
+    } else {
+      chrome.storage.local.remove(['bugmind_token', 'bugmind_refresh_token']);
+      chrome.storage.local.set({ bugmind_email: auth.email, bugmind_remember_me: false });
+    }
+    chrome.storage.session.set({ bugmind_token: secureToken, bugmind_refresh_token: secureRefreshToken });
+
+    const nextView = await runAuthBootstrap(data.access_token);
+    if (nextView === 'main') {
+      auth.setGlobalView('main');
+      updateSession({ success: successMessages?.main || `Welcome back, ${auth.email}!` });
+    } else {
+      auth.setGlobalView('setup');
+      updateSession({ success: successMessages?.setup || 'Login successful! Please connect your Jira instance.' });
+    }
+
+    ai.fetchUsage();
+    ai.fetchAISettings();
+    setTimeout(() => updateSession({ success: null }), TIMEOUTS.NOTIFICATION_AUTO_HIDE_LONG);
+  }, [ai, auth, runAuthBootstrap, updateSession]);
+
+  const startGoogleAuthFlow = useCallback(async (): Promise<string> => {
+    const configRes = await apiRequest(`${auth.apiBase}/auth/google/config`, {
+      onDebug: logDebug,
+      timeoutMs: 10000
+    });
+    if (!configRes.ok) {
+      await throwApiErrorResponse(configRes, `Google config failed (${configRes.status})`);
+    }
+
+    const config = await readJsonResponse<GoogleAuthConfigResponsePayload>(configRes);
+    if (!config.enabled || !config.client_id) {
+      throw new Error('Google sign-in is not configured');
+    }
+
+    const redirectUri = chrome.identity.getRedirectURL('google');
+    const nonce = crypto.randomUUID();
+    const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+    authUrl.searchParams.set('client_id', config.client_id);
+    authUrl.searchParams.set('redirect_uri', redirectUri);
+    authUrl.searchParams.set('response_type', 'id_token');
+    authUrl.searchParams.set('scope', 'openid email profile');
+    authUrl.searchParams.set('nonce', nonce);
+    authUrl.searchParams.set('prompt', 'select_account');
+    if (auth.email.trim()) {
+      authUrl.searchParams.set('login_hint', auth.email.trim());
+    }
+
+    const callbackUrl = await chrome.identity.launchWebAuthFlow({
+      interactive: true,
+      url: authUrl.toString()
+    });
+    if (!callbackUrl) {
+      throw new Error('Google sign-in was cancelled');
+    }
+
+    const fragment = callbackUrl.split('#')[1] || '';
+    const params = new URLSearchParams(fragment);
+    const idToken = params.get('id_token');
+    if (!idToken) {
+      throw new Error(params.get('error_description') || params.get('error') || 'Google sign-in failed');
+    }
+    return idToken;
+  }, [auth.apiBase, auth.email, logDebug]);
 
   // 1. Initial Context Hydration (Phase 1)
   useEffect(() => {
@@ -393,31 +482,8 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
       }
       const data = await readJsonResponse<AuthTokenResponsePayload>(response);
       if (data.access_token) {
-        auth.setAuthToken(data.access_token);
-        if (data.refresh_token) auth.setRefreshToken(data.refresh_token);
-        
-        // Phase 3 Secure Storage
-        const secureToken = obfuscate(data.access_token);
-        const secureRefreshToken = data.refresh_token ? obfuscate(data.refresh_token) : '';
-        if (auth.rememberMe) {
-          chrome.storage.local.set({ bugmind_token: secureToken, bugmind_refresh_token: secureRefreshToken, bugmind_email: auth.email, bugmind_remember_me: true });
-        }
-        chrome.storage.session.set({ bugmind_token: secureToken, bugmind_refresh_token: secureRefreshToken });
-        
         logDebug('LOGIN-OK', 'Login successful. Verifying Jira status...');
-        const nextView = await runAuthBootstrap(data.access_token);
-
-        if (nextView === 'main') {
-          auth.setGlobalView('main');
-          updateSession({ success: `Welcome back, ${auth.email}!` });
-        } else {
-          auth.setGlobalView('setup');
-          updateSession({ success: 'Login successful! Please connect your Jira instance.' });
-        }
-        
-        ai.fetchUsage();
-        ai.fetchAISettings();
-        setTimeout(() => updateSession({ success: null }), TIMEOUTS.NOTIFICATION_AUTO_HIDE_LONG);
+        await completeAuthenticatedSession(data);
       } else {
         throw new Error(data.detail || 'Login failed');
       }
@@ -427,7 +493,7 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
       loginInFlightRef.current = false;
       updateSession({ loading: false });
     }
-  }, [ai, auth, logDebug, runAuthBootstrap, updateSession]);
+  }, [auth, completeAuthenticatedSession, logDebug, updateSession]);
 
 
   const value: BugMindContextType = {
@@ -479,6 +545,101 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
         sessionData.updateSession({ error: getErrorMessage(err) });
       } finally {
         registerInFlightRef.current = false;
+        sessionData.updateSession({ loading: false });
+      }
+    },
+    handleForgotPassword: async (e) => {
+      e.preventDefault();
+      if (forgotPasswordInFlightRef.current) return;
+      forgotPasswordInFlightRef.current = true;
+      sessionData.updateSession({ loading: true, error: null, success: null });
+      try {
+        const payload: ForgotPasswordRequestPayload = { email: auth.email };
+        const res = await apiRequest(`${auth.apiBase}/auth/password/forgot`, {
+          method: 'POST',
+          body: JSON.stringify(payload),
+          timeoutMs: 10000,
+          onDebug: logDebug
+        });
+        if (!res.ok) {
+          await throwApiErrorResponse(res, `Forgot password failed (${res.status})`);
+        }
+        const data = await readJsonResponse<MessageResponsePayload>(res);
+        auth.setResetCode('');
+        auth.setPassword('');
+        auth.setConfirmPassword('');
+        auth.setAuthMode('reset');
+        sessionData.updateSession({ success: data.message || 'Reset code sent. Check your email.' });
+      } catch (err) {
+        sessionData.updateSession({ error: getErrorMessage(err) });
+      } finally {
+        forgotPasswordInFlightRef.current = false;
+        sessionData.updateSession({ loading: false });
+      }
+    },
+    handleResetPassword: async (e) => {
+      e.preventDefault();
+      if (resetPasswordInFlightRef.current) return;
+      resetPasswordInFlightRef.current = true;
+      sessionData.updateSession({ loading: true, error: null, success: null });
+      try {
+        if (auth.password !== auth.confirmPassword) {
+          throw new Error('Passwords do not match');
+        }
+        const payload: ResetPasswordRequestPayload = {
+          email: auth.email,
+          code: auth.resetCode,
+          new_password: auth.password
+        };
+        const res = await apiRequest(`${auth.apiBase}/auth/password/reset`, {
+          method: 'POST',
+          body: JSON.stringify(payload),
+          timeoutMs: 10000,
+          onDebug: logDebug
+        });
+        if (!res.ok) {
+          await throwApiErrorResponse(res, `Password reset failed (${res.status})`);
+        }
+        const data = await readJsonResponse<MessageResponsePayload>(res);
+        auth.setAuthMode('login');
+        auth.setPassword('');
+        auth.setConfirmPassword('');
+        auth.setResetCode('');
+        sessionData.updateSession({ success: data.message || 'Password updated. Please sign in again.' });
+      } catch (err) {
+        sessionData.updateSession({ error: getErrorMessage(err) });
+      } finally {
+        resetPasswordInFlightRef.current = false;
+        sessionData.updateSession({ loading: false });
+      }
+    },
+    handleGoogleLogin: async () => {
+      if (googleLoginInFlightRef.current) return;
+      googleLoginInFlightRef.current = true;
+      sessionData.updateSession({ loading: true, error: null, success: null });
+      try {
+        const idToken = await startGoogleAuthFlow();
+        const res = await apiRequest(`${auth.apiBase}/auth/google`, {
+          method: 'POST',
+          body: JSON.stringify({ id_token: idToken } satisfies GoogleLoginRequestPayload),
+          timeoutMs: 15000,
+          onDebug: logDebug
+        });
+        if (!res.ok) {
+          await throwApiErrorResponse(res, `Google login failed (${res.status})`);
+        }
+        const data = await readJsonResponse<AuthTokenResponsePayload>(res);
+        if (!data.access_token) {
+          throw new Error(data.detail || 'Google login failed');
+        }
+        await completeAuthenticatedSession(data, {
+          main: 'Google sign-in successful.',
+          setup: 'Google sign-in successful! Please connect your Jira instance.'
+        });
+      } catch (err) {
+        sessionData.updateSession({ error: getErrorMessage(err) });
+      } finally {
+        googleLoginInFlightRef.current = false;
         sessionData.updateSession({ loading: false });
       }
     },
@@ -535,7 +696,22 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
         sessionData.updateSession({ success: 'Synced' });
       } catch (err) { sessionData.updateSession({ error: getErrorMessage(err) }); }
     },
-    handleLogout: () => auth.handleLogout(() => setTabSessions({})),
+    handleLogout: async () => {
+      try {
+        if (auth.refreshToken) {
+          await apiRequest(`${auth.apiBase}/auth/logout`, {
+            method: 'POST',
+            body: JSON.stringify({ refresh_token: auth.refreshToken } satisfies AuthLogoutRequestPayload),
+            timeoutMs: 5000,
+            onDebug: logDebug
+          });
+        }
+      } catch (err) {
+        logDebug('LOGOUT-WARN', `Remote logout failed: ${getErrorMessage(err)}`);
+      } finally {
+        auth.handleLogout(() => setTabSessions({}));
+      }
+    },
     handleTabReload: () => chrome.tabs.reload(currentTabId!),
     completeOnboarding: async () => {
       await chrome.storage.local.set({ bugmind_onboarding_completed: true });

@@ -20,8 +20,10 @@ export interface AuthContextType {
   setPassword: (pw: string) => void;
   confirmPassword: string;
   setConfirmPassword: (pw: string) => void;
-  authMode: 'login' | 'register';
-  setAuthMode: (mode: 'login' | 'register') => void;
+  resetCode: string;
+  setResetCode: (code: string) => void;
+  authMode: 'login' | 'register' | 'forgot' | 'reset';
+  setAuthMode: (mode: 'login' | 'register' | 'forgot' | 'reset') => void;
   rememberMe: boolean;
   setRememberMe: (val: boolean) => void;
   handleLogout: (clearSessions: () => void) => void;
