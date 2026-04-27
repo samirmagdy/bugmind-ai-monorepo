@@ -58,8 +58,14 @@ class JiraFieldResolver:
         
         # 1. Option / Priority handling
         if field_type == "option" or field_type == "priority":
-            if isinstance(raw_value, dict) and ("id" in raw_value or "value" in raw_value):
-                return raw_value
+            if isinstance(raw_value, dict):
+                if raw_value.get("id"):
+                    return {"id": raw_value.get("id")}
+                if raw_value.get("value"):
+                    return {"value": raw_value.get("value")}
+                if raw_value.get("name"):
+                    return {"name": raw_value.get("name")}
+                return None
             return {"id": raw_value} if raw_value else None
 
         elif field_type == "sprint":
@@ -85,9 +91,14 @@ class JiraFieldResolver:
                 # Jira Cloud v3 expects {"accountId": "..."}
                 # But search returns 'id' as 'accountId' for Cloud in our adapters
                 if isinstance(raw_value, list):
-                    return [{"accountId": v.get("id") if isinstance(v, dict) else v} for v in raw_value if v]
+                    return [
+                        {"accountId": v.get("accountId") or v.get("id")} if isinstance(v, dict) else {"accountId": v}
+                        for v in raw_value
+                        if v
+                    ]
                 if isinstance(raw_value, dict):
-                    return {"accountId": raw_value.get("id")} if "id" in raw_value else raw_value
+                    account_id = raw_value.get("accountId") or raw_value.get("id")
+                    return {"accountId": account_id} if account_id else None
                 return {"accountId": raw_value} if raw_value else None
 
         # 3. Multi-select handling
@@ -100,7 +111,12 @@ class JiraFieldResolver:
             structured = []
             for item in raw_value:
                 if isinstance(item, dict):
-                    structured.append(item)
+                    if item.get("id"):
+                        structured.append({"id": item.get("id")})
+                    elif item.get("value"):
+                        structured.append({"value": item.get("value")})
+                    elif item.get("name"):
+                        structured.append({"name": item.get("name")})
                 elif item:
                     structured.append({"id": item})
             return structured

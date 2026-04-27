@@ -133,6 +133,7 @@ export const AIProvider: React.FC<{
   const manualGenerateInFlightRef = useRef(false);
   const submitBugsInFlightRef = useRef(false);
   const publishXrayInFlightRef = useRef(false);
+  const validationRequestRef = useRef(0);
 
   const activeFetches = useRef<Set<string>>(new Set());
   const isFetching = (key: string) => activeFetches.current.has(key);
@@ -149,6 +150,13 @@ export const AIProvider: React.FC<{
     delete sanitized.project;
     return sanitized;
   }, []);
+
+  const buildIdempotencyKey = useCallback(() => {
+    const randomId = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    return `ai-submit-${currentTabId ?? 'tab'}-${randomId}`;
+  }, [currentTabId]);
 
   const buildDefaultExtraFields = useCallback(() => {
     return sanitizeExtraFields((session.fieldDefaults || {}) as BugReport['extra_fields']);
@@ -276,7 +284,14 @@ export const AIProvider: React.FC<{
       const curr = prev[currentTabId] || INITIAL_SESSION;
       const newBugs = [...(curr.bugs || [])];
       if (newBugs[index]) {
-        newBugs[index] = { ...newBugs[index], ...updates, edited: true };
+        newBugs[index] = {
+          ...newBugs[index],
+          ...updates,
+          extra_fields: updates.extra_fields
+            ? { ...(newBugs[index].extra_fields || {}), ...updates.extra_fields }
+            : newBugs[index].extra_fields,
+          edited: true
+        };
       }
       return { ...prev, [currentTabId]: { ...curr, bugs: newBugs } };
     });
@@ -330,7 +345,7 @@ export const AIProvider: React.FC<{
       return;
     }
     generateBugsInFlightRef.current = true;
-    updateSession({ loading: true, error: null, bugs: [], testCases: [], coverageScore: null, gapAnalysisSummary: null });
+    updateSession({ loading: true, error: null, success: null, testCases: [], coverageScore: null, gapAnalysisSummary: null }, currentTabId);
     logDebug('AI-START', `Analyzing ${session.issueData.key}...`);
 
     try {
@@ -367,6 +382,7 @@ export const AIProvider: React.FC<{
         gapAnalysisSummary: normalizeGapAnalysisSummary(data.analysis_summary),
         success: data.warnings?.length ? data.warnings.join(' ') : null,
       }, currentTabId);
+      fetchUsage();
       logDebug('AI-OK', `Analysis complete for ${session.issueData.key}.`);
 
     } catch (err: unknown) {
@@ -376,7 +392,7 @@ export const AIProvider: React.FC<{
       generateBugsInFlightRef.current = false;
       updateSession({ loading: false }, currentTabId);
     }
-  }, [apiBase, authToken, buildArtifactContext, buildGenerationLearningHints, buildIssueContext, currentTabId, getProjectRequestParams, logDebug, normalizeGapAnalysisSummary, refreshAuthToken, session.bugGenerationCount, session.generationSupportingContext, session.instanceUrl, session.issueData, session.jiraConnectionId, session.selectedIssueType, toFrontendBug, updateSession]);
+  }, [apiBase, authToken, buildArtifactContext, buildGenerationLearningHints, buildIssueContext, currentTabId, fetchUsage, getProjectRequestParams, logDebug, normalizeGapAnalysisSummary, refreshAuthToken, session.bugGenerationCount, session.generationSupportingContext, session.instanceUrl, session.issueData, session.jiraConnectionId, session.selectedIssueType, toFrontendBug, updateSession]);
 
   const generateTestCases = useCallback(async () => {
     if (generateTestsInFlightRef.current) return;
@@ -490,9 +506,10 @@ export const AIProvider: React.FC<{
     manualGenerateInFlightRef.current = true;
     updateSession({ loading: true, error: null, testCases: [], coverageScore: null, gapAnalysisSummary: null });
     logDebug('MANUAL-START', `Structuring ${manualInputs.length} manual finding(s)...`);
+    const generatedBugs: BugReport[] = [];
+    let committedGeneratedBugs = false;
     try {
       const { projectKey, projectId } = getProjectRequestParams();
-      const generatedBugs: BugReport[] = [];
 
       for (const manualInput of manualInputs) {
         const payload: AIGenerationRequestPayload = {
@@ -525,9 +542,7 @@ export const AIProvider: React.FC<{
 
         const data = await readJsonResponse<ManualBugGenerationResponsePayload>(res);
         const generated = (data.bugs || []).map(toFrontendBug);
-        if (generated.length > 0) {
-          generatedBugs.push(generated[0]);
-        }
+        generatedBugs.push(...generated);
       }
 
       const existing = session.bugs || [];
@@ -540,9 +555,21 @@ export const AIProvider: React.FC<{
         mainWorkflow: 'home',
         expandedBug: existing.length
       });
+      committedGeneratedBugs = true;
       fetchUsage();
     } catch (err: unknown) {
-      updateSession({ error: getErrorMessage(err) });
+      if (generatedBugs.length > 0 && !committedGeneratedBugs) {
+        const existing = session.bugs || [];
+        updateSession({
+          bugs: [...existing, ...generatedBugs],
+          mainWorkflow: 'home',
+          expandedBug: existing.length,
+          error: getErrorMessage(err)
+        });
+        fetchUsage();
+      } else {
+        updateSession({ error: getErrorMessage(err) });
+      }
     } finally {
       manualGenerateInFlightRef.current = false;
       updateSession({ loading: false });
@@ -591,7 +618,16 @@ export const AIProvider: React.FC<{
         const curr = prev[currentTabId] || INITIAL_SESSION;
         const nextBugs = [...(curr.bugs || [])];
         if (!nextBugs[index]) return prev;
-        nextBugs[index] = { ...regenerated };
+        const existingBug = nextBugs[index];
+        nextBugs[index] = {
+          ...existingBug,
+          ...regenerated,
+          extra_fields: {
+            ...(regenerated.extra_fields || {}),
+            ...(existingBug.extra_fields || {})
+          },
+          edited: true
+        };
         return {
           ...prev,
           [currentTabId]: {
@@ -613,6 +649,8 @@ export const AIProvider: React.FC<{
     const bug = session.bugs[index];
     if (!bug || !session.jiraConnectionId || !session.issueData || !session.selectedIssueType?.id) return false;
 
+    const requestId = validationRequestRef.current + 1;
+    validationRequestRef.current = requestId;
     updateSession({ loading: true, error: null, validationErrors: [] });
     try {
       const { projectKey, projectId } = getProjectRequestParams();
@@ -635,6 +673,8 @@ export const AIProvider: React.FC<{
       
       const data = await readJsonResponse<AIPreviewResponsePayload>(res);
       const actionableMissingFields = (data.missing_fields || []).filter((field) => !isSystemManagedMissingField(field));
+      if (validationRequestRef.current !== requestId) return false;
+
       updateSession({ resolvedPayload: data.resolved_payload ?? null });
       if (actionableMissingFields.length > 0) {
         updateSession({ 
@@ -645,23 +685,37 @@ export const AIProvider: React.FC<{
       updateSession({ validationErrors: [] });
       return true;
     } catch (err) {
-      updateSession({ error: getErrorMessage(err) });
+      if (validationRequestRef.current === requestId) {
+        updateSession({ error: getErrorMessage(err) });
+      }
       return false;
     } finally {
-      updateSession({ loading: false });
+      if (validationRequestRef.current === requestId) {
+        updateSession({ loading: false });
+      }
     }
   }, [apiBase, authToken, getProjectRequestParams, isSystemManagedMissingField, refreshAuthToken, session.bugs, session.instanceUrl, session.issueData, session.jiraConnectionId, session.selectedIssueType, updateSession]);
 
   const preparePreviewBug = useCallback((index: number) => {
+    if (index < 0 || index >= session.bugs.length) {
+      updateSession({ view: 'main', previewBugIndex: null, validationErrors: [], resolvedPayload: null, error: 'Could not find the draft for review.' });
+      return;
+    }
     updateSession({ view: 'preview', previewBugIndex: index, validationErrors: [], resolvedPayload: null });
     void validateBug(index);
-  }, [updateSession, validateBug]);
+  }, [session.bugs.length, updateSession, validateBug]);
 
   const submitBugs = useCallback(async (index?: number) => {
     if (submitBugsInFlightRef.current) return;
-    let bugs = session.bugs || [];
+    const allBugs = session.bugs || [];
+    let bugs = allBugs;
     if (index !== undefined) {
-      bugs = [bugs[index]];
+      const selectedBug = allBugs[index];
+      if (!selectedBug) {
+        updateSession({ error: 'Could not find the selected bug draft to publish.' });
+        return;
+      }
+      bugs = [selectedBug];
     }
     
     if (!session.issueData || !bugs.length || !session.jiraConnectionId || !session.selectedIssueType?.id) return;
@@ -669,6 +723,28 @@ export const AIProvider: React.FC<{
     updateSession({ loading: true, error: null });
     
     try {
+      if (index === undefined) {
+        for (let bugIndex = 0; bugIndex < allBugs.length; bugIndex += 1) {
+          const isBugValid = await validateBug(bugIndex);
+          if (!isBugValid) {
+            updateSession({
+              view: 'preview',
+              previewBugIndex: bugIndex,
+              error: null
+            });
+            return;
+          }
+        }
+        bugs = allBugs;
+      } else {
+        const isBugValid = await validateBug(index);
+        if (!isBugValid) {
+          updateSession({ view: 'preview', previewBugIndex: index, error: null });
+          return;
+        }
+      }
+
+      updateSession({ loading: true, error: null });
       const { projectKey, projectId } = getProjectRequestParams();
       const payload: AISubmitRequestPayload = {
         jira_connection_id: session.jiraConnectionId,
@@ -683,6 +759,7 @@ export const AIProvider: React.FC<{
         method: 'POST',
         token: authToken,
         onUnauthorized: refreshAuthToken,
+        headers: { 'Idempotency-Key': buildIdempotencyKey() },
         body: JSON.stringify(payload)
       });
 
@@ -737,7 +814,7 @@ export const AIProvider: React.FC<{
       submitBugsInFlightRef.current = false;
       updateSession({ loading: false });
     }
-  }, [authToken, apiBase, extractBulkSubmitFailure, getProjectRequestParams, parseJiraRequiredFieldErrors, refreshAuthToken, session.bugs, session.instanceUrl, session.issueData, session.jiraConnectionId, session.previewBugIndex, session.selectedIssueType, session.visibleFields, updateSession]);
+  }, [authToken, apiBase, buildIdempotencyKey, extractBulkSubmitFailure, getProjectRequestParams, parseJiraRequiredFieldErrors, refreshAuthToken, session.bugs, session.instanceUrl, session.issueData, session.jiraConnectionId, session.previewBugIndex, session.selectedIssueType, session.visibleFields, updateSession, validateBug]);
 
   const searchUsers = useCallback(async (query: string, bugIndex?: number, fieldId?: string) => {
     if (query.length < 2 || !session.jiraConnectionId) return;

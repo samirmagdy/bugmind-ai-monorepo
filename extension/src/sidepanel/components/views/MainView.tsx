@@ -1343,7 +1343,7 @@ const MainView: React.FC = () => {
                                     const field = metadataFields.find((f: JiraField) => f.key === fieldKey);
                                     if (!field) return null;
 
-                                    const isMulti = field.type === 'array' || field.type === 'multi-select';
+                                    const isMulti = field.type === 'array' || field.type === 'multi-select' || field.type === 'multi-user';
                                     const currentVal = mergeDisplayValue(
                                       bug.extra_fields?.[fieldKey],
                                       session.fieldDefaults?.[fieldKey]
@@ -1374,8 +1374,8 @@ const MainView: React.FC = () => {
                                                 finalVal = toStoredSelectValue(Array.isArray(next) ? next[0] : next);
                                               }
                                             }
-                                            handleUpdateBug(idx, { 
-                                              extra_fields: { ...(bug.extra_fields || {}), [fieldKey]: finalVal } 
+                                            handleUpdateBug(idx, {
+                                              extra_fields: { [fieldKey]: finalVal }
                                             });
                                           }}
                                         />

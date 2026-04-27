@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
 from typing import Optional
 import httpx
 from app.api import deps
@@ -304,14 +303,17 @@ def resolve_jira_bootstrap_context(
             if not metadata_fields and last_field_error:
                 raise last_field_error
 
-            mapping = db.query(JiraFieldMapping).filter(
+            mapping_query = db.query(JiraFieldMapping).filter(
                 JiraFieldMapping.user_id == current_user.id,
-                or_(
-                    JiraFieldMapping.project_key == canonical_project_key,
-                    JiraFieldMapping.project_id == (canonical_project_id if str(canonical_project_id).isdigit() else None),
-                ),
+                JiraFieldMapping.project_key == canonical_project_key,
                 JiraFieldMapping.issue_type_id == selected_issue_type_id
-            ).first()
+            )
+            canonical_mapping_project_id = canonical_project_id if str(canonical_project_id).isdigit() else None
+            if canonical_mapping_project_id is None:
+                mapping_query = mapping_query.filter(JiraFieldMapping.project_id.is_(None))
+            else:
+                mapping_query = mapping_query.filter(JiraFieldMapping.project_id == canonical_mapping_project_id)
+            mapping = mapping_query.first()
             visible_fields = mapping.visible_fields if mapping else []
             ai_mapping = mapping.field_mappings if mapping else {}
             field_defaults = mapping.field_defaults if mapping else {}

@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
 from datetime import datetime
 from typing import Optional, List, Dict
 from difflib import SequenceMatcher
@@ -53,14 +52,16 @@ def _get_field_mapping_record(
     project_id: Optional[str],
     issue_type_id: str,
 ) -> Optional[JiraFieldMapping]:
-    return db.query(JiraFieldMapping).filter(
-        or_(
-            JiraFieldMapping.project_key == project_key,
-            JiraFieldMapping.project_id == project_id
-        ),
+    query = db.query(JiraFieldMapping).filter(
+        JiraFieldMapping.project_key == project_key,
         JiraFieldMapping.issue_type_id == issue_type_id,
         JiraFieldMapping.user_id == user_id
-    ).first()
+    )
+    if project_id is None:
+        query = query.filter(JiraFieldMapping.project_id.is_(None))
+    else:
+        query = query.filter(JiraFieldMapping.project_id == project_id)
+    return query.first()
 
 
 def _compose_story_context(selected_text: Optional[str], issue_context) -> str:
@@ -244,17 +245,41 @@ def _build_issue_fields(
 
 def _merge_saved_field_defaults(
     payload_fields: dict,
-    mapping_record: Optional[JiraFieldMapping]
+    mapping_record: Optional[JiraFieldMapping],
+    schema: Optional[list] = None,
 ) -> dict:
     merged_fields = dict(payload_fields)
     saved_defaults = (mapping_record.field_defaults if mapping_record else None) or {}
+    creatable_schema_keys = {field.get("key") for field in (schema or [])}
     for field_key, default_value in saved_defaults.items():
         if field_key in NON_CREATABLE_ISSUE_FIELDS:
+            continue
+        if schema is not None and field_key not in creatable_schema_keys:
             continue
         existing = merged_fields.get(field_key)
         if existing is None or existing == "" or existing == []:
             merged_fields[field_key] = default_value
     return merged_fields
+
+
+def _is_missing_jira_value(field: dict, value: object) -> bool:
+    if value is None or value == "":
+        return True
+    if isinstance(value, list):
+        if not value:
+            return True
+        return any(_is_missing_jira_value(field, item) for item in value)
+    if not isinstance(value, dict):
+        return False
+
+    field_type = field.get("type", "")
+    if field_type in {"option", "priority"}:
+        return not any(str(value.get(key) or "").strip() for key in ("id", "value", "name"))
+    if field_type in {"user", "multi-user"}:
+        return not any(str(value.get(key) or "").strip() for key in ("accountId", "name", "id"))
+    if field_type in {"array", "multi-select"}:
+        return not any(str(value.get(key) or "").strip() for key in ("id", "value", "name", "accountId"))
+    return False
 
 
 def _resolve_payload(db: Session, user_id: int, project_key: str, project_id: Optional[str], issue_type_id: str, schema: list, payload_fields: dict, platform: str = "cloud") -> dict:
@@ -299,14 +324,7 @@ def _validate_payload(schema: list, payload_fields: dict) -> List[Dict]:
             continue
 
         value = get_payload_value_for_field(field, payload_fields)
-        if value is None:
-            missing_fields.append({
-                "key": field["key"],
-                "name": field["name"]
-            })
-            continue
-
-        if value == "" or (isinstance(value, list) and not value):
+        if _is_missing_jira_value(field, value):
             missing_fields.append({
                 "key": field["key"],
                 "name": field["name"]
@@ -377,7 +395,7 @@ async def _generate_findings_response(
             continue
 
         jira_payload = resolver.resolve(raw_bug)
-        jira_payload["fields"] = _merge_saved_field_defaults(jira_payload["fields"], mapping_record)
+        jira_payload["fields"] = _merge_saved_field_defaults(jira_payload["fields"], mapping_record, schema)
 
         steps_list = raw_bug.get("steps", [])
         if isinstance(steps_list, list):
@@ -570,9 +588,8 @@ async def prepare_bug_preview(
             prefer_project_key=prefer_project_key
         )
     )
-    payload_fields = _merge_saved_field_defaults(payload_fields, mapping_record)
+    payload_fields = _merge_saved_field_defaults(payload_fields, mapping_record, schema)
     platform = "server" if prefer_project_key else "cloud"
-    missing_fields = _validate_payload(schema, payload_fields)
     resolved_payload = _resolve_payload(
         db,
         current_user.id,
@@ -583,6 +600,7 @@ async def prepare_bug_preview(
         payload_fields,
         platform=platform
     )
+    missing_fields = _validate_payload(schema, resolved_payload.get("fields", {}))
 
     return PreviewPreparationResponse(
         valid=len(missing_fields) == 0,
@@ -654,115 +672,122 @@ async def submit_bugs(
     platform = "server" if prefer_project_key else "cloud"
     prepared_payloads: List[tuple[int, Any, Dict[str, Any]]] = []
 
-    for bug_index, bug in enumerate(req.bugs):
-        payload_fields = inject_standard_field_aliases(
-            schema,
-            _build_issue_fields(
-                bug.model_dump(),
-                req.issue_type_id,
+    try:
+        for bug_index, bug in enumerate(req.bugs):
+            payload_fields = inject_standard_field_aliases(
+                schema,
+                _build_issue_fields(
+                    bug.model_dump(),
+                    req.issue_type_id,
+                    req.project_key,
+                    req.project_id,
+                    prefer_project_key=prefer_project_key
+                )
+            )
+            payload_fields = _merge_saved_field_defaults(payload_fields, mapping_record, schema)
+            resolved_payload = _resolve_payload(
+                db,
+                current_user.id,
                 req.project_key,
                 req.project_id,
-                prefer_project_key=prefer_project_key
+                req.issue_type_id,
+                schema,
+                payload_fields,
+                platform=platform
             )
-        )
-        payload_fields = _merge_saved_field_defaults(payload_fields, mapping_record)
-        missing_fields = _validate_payload(schema, payload_fields)
-        if missing_fields:
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error": {
-                        "code": "BULK_BUG_FIELDS_MISSING",
-                        "message": f"Bug {bug_index + 1} is missing required Jira fields.",
-                        "details": [{
-                            "bug_index": bug_index,
-                            "bug_summary": bug.summary,
-                            "missing_fields": missing_fields,
-                        }],
-                    }
-                },
-            )
-
-        resolved_payload = _resolve_payload(
-            db,
-            current_user.id,
-            req.project_key,
-            req.project_id,
-            req.issue_type_id,
-            schema,
-            payload_fields,
-            platform=platform
-        )
-        prepared_payloads.append((bug_index, bug, resolved_payload))
-
-    for bug_index, bug, resolved_payload in prepared_payloads:
-
-        try:
-            issue_key = adapter.create_issue(resolved_payload)
-        except HTTPException as exc:
-            rollback_failed_keys: List[str] = []
-            rolled_back_issue_keys: List[str] = []
-            rollback_failure_details: List[dict[str, str]] = []
-            for created_issue_key in reversed(created_issue_keys_for_rollback):
-                try:
-                    adapter.delete_issue(created_issue_key)
-                    rolled_back_issue_keys.append(created_issue_key)
-                except HTTPException as rollback_exc:
-                    rollback_failed_keys.append(created_issue_key)
-                    rollback_failure_details.append(
-                        {
-                            "issue_key": created_issue_key,
-                            "error": str(rollback_exc.detail),
+            missing_fields = _validate_payload(schema, resolved_payload.get("fields", {}))
+            if missing_fields:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "error": {
+                            "code": "BULK_BUG_FIELDS_MISSING",
+                            "message": f"Bug {bug_index + 1} is missing required Jira fields.",
+                            "details": [{
+                                "bug_index": bug_index,
+                                "bug_summary": bug.summary,
+                                "missing_fields": missing_fields,
+                            }],
                         }
+                    },
+                )
+            prepared_payloads.append((bug_index, bug, resolved_payload))
+    except Exception:
+        idempotency_store.clear_reservation("ai.submit", str(current_user.id), idem_key, request_payload)
+        raise
+
+    try:
+        for bug_index, bug, resolved_payload in prepared_payloads:
+
+            try:
+                issue_key = adapter.create_issue(resolved_payload)
+            except HTTPException as exc:
+                rollback_failed_keys: List[str] = []
+                rolled_back_issue_keys: List[str] = []
+                rollback_failure_details: List[dict[str, str]] = []
+                for created_issue_key in reversed(created_issue_keys_for_rollback):
+                    try:
+                        adapter.delete_issue(created_issue_key)
+                        rolled_back_issue_keys.append(created_issue_key)
+                    except HTTPException as rollback_exc:
+                        rollback_failed_keys.append(created_issue_key)
+                        rollback_failure_details.append(
+                            {
+                                "issue_key": created_issue_key,
+                                "error": str(rollback_exc.detail),
+                            }
+                        )
+                error_message = f"Bug {bug_index + 1} could not be created in Jira."
+                if rollback_failed_keys:
+                    error_message = (
+                        f"{error_message} Some earlier bugs were already created and could not be deleted automatically. "
+                        "Review Jira permissions or remove them manually."
                     )
-            error_message = f"Bug {bug_index + 1} could not be created in Jira."
-            if rollback_failed_keys:
-                error_message = (
-                    f"{error_message} Some earlier bugs were already created and could not be deleted automatically. "
-                    "Review Jira permissions or remove them manually."
-                )
-            raise HTTPException(
-                status_code=exc.status_code,
-                detail={
-                    "error": {
-                        "code": "BULK_BUG_SUBMIT_FAILED",
-                        "message": error_message,
-                        "details": [{
-                            "bug_index": bug_index,
-                            "bug_summary": bug.summary,
-                            "jira_error": exc.detail,
-                            "rolled_back_issue_keys": rolled_back_issue_keys,
-                            "rollback_attempted_issue_keys": created_issue_keys_for_rollback,
-                            "rollback_failed_issue_keys": rollback_failed_keys,
-                            "rollback_failed_issue_details": rollback_failure_details,
-                            "partial_publish": bool(rollback_failed_keys),
-                        }],
-                    }
-                },
-            ) from exc
-        created_issue_keys_for_rollback.append(issue_key)
-        created_issues.append(XrayPublishedTest(id=issue_key, key=issue_key, self=""))
-        if story_issue_key:
-            linked = False
-            for candidate in link_candidates:
-                try:
-                    adapter.link_issues(issue_key, candidate, story_issue_key)
-                    linked = True
-                    linked_issue_keys.append(issue_key)
-                    if not link_type_used:
-                        link_type_used = candidate
-                    break
-                except HTTPException:
-                    continue
-            if not linked:
-                unlinked_issue_keys.append(issue_key)
-                warnings.append(f"Issue {issue_key} was created but could not be linked to parent story {story_issue_key}.")
-                logger.warning(
-                    "bug_submit_link_failed story_issue_key=%s created_issue_key=%s jira_connection_id=%s",
-                    story_issue_key,
-                    issue_key,
-                    req.jira_connection_id,
-                )
+                raise HTTPException(
+                    status_code=exc.status_code,
+                    detail={
+                        "error": {
+                            "code": "BULK_BUG_SUBMIT_FAILED",
+                            "message": error_message,
+                            "details": [{
+                                "bug_index": bug_index,
+                                "bug_summary": bug.summary,
+                                "jira_error": exc.detail,
+                                "rolled_back_issue_keys": rolled_back_issue_keys,
+                                "rollback_attempted_issue_keys": created_issue_keys_for_rollback,
+                                "rollback_failed_issue_keys": rollback_failed_keys,
+                                "rollback_failed_issue_details": rollback_failure_details,
+                                "partial_publish": bool(rollback_failed_keys),
+                            }],
+                        }
+                    },
+                ) from exc
+            created_issue_keys_for_rollback.append(issue_key)
+            created_issues.append(XrayPublishedTest(id=issue_key, key=issue_key, self=""))
+            if story_issue_key:
+                linked = False
+                for candidate in link_candidates:
+                    try:
+                        adapter.link_issues(issue_key, candidate, story_issue_key)
+                        linked = True
+                        linked_issue_keys.append(issue_key)
+                        if not link_type_used:
+                            link_type_used = candidate
+                        break
+                    except HTTPException:
+                        continue
+                if not linked:
+                    unlinked_issue_keys.append(issue_key)
+                    warnings.append(f"Issue {issue_key} was created but could not be linked to parent story {story_issue_key}.")
+                    logger.warning(
+                        "bug_submit_link_failed story_issue_key=%s created_issue_key=%s jira_connection_id=%s",
+                        story_issue_key,
+                        issue_key,
+                        req.jira_connection_id,
+                    )
+    except Exception:
+        idempotency_store.clear_reservation("ai.submit", str(current_user.id), idem_key, request_payload)
+        raise
 
     response = SubmitBugsResponse(
         created_issues=created_issues,
