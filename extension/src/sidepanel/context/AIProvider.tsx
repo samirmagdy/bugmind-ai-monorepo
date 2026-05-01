@@ -1207,22 +1207,21 @@ export const AIProvider: React.FC<{
         attachmentId: string;
         contentType: string;
         filename: string;
-        bytes: number[];
+        content: string;
       }>('FETCH_ATTACHMENT', {
         jiraConnectionId: session.jiraConnectionId,
         attachmentId,
       });
 
-      const bytes = new Uint8Array(result.bytes || []);
-      const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes).trim();
+      const text = (result.content || '').trim();
       if (!text) {
         throw new Error('The selected attachment did not contain readable text.');
       }
       updateSession({
         bulkBrdText: text,
-        bulkProgressMessage: 'Attachment loaded into BRD compare.',
+        bulkProgressMessage: `${result.filename || 'Attachment'} loaded into BRD compare.`,
         bulkProgressPercent: 100,
-        success: 'Attachment loaded into BRD compare.',
+        success: `${result.filename || 'Attachment'} loaded into BRD compare.`,
       });
     } catch (err) {
       updateSession({ error: getErrorMessage(err) });

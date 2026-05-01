@@ -3,6 +3,9 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import Any, Optional
 import httpx
+import zipfile
+import xml.etree.ElementTree as ET
+from pypdf import PdfReader
 from app.api import deps
 from app.models.user import User
 from app.models.jira import JiraConnection, JiraAuthType, JiraFieldMapping
@@ -13,6 +16,7 @@ from app.schemas.jira import (
     JiraBulkFetchResponse,
     JiraBulkIssueResponse,
     JiraAttachmentResponse,
+    JiraAttachmentTextResponse,
     JiraConnectionCreate,
     JiraConnectionResponse,
     JiraConnectionUpdate,
@@ -198,6 +202,87 @@ def _normalize_bulk_issue(issue: dict) -> JiraBulkIssueResponse:
         risk_score=risk_score,
         risk_reasons=risk_reasons,
         attachments=attachments,
+    )
+
+
+def _decode_text_attachment(content: bytes, content_type: str, filename: str) -> str:
+    normalized_type = (content_type or "").split(";", 1)[0].strip().lower()
+    normalized_name = filename.strip().lower()
+
+    if (
+        normalized_type.startswith("text/")
+        or normalized_type in {
+            "application/json",
+            "application/xml",
+            "application/yaml",
+            "application/x-yaml",
+            "text/markdown",
+            "text/csv",
+        }
+        or normalized_name.endswith((".txt", ".md", ".csv", ".json", ".xml", ".yaml", ".yml", ".log"))
+    ):
+        for encoding in ("utf-8-sig", "utf-8", "utf-16"):
+            try:
+                return content.decode(encoding).strip()
+            except UnicodeDecodeError:
+                continue
+        return content.decode("utf-8", errors="replace").strip()
+
+    is_docx = (
+        normalized_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        or normalized_name.endswith(".docx")
+    )
+    if is_docx:
+        try:
+            with zipfile.ZipFile(BytesIO(content)) as archive:
+                document_xml = archive.read("word/document.xml")
+        except (KeyError, zipfile.BadZipFile) as exc:
+            raise HTTPException(status_code=400, detail="Could not read text from the DOCX attachment") from exc
+
+        try:
+            root = ET.fromstring(document_xml)
+        except ET.ParseError as exc:
+            raise HTTPException(status_code=400, detail="Could not parse DOCX document text") from exc
+
+        namespace = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+        paragraphs: list[str] = []
+        for paragraph in root.iter(f"{namespace}p"):
+            parts: list[str] = []
+            for node in paragraph.iter():
+                if node.tag == f"{namespace}t" and node.text:
+                    parts.append(node.text)
+                elif node.tag == f"{namespace}tab":
+                    parts.append("\t")
+                elif node.tag == f"{namespace}br":
+                    parts.append("\n")
+            text = "".join(parts).strip()
+            if text:
+                paragraphs.append(text)
+        return "\n\n".join(paragraphs).strip()
+
+    is_pdf = normalized_type == "application/pdf" or normalized_name.endswith(".pdf")
+    if is_pdf:
+        try:
+            reader = PdfReader(BytesIO(content))
+            pages = []
+            for index, page in enumerate(reader.pages, start=1):
+                page_text = (page.extract_text() or "").strip()
+                if page_text:
+                    pages.append(f"Page {index}\n{page_text}")
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="Could not read text from the PDF attachment") from exc
+
+        text = "\n\n".join(pages).strip()
+        if not text:
+            raise HTTPException(
+                status_code=400,
+                detail="The selected PDF does not contain extractable text. Use an OCR/text PDF or paste the BRD text manually.",
+            )
+        return text
+
+    raise HTTPException(
+        status_code=415,
+        detail="This attachment type cannot be extracted as BRD text. Use TXT, MD, CSV, JSON, XML, YAML, LOG, DOCX, or text-based PDF.",
     )
 
 
@@ -871,6 +956,31 @@ def fetch_jira_attachment(
         BytesIO(content),
         media_type=content_type,
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"},
+    )
+
+
+@router.get("/connections/{conn_id}/attachments/{attachment_id}/text", response_model=JiraAttachmentTextResponse)
+def fetch_jira_attachment_text(
+    conn_id: int,
+    attachment_id: str,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    conn = db.query(JiraConnection).filter(JiraConnection.id == conn_id, JiraConnection.user_id == current_user.id).first()
+    if not conn:
+        raise HTTPException(status_code=404, detail="Connection not found")
+
+    adapter = get_adapter(conn)
+    content, content_type, filename = adapter.fetch_attachment(attachment_id)
+    text = _decode_text_attachment(content, content_type, filename)
+    if not text:
+        raise HTTPException(status_code=400, detail="The selected attachment does not contain readable BRD text")
+
+    return JiraAttachmentTextResponse(
+        id=attachment_id,
+        filename=filename,
+        mime_type=content_type,
+        content=text,
     )
 
 

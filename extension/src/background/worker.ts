@@ -314,21 +314,32 @@ async function fetchAttachment(message: BulkMessage): Promise<unknown> {
   if (!jiraConnectionId || !attachmentId) throw new Error('FETCH_ATTACHMENT requires jiraConnectionId and attachmentId.');
 
   const { apiBase, token } = await getWorkerAuthContext(payload);
-  const url = `${apiBase}/jira/connections/${jiraConnectionId}/attachments/${attachmentId}`;
+  const url = `${apiBase}/jira/connections/${jiraConnectionId}/attachments/${attachmentId}/text`;
   const response = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` }
   });
   if (!response.ok) {
     const body = await response.text().catch(() => '');
-    throw new Error(`Attachment fetch failed at ${url} with status ${response.status}: ${body || response.statusText}`);
+    let message = body || response.statusText;
+    try {
+      const parsed = JSON.parse(body) as { detail?: unknown };
+      if (typeof parsed.detail === 'string') message = parsed.detail;
+    } catch {
+      // Use raw body.
+    }
+    throw new Error(`Attachment text fetch failed at ${url} with status ${response.status}: ${message}`);
   }
-  const buffer = await response.arrayBuffer();
-  const bytes = Array.from(new Uint8Array(buffer));
+  const data = await response.json() as {
+    id?: string;
+    filename?: string;
+    mime_type?: string;
+    content?: string;
+  };
   return {
     attachmentId,
-    contentType: response.headers.get('Content-Type') || 'application/octet-stream',
-    filename: response.headers.get('Content-Disposition') || '',
-    bytes,
+    contentType: data.mime_type || 'text/plain',
+    filename: data.filename || '',
+    content: data.content || '',
   };
 }
 

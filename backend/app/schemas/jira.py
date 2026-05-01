@@ -93,6 +93,13 @@ class JiraAttachmentResponse(BaseModel):
     issue_key: Optional[str] = None
 
 
+class JiraAttachmentTextResponse(BaseModel):
+    id: str
+    filename: str
+    mime_type: Optional[str] = None
+    content: str
+
+
 class JiraBulkIssueResponse(BaseModel):
     id: str
     key: str
