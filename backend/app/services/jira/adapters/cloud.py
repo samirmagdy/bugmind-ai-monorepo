@@ -292,7 +292,7 @@ class JiraCloudAdapter(JiraAdapter):
         max_results: int = 100,
     ) -> List[Dict[str, Any]]:
         collected: List[Dict[str, Any]] = []
-        start_at = 0
+        next_page_token: Optional[str] = None
         page_size = min(max_results, 100)
         requested_fields = fields or ["summary", "description", "issuetype", "status", "attachment", "parent"]
 
@@ -300,12 +300,15 @@ class JiraCloudAdapter(JiraAdapter):
             payload = {
                 "jql": jql,
                 "fields": requested_fields,
-                "startAt": start_at,
                 "maxResults": min(page_size, max_results - len(collected)),
+                "fieldsByKeys": False,
             }
-            response = self._request("POST", "/rest/api/3/search", json=payload)
+            if next_page_token:
+                payload["nextPageToken"] = next_page_token
+
+            response = self._request("POST", "/rest/api/3/search/jql", json=payload)
             if response.status_code in (404, 405):
-                response = self._request("POST", "/rest/api/2/search", json=payload)
+                response = self._request("POST", "/rest/api/2/search/jql", json=payload)
             if response.status_code != 200:
                 raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to search Jira issues"))
 
@@ -314,9 +317,11 @@ class JiraCloudAdapter(JiraAdapter):
             if not isinstance(issues, list) or not issues:
                 break
             collected.extend(issues)
-            start_at += len(issues)
-            total = int(data.get("total") or 0)
-            if start_at >= total:
+
+            if data.get("isLast", True):
+                break
+            next_page_token = data.get("nextPageToken")
+            if not next_page_token:
                 break
 
         return collected
