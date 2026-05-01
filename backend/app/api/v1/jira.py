@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from typing import Optional
+from typing import Any, Optional
 import httpx
 from app.api import deps
 from app.models.user import User
@@ -8,6 +9,10 @@ from app.models.jira import JiraConnection, JiraAuthType, JiraFieldMapping
 from app.schemas.jira import (
     JiraBootstrapContextRequest,
     JiraBootstrapContextResponse,
+    JiraBulkFetchRequest,
+    JiraBulkFetchResponse,
+    JiraBulkIssueResponse,
+    JiraAttachmentResponse,
     JiraConnectionCreate,
     JiraConnectionResponse,
     JiraConnectionUpdate,
@@ -23,7 +28,8 @@ from app.core import security
 from app.services.jira.adapters.cloud import JiraCloudAdapter
 from app.services.jira.adapters.server import JiraServerAdapter
 from app.services.jira.metadata_engine import JiraMetadataEngine
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
+from io import BytesIO
 from app.core.audit import log_audit
 from app.core.idempotency import idempotency_store
 from app.core.rate_limit import rate_limiter
@@ -55,7 +61,7 @@ def _verify_connection_credentials(auth_type: JiraAuthType, host_url: str, usern
         if auth_type == JiraAuthType.CLOUD
         else JiraServerAdapter(host_url, username, token, verify_ssl=verify_ssl)
     )
-    adapter.get_projects()
+    adapter.get_current_user()
 
 
 def _normalize_instance_url(url: Optional[str]) -> str:
@@ -98,6 +104,101 @@ def _project_key_from_issue_key(issue_key: Optional[str]) -> Optional[str]:
         return None
     candidate = raw.split("-", 1)[0].strip()
     return candidate or None
+
+
+def _quote_jql_value(value: str) -> str:
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _build_epic_children_jql(epic_key: str) -> str:
+    quoted = _quote_jql_value(epic_key)
+    return f'parent = {quoted} OR "Epic Link" = {quoted} OR issue in linkedIssues({quoted})'
+
+
+def _attachment_response(raw_attachment: dict, issue_key: Optional[str] = None) -> JiraAttachmentResponse:
+    return JiraAttachmentResponse(
+        id=str(raw_attachment.get("id") or ""),
+        filename=str(raw_attachment.get("filename") or raw_attachment.get("name") or ""),
+        mime_type=raw_attachment.get("mimeType") or raw_attachment.get("mime_type"),
+        size=raw_attachment.get("size"),
+        issue_key=issue_key,
+    )
+
+
+def _stringify_jira_description(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        parts: list[str] = []
+
+        def walk(node: Any) -> None:
+            if isinstance(node, dict):
+                text = node.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+                for child in node.get("content") or []:
+                    walk(child)
+            elif isinstance(node, list):
+                for child in node:
+                    walk(child)
+
+        walk(value)
+        return " ".join(parts)
+    return ""
+
+
+def _score_story_risk(issue: dict) -> tuple[int, list[str]]:
+    fields = issue.get("fields", {}) if isinstance(issue, dict) else {}
+    summary = str(fields.get("summary") or "")
+    description = _stringify_jira_description(fields.get("description"))
+    combined = f"{summary}\n{description}".lower()
+    reasons: list[str] = []
+    score = 0
+
+    if len(description.strip()) < 80:
+        score += 25
+        reasons.append("short_description")
+    if not any(term in combined for term in ("acceptance criteria", "given", "when", "then", "must", "should")):
+        score += 25
+        reasons.append("missing_clear_acceptance_criteria")
+    if any(term in combined for term in ("tbd", "todo", "unknown", "n/a", "later")):
+        score += 20
+        reasons.append("placeholder_language")
+    if any(term in combined for term in ("payment", "auth", "permission", "security", "role", "integration", "migration")):
+        score += 15
+        reasons.append("high_impact_domain")
+    if any(term in combined for term in ("all", "any", "etc", "and/or", "multiple")):
+        score += 10
+        reasons.append("ambiguous_scope")
+
+    return min(score, 100), reasons
+
+
+def _normalize_bulk_issue(issue: dict) -> JiraBulkIssueResponse:
+    fields = issue.get("fields", {}) if isinstance(issue, dict) else {}
+    issue_type = fields.get("issuetype") if isinstance(fields.get("issuetype"), dict) else {}
+    status = fields.get("status") if isinstance(fields.get("status"), dict) else {}
+    issue_key = str(issue.get("key") or "")
+    risk_score, risk_reasons = _score_story_risk(issue)
+
+    raw_attachments = fields.get("attachment") or []
+    attachments = [
+        _attachment_response(attachment, issue_key)
+        for attachment in raw_attachments
+        if isinstance(attachment, dict) and attachment.get("id")
+    ]
+
+    return JiraBulkIssueResponse(
+        id=str(issue.get("id") or ""),
+        key=issue_key,
+        summary=str(fields.get("summary") or ""),
+        description=fields.get("description"),
+        issue_type=issue_type.get("name"),
+        status=status.get("name"),
+        risk_score=risk_score,
+        risk_reasons=risk_reasons,
+        attachments=attachments,
+    )
 
 
 def _select_issue_type(issue_types: list[dict], issue_type_id: Optional[str]) -> Optional[dict]:
@@ -200,6 +301,134 @@ def _format_test_issue_description(story_issue_key: str, test_case: dict) -> str
     if components:
         lines.extend(["", "Components:", ", ".join(str(component) for component in components)])
     return "\n".join(lines).strip()
+
+
+def _folder_id(folder: dict[str, Any]) -> Optional[str]:
+    value = folder.get("id") or folder.get("folderId") or folder.get("folder_id")
+    return str(value).strip() if value is not None and str(value).strip() else None
+
+
+def _folder_name(folder: dict[str, Any]) -> str:
+    return str(folder.get("name") or folder.get("folderName") or "").strip()
+
+
+def _folder_parent_id(folder: dict[str, Any]) -> Optional[str]:
+    value = folder.get("parentId") or folder.get("parent_id") or folder.get("parent")
+    if isinstance(value, dict):
+        value = value.get("id")
+    return str(value).strip() if value is not None and str(value).strip() else None
+
+
+def _folder_path(folder: dict[str, Any]) -> str:
+    raw_path = str(folder.get("path") or folder.get("fullPath") or "").strip()
+    if raw_path:
+        return "/" + "/".join(part.strip() for part in raw_path.split("/") if part.strip())
+    return ""
+
+
+def _flatten_xray_folders(folders: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    flattened: list[dict[str, Any]] = []
+    stack = list(folders)
+    while stack:
+        folder = stack.pop(0)
+        if not isinstance(folder, dict):
+            continue
+        flattened.append(folder)
+        for child_key in ("children", "folders"):
+            children = folder.get(child_key)
+            if isinstance(children, list):
+                stack.extend(child for child in children if isinstance(child, dict))
+    return flattened
+
+
+def _find_xray_folder(
+    folders: list[dict[str, Any]],
+    *,
+    name: Optional[str] = None,
+    parent_id: Optional[str] = None,
+    path: Optional[str] = None,
+) -> Optional[dict[str, Any]]:
+    normalized_path = _normalize_folder_path(path, "") if path else None
+    for folder in _flatten_xray_folders(folders):
+        if normalized_path and _folder_path(folder).strip("/") == normalized_path:
+            return folder
+        if name:
+            folder_parent = _folder_parent_id(folder)
+            parent_matches = (
+                not parent_id
+                or folder_parent == str(parent_id)
+                or (str(parent_id) == "0" and folder_parent in (None, "", "0"))
+            )
+            if parent_matches and _folder_name(folder).lower() == name.strip().lower():
+                return folder
+    return None
+
+
+def _ensure_xray_folder(adapter: JiraServerAdapter, project_key: str, folder_path: str) -> str:
+    parent_id = "0"
+    current_path_parts: list[str] = []
+
+    for part in [segment for segment in folder_path.split("/") if segment.strip()]:
+        name = part.strip()
+        current_path_parts.append(name)
+        folders = adapter.get_xray_folders(project_key)
+        existing = _find_xray_folder(
+            folders,
+            name=name,
+            parent_id=parent_id,
+            path="/".join(current_path_parts),
+        )
+        if existing:
+            existing_id = _folder_id(existing)
+            if existing_id:
+                parent_id = existing_id
+                continue
+
+        try:
+            created = adapter.create_xray_folder(project_key, parent_id, name)
+        except HTTPException:
+            refreshed = adapter.get_xray_folders(project_key)
+            existing = _find_xray_folder(
+                refreshed,
+                name=name,
+                parent_id=parent_id,
+                path="/".join(current_path_parts),
+            )
+            existing_id = _folder_id(existing or {})
+            if existing_id:
+                parent_id = existing_id
+                continue
+            raise
+
+        created_id = _folder_id(created)
+        if not created_id:
+            refreshed = adapter.get_xray_folders(project_key)
+            created = _find_xray_folder(
+                refreshed,
+                name=name,
+                parent_id=parent_id,
+                path="/".join(current_path_parts),
+            ) or {}
+            created_id = _folder_id(created)
+        if not created_id:
+            raise HTTPException(status_code=400, detail=f"Xray created folder '{name}' but did not return a folder id")
+        parent_id = created_id
+
+    return parent_id
+
+
+def _add_xray_manual_steps(adapter: JiraServerAdapter, issue_key: str, test_case: dict) -> None:
+    steps = [str(step).strip() for step in (test_case.get("steps") or []) if str(step).strip()]
+    expected_result = str(test_case.get("expected_result") or "").strip()
+    preconditions = str(test_case.get("preconditions") or "").strip()
+    last_index = len(steps) - 1
+    for index, step in enumerate(steps):
+        adapter.add_xray_step(
+            issue_key,
+            step,
+            data=preconditions if index == 0 and preconditions else None,
+            result=expected_result if index == last_index else None,
+        )
 
 
 def _field_key_by_name(fields: list[dict], names: tuple[str, ...]) -> Optional[str]:
@@ -542,6 +771,109 @@ def get_projects(
     return adapter.get_projects()
 
 
+@router.get("/connections/{conn_id}/current-user")
+def get_current_jira_user(
+    conn_id: int,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    conn = db.query(JiraConnection).filter(JiraConnection.id == conn_id, JiraConnection.user_id == current_user.id).first()
+    if not conn:
+        raise HTTPException(status_code=404, detail="Connection not found")
+
+    adapter = get_adapter(conn)
+    return adapter.get_current_user()
+
+
+@router.get("/connections/{conn_id}/issues/{issue_key}")
+def fetch_jira_issue(
+    conn_id: int,
+    issue_key: str,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    conn = db.query(JiraConnection).filter(JiraConnection.id == conn_id, JiraConnection.user_id == current_user.id).first()
+    if not conn:
+        raise HTTPException(status_code=404, detail="Connection not found")
+
+    adapter = get_adapter(conn)
+    return adapter.fetch_issue(issue_key)
+
+
+@router.post("/connections/{conn_id}/bulk/epic", response_model=JiraBulkFetchResponse)
+def bulk_fetch_epic_children(
+    conn_id: int,
+    req: JiraBulkFetchRequest,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    epic_key = req.epic_key.strip().upper()
+    if not epic_key or "-" not in epic_key:
+        raise HTTPException(status_code=400, detail="A valid Epic issue key is required")
+
+    conn = db.query(JiraConnection).filter(JiraConnection.id == conn_id, JiraConnection.user_id == current_user.id).first()
+    if not conn:
+        raise HTTPException(status_code=404, detail="Connection not found")
+
+    adapter = get_adapter(conn)
+    jql = _build_epic_children_jql(epic_key)
+    issues = adapter.search_issues(
+        jql,
+        fields=["summary", "description", "issuetype", "status", "attachment", "parent"],
+        max_results=max(1, min(req.max_results, 250)),
+    )
+    normalized_issues = [_normalize_bulk_issue(issue) for issue in issues]
+
+    epic_attachments: list[JiraAttachmentResponse] = []
+    try:
+        epic = adapter.fetch_issue(epic_key)
+        fields = epic.get("fields", {}) if isinstance(epic, dict) else {}
+        raw_attachments = fields.get("attachment") or []
+        epic_attachments = [
+            _attachment_response(attachment, epic_key)
+            for attachment in raw_attachments
+            if isinstance(attachment, dict) and attachment.get("id")
+        ]
+    except HTTPException:
+        epic_attachments = []
+
+    log_audit(
+        "jira.bulk_fetch_epic",
+        current_user.id,
+        db=db,
+        jira_connection_id=conn.id,
+        epic_key=epic_key,
+        issue_count=len(normalized_issues),
+    )
+    return JiraBulkFetchResponse(
+        epic_key=epic_key,
+        jql=jql,
+        issues=normalized_issues,
+        epic_attachments=epic_attachments,
+    )
+
+
+@router.get("/connections/{conn_id}/attachments/{attachment_id}")
+def fetch_jira_attachment(
+    conn_id: int,
+    attachment_id: str,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    conn = db.query(JiraConnection).filter(JiraConnection.id == conn_id, JiraConnection.user_id == current_user.id).first()
+    if not conn:
+        raise HTTPException(status_code=404, detail="Connection not found")
+
+    adapter = get_adapter(conn)
+    content, content_type, filename = adapter.fetch_attachment(attachment_id)
+    encoded_filename = quote(filename)
+    return StreamingResponse(
+        BytesIO(content),
+        media_type=content_type,
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"},
+    )
+
+
 @router.get("/connections/{conn_id}/xray/defaults", response_model=XrayDefaultsResponse)
 def get_xray_defaults(
     conn_id: int,
@@ -685,6 +1017,11 @@ def _publish_xray_server_test_suite(
     test_fields = engine.get_field_schema(req.xray_project_id, test_issue_type_id)
     repository_path_field_id = _detect_repository_path_field_id(test_fields, req.repository_path_field_id)
     folder_path = _normalize_folder_path(req.folder_path, req.story_issue_key)
+    xray_project_key = req.xray_project_key or str(project_metadata.get("project_key") or "").strip()
+    xray_folder_id: Optional[str] = None
+    uses_raven_repository = isinstance(adapter, JiraServerAdapter) and bool(xray_project_key)
+    if uses_raven_repository:
+        xray_folder_id = _ensure_xray_folder(adapter, xray_project_key, folder_path)
 
     available_link_types: list[str] = []
     try:
@@ -712,6 +1049,10 @@ def _publish_xray_server_test_suite(
 
             issue_key = adapter.create_issue({"fields": fields})
             created_tests.append(XrayPublishedTest(id=issue_key, key=issue_key, self=""))
+            if isinstance(adapter, JiraServerAdapter):
+                _add_xray_manual_steps(adapter, issue_key, test_case_payload)
+                if xray_project_key and xray_folder_id:
+                    adapter.add_test_to_folder(xray_project_key, xray_folder_id, issue_key)
 
             linked = False
             for candidate in link_candidates:
@@ -742,7 +1083,7 @@ def _publish_xray_server_test_suite(
             }
         raise HTTPException(status_code=exc.status_code, detail=detail) from exc
 
-    if not repository_path_field_id:
+    if not repository_path_field_id and not uses_raven_repository:
         warnings.append("Created tests without setting an Xray repository path because no repository path field was detected")
 
     response = XrayTestSuitePublishResponse(

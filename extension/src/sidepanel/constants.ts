@@ -19,6 +19,12 @@ export const LIMITS = {
   MAX_DEBUG_LOGS: 200,
 };
 
+export const BULK = {
+  FEATURE_FLAG_KEY: 'bugmind_bulk_mode',
+  REQUEST_DELAY_MS: 1200,
+  RATE_LIMIT_RETRY_MS: 10000,
+};
+
 export const DOMAINS = {
   JIRA_CLOUD: '.atlassian.net',
   BROWSE_PATH: '/browse/',

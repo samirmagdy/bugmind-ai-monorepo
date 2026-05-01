@@ -80,6 +80,38 @@ class JiraUserSearchRequest(BaseModel):
     field_id: Optional[str] = None
 
 
+class JiraBulkFetchRequest(BaseModel):
+    epic_key: str
+    max_results: int = 100
+
+
+class JiraAttachmentResponse(BaseModel):
+    id: str
+    filename: str
+    mime_type: Optional[str] = None
+    size: Optional[int] = None
+    issue_key: Optional[str] = None
+
+
+class JiraBulkIssueResponse(BaseModel):
+    id: str
+    key: str
+    summary: str = ""
+    description: Any = None
+    issue_type: Optional[str] = None
+    status: Optional[str] = None
+    risk_score: int = 0
+    risk_reasons: List[str] = []
+    attachments: List[JiraAttachmentResponse] = []
+
+
+class JiraBulkFetchResponse(BaseModel):
+    epic_key: str
+    jql: str
+    issues: List[JiraBulkIssueResponse] = []
+    epic_attachments: List[JiraAttachmentResponse] = []
+
+
 class JiraProjectResponse(BaseModel):
     id: str
     key: str

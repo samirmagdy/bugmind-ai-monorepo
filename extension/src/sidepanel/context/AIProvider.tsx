@@ -1,5 +1,5 @@
-import React, { useState, useRef, useMemo, useCallback } from 'react';
-import { TabSession, BugReport, Usage, INITIAL_SESSION, TestCase, MissingField, IssueContextPayload, SupportingArtifact, ManualBugInput, GapAnalysisSummary } from '../types';
+import React, { useState, useRef, useMemo, useCallback, useEffect } from 'react';
+import { TabSession, BugReport, Usage, INITIAL_SESSION, TestCase, MissingField, IssueContextPayload, SupportingArtifact, ManualBugInput, GapAnalysisSummary, BulkFetchResult, BulkProgressPayload, BulkStory } from '../types';
 import { ApiError, apiRequest, getErrorMessage, readJsonResponse, throwApiErrorResponse } from '../services/api';
 import {
   AIGenerationRequestPayload,
@@ -17,6 +17,7 @@ import {
   XrayPublishRequestPayload,
   XrayPublishResponsePayload,
   GeneratedFindingResponsePayload,
+  BulkWorkerResponsePayload,
   buildIssueContextPayload,
   buildProjectRequestParams,
 } from '../services/contracts';
@@ -141,6 +142,52 @@ export const AIProvider: React.FC<{
   const isFetching = (key: string) => activeFetches.current.has(key);
   const startFetch = (key: string) => activeFetches.current.add(key);
   const clearFetch = (key: string) => activeFetches.current.delete(key);
+
+  const sendBulkWorkerMessage = useCallback(<T,>(action: string, payload: Record<string, unknown>): Promise<T> => {
+    return new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage(
+        {
+          action,
+          tabId: currentTabId || undefined,
+          payload: {
+            ...payload,
+            apiBase,
+            authToken: authToken || undefined,
+          }
+        },
+        (response: BulkWorkerResponsePayload<T> | undefined) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+            return;
+          }
+          if (!response) {
+            reject(new Error('Bulk worker did not return a response.'));
+            return;
+          }
+          if (!response.ok) {
+            reject(new Error(response.error));
+            return;
+          }
+          resolve(response.result);
+        }
+      );
+    });
+  }, [apiBase, authToken, currentTabId]);
+
+  useEffect(() => {
+    const handler = (message: { action?: string; tabId?: number; payload?: BulkProgressPayload }) => {
+      if (!message?.action || !message.payload) return;
+      if (!['bulkFetchProgress', 'bulkGenerationProgress', 'bulkAnalysisProgress', 'brdComparisonProgress'].includes(message.action)) return;
+      if (message.tabId && currentTabId && message.tabId !== currentTabId) return;
+      updateSession({
+        bulkProgressMessage: message.payload.message,
+        bulkProgressPercent: message.payload.percent,
+      }, currentTabId || undefined);
+    };
+
+    chrome.runtime.onMessage.addListener(handler);
+    return () => chrome.runtime.onMessage.removeListener(handler);
+  }, [currentTabId, updateSession]);
 
   const sanitizeExtraFields = useCallback((fields: BugReport['extra_fields']) => {
     if (!fields) return {};
@@ -986,6 +1033,204 @@ export const AIProvider: React.FC<{
     }
   }, [apiBase, authToken, getProjectRequestParams, refreshAuthToken, handleUpdateBug, session.bugs, session.jiraConnectionId, session.selectedIssueType]);
 
+  const getSelectedBulkStories = useCallback((): BulkStory[] => {
+    const selectedKeys = new Set(session.bulkSelectedStoryKeys || []);
+    return (session.bulkStories || []).filter((story) => selectedKeys.has(story.key));
+  }, [session.bulkSelectedStoryKeys, session.bulkStories]);
+
+  const bulkFetchEpic = useCallback(async () => {
+    if (!session.jiraConnectionId || !session.bulkEpicKey.trim()) {
+      updateSession({ error: 'Enter an Epic key before fetching bulk stories.' });
+      return;
+    }
+
+    updateSession({
+      loading: true,
+      error: null,
+      success: null,
+      bulkProgressMessage: `Fetching stories for ${session.bulkEpicKey.trim().toUpperCase()}...`,
+      bulkProgressPercent: 5,
+    });
+
+    try {
+      const result = await sendBulkWorkerMessage<BulkFetchResult>('BULK_FETCH', {
+        jiraConnectionId: session.jiraConnectionId,
+        epicKey: session.bulkEpicKey.trim().toUpperCase(),
+        maxResults: 100,
+      });
+      updateSession({
+        bulkEpicKey: result.epic_key,
+        bulkStories: result.issues || [],
+        bulkSelectedStoryKeys: (result.issues || []).map((story) => story.key),
+        bulkEpicAttachments: result.epic_attachments || [],
+        bulkProgressMessage: `Fetched ${(result.issues || []).length} stories from ${result.epic_key}.`,
+        bulkProgressPercent: 100,
+        success: `Fetched ${(result.issues || []).length} stories from ${result.epic_key}.`,
+      });
+    } catch (err) {
+      updateSession({ error: getErrorMessage(err) });
+    } finally {
+      updateSession({ loading: false });
+    }
+  }, [sendBulkWorkerMessage, session.bulkEpicKey, session.jiraConnectionId, updateSession]);
+
+  const bulkGenerateTests = useCallback(async () => {
+    const stories = getSelectedBulkStories();
+    if (!session.jiraConnectionId || !session.selectedIssueType?.id || stories.length === 0) {
+      updateSession({ error: 'Select stories and an issue type before bulk test generation.' });
+      return;
+    }
+
+    updateSession({ loading: true, error: null, success: null, bulkProgressMessage: 'Starting bulk test generation...', bulkProgressPercent: 0 });
+    try {
+      const { projectKey, projectId } = getProjectRequestParams();
+      const result = await sendBulkWorkerMessage<{ results?: Array<{ storyKey?: string; ok?: boolean; result?: AITestCasesResponsePayload; error?: string }> }>('BULK_GENERATE', {
+        jiraConnectionId: session.jiraConnectionId,
+        stories,
+        issueTypeId: session.selectedIssueType.id,
+        issueTypeName: session.selectedIssueType.name,
+        instanceUrl: session.instanceUrl,
+        projectKey,
+        projectId,
+        supportingContext: session.generationSupportingContext,
+      });
+
+      const testCases = (result.results || []).flatMap((item) => {
+        const storyKey = item.storyKey || 'Story';
+        return (item.result?.test_cases || []).map((testCase) => ({
+          ...normalizeFrontendTestCase(testCase),
+          title: `[${storyKey}] ${testCase.title || 'Untitled test case'}`
+        }));
+      });
+      const failures = (result.results || []).filter((item) => !item.ok);
+      updateSession({
+        testCases,
+        bugs: [],
+        mainWorkflow: testCases.length ? 'tests' : 'bulk',
+        coverageScore: null,
+        bulkProgressMessage: `Generated ${testCases.length} test cases across ${stories.length} stories.`,
+        bulkProgressPercent: 100,
+        success: failures.length ? `Generated ${testCases.length} test cases. ${failures.length} stories failed.` : `Generated ${testCases.length} test cases.`,
+      });
+      fetchUsage();
+    } catch (err) {
+      updateSession({ error: getErrorMessage(err) });
+    } finally {
+      updateSession({ loading: false });
+    }
+  }, [fetchUsage, getProjectRequestParams, getSelectedBulkStories, normalizeFrontendTestCase, sendBulkWorkerMessage, session.generationSupportingContext, session.instanceUrl, session.jiraConnectionId, session.selectedIssueType, updateSession]);
+
+  const bulkAnalyzeStories = useCallback(async () => {
+    const stories = getSelectedBulkStories();
+    if (!session.jiraConnectionId || !session.selectedIssueType?.id || stories.length === 0) {
+      updateSession({ error: 'Select stories and an issue type before bulk analysis.' });
+      return;
+    }
+
+    updateSession({ loading: true, error: null, success: null, bulkProgressMessage: 'Starting cross-story audit...', bulkProgressPercent: 0 });
+    try {
+      const { projectKey, projectId } = getProjectRequestParams();
+      const result = await sendBulkWorkerMessage<GapAnalysisResponsePayload>('BULK_ANALYZE', {
+        jiraConnectionId: session.jiraConnectionId,
+        stories,
+        issueTypeId: session.selectedIssueType.id,
+        issueTypeName: session.selectedIssueType.name,
+        instanceUrl: session.instanceUrl,
+        projectKey,
+        projectId,
+      });
+      const bugs = (result.bugs || []).map(toFrontendBug);
+      updateSession({
+        bugs,
+        testCases: [],
+        mainWorkflow: bugs.length ? 'analysis' : 'bulk',
+        coverageScore: typeof result.ac_coverage === 'number' ? result.ac_coverage : null,
+        gapAnalysisSummary: normalizeGapAnalysisSummary(result.analysis_summary),
+        bulkProgressMessage: `Cross-story audit produced ${bugs.length} findings.`,
+        bulkProgressPercent: 100,
+        success: result.warnings?.length ? result.warnings.join(' ') : `Cross-story audit produced ${bugs.length} findings.`,
+      });
+      fetchUsage();
+    } catch (err) {
+      updateSession({ error: getErrorMessage(err) });
+    } finally {
+      updateSession({ loading: false });
+    }
+  }, [fetchUsage, getProjectRequestParams, getSelectedBulkStories, normalizeGapAnalysisSummary, sendBulkWorkerMessage, session.instanceUrl, session.jiraConnectionId, session.selectedIssueType, toFrontendBug, updateSession]);
+
+  const bulkCompareBrd = useCallback(async () => {
+    const stories = getSelectedBulkStories();
+    if (!session.jiraConnectionId || !session.selectedIssueType?.id || stories.length === 0 || !session.bulkBrdText.trim()) {
+      updateSession({ error: 'Add BRD text and select stories before comparing.' });
+      return;
+    }
+
+    updateSession({ loading: true, error: null, success: null, bulkProgressMessage: 'Starting BRD comparison...', bulkProgressPercent: 0 });
+    try {
+      const { projectKey, projectId } = getProjectRequestParams();
+      const result = await sendBulkWorkerMessage<GapAnalysisResponsePayload>('PROCESS_GOAL', {
+        goalId: 'brd-compare',
+        jiraConnectionId: session.jiraConnectionId,
+        stories,
+        brdText: session.bulkBrdText,
+        issueTypeId: session.selectedIssueType.id,
+        issueTypeName: session.selectedIssueType.name,
+        instanceUrl: session.instanceUrl,
+        projectKey,
+        projectId,
+      });
+      const bugs = (result.bugs || []).map(toFrontendBug);
+      updateSession({
+        bugs,
+        testCases: [],
+        mainWorkflow: bugs.length ? 'analysis' : 'bulk',
+        coverageScore: typeof result.ac_coverage === 'number' ? result.ac_coverage : null,
+        gapAnalysisSummary: normalizeGapAnalysisSummary(result.analysis_summary),
+        bulkProgressMessage: `BRD comparison produced ${bugs.length} findings.`,
+        bulkProgressPercent: 100,
+        success: result.warnings?.length ? result.warnings.join(' ') : `BRD comparison produced ${bugs.length} findings.`,
+      });
+      fetchUsage();
+    } catch (err) {
+      updateSession({ error: getErrorMessage(err) });
+    } finally {
+      updateSession({ loading: false });
+    }
+  }, [fetchUsage, getProjectRequestParams, getSelectedBulkStories, normalizeGapAnalysisSummary, sendBulkWorkerMessage, session.bulkBrdText, session.instanceUrl, session.jiraConnectionId, session.selectedIssueType, toFrontendBug, updateSession]);
+
+  const bulkLoadAttachmentAsBrd = useCallback(async (attachmentId: string) => {
+    if (!session.jiraConnectionId || !attachmentId) return;
+
+    updateSession({ loading: true, error: null, success: null, bulkProgressMessage: 'Fetching Epic attachment...', bulkProgressPercent: 20 });
+    try {
+      const result = await sendBulkWorkerMessage<{
+        attachmentId: string;
+        contentType: string;
+        filename: string;
+        bytes: number[];
+      }>('FETCH_ATTACHMENT', {
+        jiraConnectionId: session.jiraConnectionId,
+        attachmentId,
+      });
+
+      const bytes = new Uint8Array(result.bytes || []);
+      const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes).trim();
+      if (!text) {
+        throw new Error('The selected attachment did not contain readable text.');
+      }
+      updateSession({
+        bulkBrdText: text,
+        bulkProgressMessage: 'Attachment loaded into BRD compare.',
+        bulkProgressPercent: 100,
+        success: 'Attachment loaded into BRD compare.',
+      });
+    } catch (err) {
+      updateSession({ error: getErrorMessage(err) });
+    } finally {
+      updateSession({ loading: false });
+    }
+  }, [sendBulkWorkerMessage, session.jiraConnectionId, updateSession]);
+
   const value = useMemo(() => ({
     usage, fetchUsage,
     customModel, setCustomModel,
@@ -1002,9 +1247,14 @@ export const AIProvider: React.FC<{
     handleUpdateBug,
     handleUpdateTestCase,
     publishTestCasesToXray,
+    bulkFetchEpic,
+    bulkGenerateTests,
+    bulkAnalyzeStories,
+    bulkCompareBrd,
+    bulkLoadAttachmentAsBrd,
     validateBug,
     preparePreviewBug
-  }), [usage, fetchUsage, customModel, customKey, hasCustomKeySaved, clearCustomKeyRequested, fetchAISettings, generateBugs, generateTestCases, handleManualGenerate, submitBugs, regenerateBug, searchUsers, handleUpdateBug, handleUpdateTestCase, publishTestCasesToXray, validateBug, preparePreviewBug]);
+  }), [usage, fetchUsage, customModel, customKey, hasCustomKeySaved, clearCustomKeyRequested, fetchAISettings, generateBugs, generateTestCases, handleManualGenerate, submitBugs, regenerateBug, searchUsers, handleUpdateBug, handleUpdateTestCase, publishTestCasesToXray, bulkFetchEpic, bulkGenerateTests, bulkAnalyzeStories, bulkCompareBrd, bulkLoadAttachmentAsBrd, validateBug, preparePreviewBug]);
 
   return <AIContext.Provider value={value}>{children}</AIContext.Provider>;
 };

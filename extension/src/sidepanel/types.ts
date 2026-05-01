@@ -185,6 +185,13 @@ export interface TabSession {
   xrayPublishSupported: boolean;
   xrayPublishMode: 'jira_server' | 'xray_cloud';
   xrayUnsupportedReason: string | null;
+  bulkEpicKey: string;
+  bulkStories: BulkStory[];
+  bulkSelectedStoryKeys: string[];
+  bulkEpicAttachments: BulkAttachment[];
+  bulkProgressMessage: string;
+  bulkProgressPercent: number;
+  bulkBrdText: string;
   previewBugIndex: number | null;
   validationErrors: string[];
   resolvedPayload: ResolvedPayload | null;
@@ -260,8 +267,40 @@ export interface IssueData {
   iconUrl?: string;
 }
 
+export interface BulkAttachment {
+  id: string;
+  filename: string;
+  mime_type?: string | null;
+  size?: number | null;
+  issue_key?: string | null;
+}
+
+export interface BulkStory {
+  id: string;
+  key: string;
+  summary: string;
+  description?: unknown;
+  issue_type?: string | null;
+  status?: string | null;
+  risk_score: number;
+  risk_reasons: string[];
+  attachments: BulkAttachment[];
+}
+
+export interface BulkFetchResult {
+  epic_key: string;
+  jql: string;
+  issues: BulkStory[];
+  epic_attachments: BulkAttachment[];
+}
+
+export interface BulkProgressPayload {
+  message: string;
+  percent: number;
+}
+
 export type View = 'auth' | 'setup' | 'main' | 'success' | 'settings' | 'preview';
-export type MainWorkflow = 'home' | 'manual' | 'analysis' | 'tests';
+export type MainWorkflow = 'home' | 'manual' | 'analysis' | 'tests' | 'bulk';
 
 export const INITIAL_SESSION: TabSession = {
   view: 'main',
@@ -310,6 +349,13 @@ export const INITIAL_SESSION: TabSession = {
   xrayPublishSupported: true,
   xrayPublishMode: 'jira_server',
   xrayUnsupportedReason: null,
+  bulkEpicKey: '',
+  bulkStories: [],
+  bulkSelectedStoryKeys: [],
+  bulkEpicAttachments: [],
+  bulkProgressMessage: '',
+  bulkProgressPercent: 0,
+  bulkBrdText: '',
   previewBugIndex: null,
   validationErrors: [],
   resolvedPayload: null

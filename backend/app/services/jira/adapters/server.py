@@ -2,7 +2,7 @@ import httpx
 import base64
 import logging
 import time
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from fastapi import HTTPException
 from app.services.jira.adapters.base import JiraAdapter
 
@@ -176,6 +176,68 @@ class JiraServerAdapter(JiraAdapter):
 
         return []
 
+    def get_current_user(self) -> Dict[str, Any]:
+        response = self._request("GET", "/rest/api/2/myself")
+        if response.status_code != 200:
+            raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to fetch Jira user identity"))
+        return response.json()
+
+    def fetch_issue(self, issue_key: str) -> Dict[str, Any]:
+        response = self._request("GET", f"/rest/api/2/issue/{issue_key}")
+        if response.status_code != 200:
+            raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to fetch Jira issue"))
+        return response.json()
+
+    def search_issues(
+        self,
+        jql: str,
+        fields: Optional[List[str]] = None,
+        max_results: int = 100,
+    ) -> List[Dict[str, Any]]:
+        collected: List[Dict[str, Any]] = []
+        start_at = 0
+        page_size = min(max_results, 100)
+        requested_fields = fields or ["summary", "description", "issuetype", "status", "attachment", "parent"]
+
+        while len(collected) < max_results:
+            payload = {
+                "jql": jql,
+                "fields": requested_fields,
+                "startAt": start_at,
+                "maxResults": min(page_size, max_results - len(collected)),
+            }
+            response = self._request("POST", "/rest/api/2/search", json=payload)
+            if response.status_code != 200:
+                raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to search Jira issues"))
+
+            data = response.json()
+            issues = data.get("issues", [])
+            if not isinstance(issues, list) or not issues:
+                break
+            collected.extend(issues)
+            start_at += len(issues)
+            total = int(data.get("total") or 0)
+            if start_at >= total:
+                break
+
+        return collected
+
+    def fetch_attachment(self, attachment_id: str) -> Tuple[bytes, str, str]:
+        metadata_response = self._request("GET", f"/rest/api/2/attachment/{attachment_id}")
+        if metadata_response.status_code != 200:
+            raise HTTPException(status_code=400, detail=self._extract_error_message(metadata_response, "Failed to fetch Jira attachment metadata"))
+
+        metadata = metadata_response.json()
+        filename = str(metadata.get("filename") or f"attachment-{attachment_id}")
+        content_type = str(metadata.get("mimeType") or "application/octet-stream")
+        content_url = metadata.get("content") or f"/rest/api/2/attachment/content/{attachment_id}"
+        content_response = self._request("GET", str(content_url))
+        if content_response.status_code in (302, 303) and content_response.headers.get("Location"):
+            content_response = self._request("GET", content_response.headers["Location"])
+        if content_response.status_code != 200:
+            raise HTTPException(status_code=400, detail=self._extract_error_message(content_response, "Failed to fetch Jira attachment content"))
+        return content_response.content, content_type, filename
+
     def get_projects(self) -> List[Dict[str, Any]]:
         response = self._request("GET", "/rest/api/2/project")
         if response.status_code != 200:
@@ -263,6 +325,63 @@ class JiraServerAdapter(JiraAdapter):
         response = self._request("POST", "/rest/api/2/issueLink", json=payload, retry_on_transient=False)
         if response.status_code not in [200, 201]:
             raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to link Jira issues"))
+
+    def add_xray_step(
+        self,
+        issue_key: str,
+        step: str,
+        data: Optional[str] = None,
+        result: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        payload = {"step": step}
+        if data:
+            payload["data"] = data
+        if result:
+            payload["result"] = result
+
+        response = self._request(
+            "PUT",
+            f"/rest/raven/1.0/api/test/{issue_key}/step",
+            json=payload,
+            retry_on_transient=False,
+        )
+        if response.status_code not in [200, 201]:
+            raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to add Xray test step"))
+        return response.json()
+
+    def create_xray_folder(self, project_key: str, parent_id: str, name: str) -> Dict[str, Any]:
+        response = self._request(
+            "POST",
+            f"/rest/raven/1.0/api/testrepository/{project_key}/folders/{parent_id}",
+            json={"name": name},
+            retry_on_transient=False,
+        )
+        if response.status_code not in [200, 201]:
+            raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to create Xray repository folder"))
+        return response.json()
+
+    def get_xray_folders(self, project_key: str) -> List[Dict[str, Any]]:
+        response = self._request("GET", f"/rest/raven/1.0/api/testrepository/{project_key}/folders")
+        if response.status_code != 200:
+            raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to fetch Xray repository folders"))
+        payload = response.json()
+        if isinstance(payload, list):
+            return payload
+        if isinstance(payload, dict):
+            folders = payload.get("folders") or payload.get("values") or payload.get("children")
+            if isinstance(folders, list):
+                return folders
+        return []
+
+    def add_test_to_folder(self, project_key: str, folder_id: str, issue_key: str) -> None:
+        response = self._request(
+            "PUT",
+            f"/rest/raven/1.0/api/testrepository/{project_key}/folders/{folder_id}/tests",
+            json={"add": [issue_key], "remove": []},
+            retry_on_transient=False,
+        )
+        if response.status_code not in [200, 201, 204]:
+            raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to assign Xray test to repository folder"))
 
     def search_users(
         self,

@@ -8,11 +8,17 @@ import { AuthContext } from './auth-context';
 const DEFAULT_API_BASE = 'https://bugmind-ai-monorepo.onrender.com/api/v1';
 
 function normalizeApiBase(url: string): string {
-  const trimmed = url.trim().replace(/\/+$/, '');
+  let trimmed = url.trim().replace(/\/+$/, '');
   if (!trimmed) return DEFAULT_API_BASE;
+
+  trimmed = trimmed.replace(/\/(auth|jira|ai|settings|stripe)(?:\/.*)?$/i, '');
 
   if (trimmed.endsWith('/api')) {
     return `${trimmed}/v1`;
+  }
+
+  if (!trimmed.endsWith('/api/v1')) {
+    trimmed = trimmed.replace(/\/api\/v1\/.*$/i, '/api/v1');
   }
 
   return trimmed;

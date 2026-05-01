@@ -22,6 +22,11 @@ export interface AIContextType {
   handleUpdateBug: (index: number, updates: Partial<BugReport>) => void;
   handleUpdateTestCase: (index: number, updates: Partial<TestCase>) => void;
   publishTestCasesToXray: () => Promise<void>;
+  bulkFetchEpic: () => Promise<void>;
+  bulkGenerateTests: () => Promise<void>;
+  bulkAnalyzeStories: () => Promise<void>;
+  bulkCompareBrd: () => Promise<void>;
+  bulkLoadAttachmentAsBrd: (attachmentId: string) => Promise<void>;
   validateBug: (index: number) => Promise<boolean>;
   preparePreviewBug: (index: number) => void;
 }

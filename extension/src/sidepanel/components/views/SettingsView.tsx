@@ -63,6 +63,16 @@ function isConnectionAuthType(value: unknown): value is 'cloud' | 'server' {
   return value === 'cloud' || value === 'server';
 }
 
+function normalizeApiBaseInput(value: string): string {
+  let trimmed = value.trim().replace(/\/+$/, '');
+  trimmed = trimmed.replace(/\/(auth|jira|ai|settings|stripe)(?:\/.*)?$/i, '');
+  if (trimmed.endsWith('/api')) return `${trimmed}/v1`;
+  if (!trimmed.endsWith('/api/v1')) {
+    trimmed = trimmed.replace(/\/api\/v1\/.*$/i, '/api/v1');
+  }
+  return trimmed;
+}
+
 const FieldRow: React.FC<{
   field: JiraField;
   savedDefault: SavedFieldValue;
@@ -643,8 +653,9 @@ const SettingsView: React.FC = () => {
                 value={apiBase} 
                 onChange={e => setApiBase(e.target.value)}
                 onBlur={e => {
-                  const val = e.target.value;
-                  chrome.storage.local.set({ 'bugmind_api_base': val.trim().replace(/\/+$/, '') });
+                  const val = normalizeApiBaseInput(e.target.value);
+                  setApiBase(val);
+                  chrome.storage.local.set({ 'bugmind_api_base': val });
                 }}
                 className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-2xl px-4 py-3 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)] focus:ring-4 focus:ring-[var(--primary-blue)]/10 transition-all"
                 placeholder="https://api.bugmind.ai/api/v1"

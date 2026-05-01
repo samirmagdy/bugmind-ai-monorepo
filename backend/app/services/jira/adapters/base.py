@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 
 class JiraAdapter(ABC):
     def __init__(self, host_url: str, username: str, token: str, verify_ssl: bool = True):
@@ -8,6 +8,31 @@ class JiraAdapter(ABC):
         self.token = token
         self.verify_ssl = verify_ssl
         
+    @abstractmethod
+    def get_current_user(self) -> Dict[str, Any]:
+        """Returns the authenticated Jira user's identity."""
+        pass
+
+    @abstractmethod
+    def fetch_issue(self, issue_key: str) -> Dict[str, Any]:
+        """Returns full Jira issue details for a given issue key."""
+        pass
+
+    @abstractmethod
+    def search_issues(
+        self,
+        jql: str,
+        fields: Optional[List[str]] = None,
+        max_results: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """Returns Jira issues matching a JQL query."""
+        pass
+
+    @abstractmethod
+    def fetch_attachment(self, attachment_id: str) -> Tuple[bytes, str, str]:
+        """Returns attachment bytes, content type, and filename."""
+        pass
+
     @abstractmethod
     def get_projects(self) -> List[Dict[str, Any]]:
         pass
@@ -59,4 +84,25 @@ class JiraAdapter(ABC):
     @abstractmethod
     def get_sprint_options(self, project_id: str) -> List[Dict[str, Any]]:
         """Returns selectable sprint options for a project."""
+        pass
+
+    @abstractmethod
+    def add_xray_step(
+        self,
+        issue_key: str,
+        step: str,
+        data: Optional[str] = None,
+        result: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Adds a manual Xray test step to a Test issue."""
+        pass
+
+    @abstractmethod
+    def create_xray_folder(self, project_key: str, parent_id: str, name: str) -> Dict[str, Any]:
+        """Creates an Xray Test Repository folder."""
+        pass
+
+    @abstractmethod
+    def add_test_to_folder(self, project_key: str, folder_id: str, issue_key: str) -> None:
+        """Adds or moves a Test issue into an Xray Test Repository folder."""
         pass

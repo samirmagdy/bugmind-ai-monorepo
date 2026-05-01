@@ -273,6 +273,70 @@ class JiraCloudAdapter(JiraAdapter):
             raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to fetch Jira projects"))
         return response.json()
 
+    def get_current_user(self) -> Dict[str, Any]:
+        response = self._request_candidates("GET", ["/rest/api/3/myself"])
+        if response.status_code != 200:
+            raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to fetch Jira user identity"))
+        return response.json()
+
+    def fetch_issue(self, issue_key: str) -> Dict[str, Any]:
+        response = self._request_candidates("GET", [f"/rest/api/3/issue/{issue_key}"])
+        if response.status_code != 200:
+            raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to fetch Jira issue"))
+        return response.json()
+
+    def search_issues(
+        self,
+        jql: str,
+        fields: Optional[List[str]] = None,
+        max_results: int = 100,
+    ) -> List[Dict[str, Any]]:
+        collected: List[Dict[str, Any]] = []
+        start_at = 0
+        page_size = min(max_results, 100)
+        requested_fields = fields or ["summary", "description", "issuetype", "status", "attachment", "parent"]
+
+        while len(collected) < max_results:
+            payload = {
+                "jql": jql,
+                "fields": requested_fields,
+                "startAt": start_at,
+                "maxResults": min(page_size, max_results - len(collected)),
+            }
+            response = self._request("POST", "/rest/api/3/search", json=payload)
+            if response.status_code in (404, 405):
+                response = self._request("POST", "/rest/api/2/search", json=payload)
+            if response.status_code != 200:
+                raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to search Jira issues"))
+
+            data = response.json()
+            issues = data.get("issues", [])
+            if not isinstance(issues, list) or not issues:
+                break
+            collected.extend(issues)
+            start_at += len(issues)
+            total = int(data.get("total") or 0)
+            if start_at >= total:
+                break
+
+        return collected
+
+    def fetch_attachment(self, attachment_id: str) -> Tuple[bytes, str, str]:
+        metadata_response = self._request_candidates("GET", [f"/rest/api/3/attachment/{attachment_id}"])
+        if metadata_response.status_code != 200:
+            raise HTTPException(status_code=400, detail=self._extract_error_message(metadata_response, "Failed to fetch Jira attachment metadata"))
+
+        metadata = metadata_response.json()
+        filename = str(metadata.get("filename") or f"attachment-{attachment_id}")
+        content_type = str(metadata.get("mimeType") or "application/octet-stream")
+        content_url = metadata.get("content") or f"/rest/api/3/attachment/content/{attachment_id}"
+        content_response = self._request("GET", str(content_url))
+        if content_response.status_code in (302, 303) and content_response.headers.get("Location"):
+            content_response = self._request("GET", content_response.headers["Location"])
+        if content_response.status_code != 200:
+            raise HTTPException(status_code=400, detail=self._extract_error_message(content_response, "Failed to fetch Jira attachment content"))
+        return content_response.content, content_type, filename
+
     def _resolve_project_ref(self, project_ref: str) -> Optional[str]:
         normalized_ref = str(project_ref).strip()
         if not normalized_ref:
@@ -631,3 +695,27 @@ class JiraCloudAdapter(JiraAdapter):
                 })
 
         return sprint_options
+
+    def add_xray_step(
+        self,
+        issue_key: str,
+        step: str,
+        data: Optional[str] = None,
+        result: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        raise HTTPException(
+            status_code=501,
+            detail="Xray Server/DC manual step API is not available for Jira Cloud connections",
+        )
+
+    def create_xray_folder(self, project_key: str, parent_id: str, name: str) -> Dict[str, Any]:
+        raise HTTPException(
+            status_code=501,
+            detail="Xray Server/DC repository folder API is not available for Jira Cloud connections",
+        )
+
+    def add_test_to_folder(self, project_key: str, folder_id: str, issue_key: str) -> None:
+        raise HTTPException(
+            status_code=501,
+            detail="Xray Server/DC repository folder API is not available for Jira Cloud connections",
+        )

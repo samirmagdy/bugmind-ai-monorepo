@@ -4,8 +4,14 @@
  * Handles tab orchestration, context discovery, and sidepanel sync.
  */
 
+import { deobfuscate } from '../sidepanel/utils/StorageObfuscator';
+
 // Deployment Metadata
 const VERSION = '1.2.0';
+const DEFAULT_API_BASE = 'https://bugmind-ai-monorepo.onrender.com/api/v1';
+const BULK_MODE_DEFAULT = true;
+const BULK_REQUEST_DELAY_MS = 1200;
+const BULK_RATE_LIMIT_COOLDOWN_MS = 10000;
 const DOMAINS = {
   JIRA_CLOUD: '.atlassian.net',
   BROWSE_PATH: '/browse/',
@@ -44,6 +50,21 @@ interface JiraContextChangedMessage {
   url?: string;
 }
 
+interface BulkStory {
+  key: string;
+  summary?: string;
+  description?: string | Record<string, unknown> | null;
+  acceptanceCriteria?: string;
+  risk_score?: number;
+  risk_reasons?: string[];
+}
+
+interface BulkMessage {
+  action: 'BULK_FETCH' | 'BULK_GENERATE' | 'BULK_ANALYZE' | 'PROCESS_GOAL' | 'FETCH_ATTACHMENT';
+  tabId?: number;
+  payload?: Record<string, unknown>;
+}
+
 function normalizeJiraUrl(url: string | null | undefined): string {
   if (!url) return '';
 
@@ -58,6 +79,304 @@ function normalizeJiraUrl(url: string | null | undefined): string {
     return `${parsed.origin}${basePath}`.replace(/\/+$/, '');
   } catch {
     return trimmed;
+  }
+}
+
+function normalizeApiBase(url: string | null | undefined): string {
+  let trimmed = (url || '').trim().replace(/\/+$/, '');
+  if (!trimmed) return DEFAULT_API_BASE;
+  trimmed = trimmed.replace(/\/(auth|jira|ai|settings|stripe)(?:\/.*)?$/i, '');
+  if (trimmed.endsWith('/api')) return `${trimmed}/v1`;
+  if (!trimmed.endsWith('/api/v1')) {
+    trimmed = trimmed.replace(/\/api\/v1\/.*$/i, '/api/v1');
+  }
+  return trimmed.endsWith('/api') ? `${trimmed}/v1` : trimmed;
+}
+
+function containsControlCharacters(value: string): boolean {
+  return Array.from(value).some((char) => char.charCodeAt(0) <= 31);
+}
+
+function decodeStoredToken(encoded: string | undefined): string {
+  if (!encoded) return '';
+  const decoded = deobfuscate(encoded);
+  if (decoded && decoded.split('.').length === 3 && !containsControlCharacters(decoded)) {
+    return decoded;
+  }
+  try {
+    const legacy = atob(encoded);
+    if (legacy && legacy.split('.').length === 3 && !containsControlCharacters(legacy)) {
+      return legacy;
+    }
+  } catch {
+    // Ignore legacy decode failure.
+  }
+  return decoded;
+}
+
+function storageLocalGet<T extends Record<string, unknown>>(keys: string[]): Promise<T> {
+  return new Promise((resolve) => chrome.storage.local.get(keys, (value) => resolve(value as T)));
+}
+
+function storageSessionGet<T extends Record<string, unknown>>(keys: string[]): Promise<T> {
+  return new Promise((resolve) => chrome.storage.session.get(keys, (value) => resolve(value as T)));
+}
+
+async function getWorkerAuthContext(payload?: Record<string, unknown>): Promise<{ apiBase: string; token: string }> {
+  const local = await storageLocalGet<Record<string, unknown>>(['bugmind_api_base', 'bugmind_token']);
+  const session = await storageSessionGet<Record<string, unknown>>(['bugmind_token']);
+  const explicitToken = typeof payload?.authToken === 'string' ? payload.authToken : '';
+  const token = explicitToken || decodeStoredToken((session.bugmind_token || local.bugmind_token) as string | undefined);
+  const apiBase = normalizeApiBase(typeof payload?.apiBase === 'string' ? payload.apiBase : local.bugmind_api_base as string | undefined);
+
+  if (!token) throw new Error('Bulk action requires an authenticated BugMind session.');
+  return { apiBase, token };
+}
+
+async function isBulkModeEnabled(): Promise<boolean> {
+  const local = await storageLocalGet<{ bugmind_bulk_mode?: boolean }>(['bugmind_bulk_mode']);
+  return local.bugmind_bulk_mode ?? BULK_MODE_DEFAULT;
+}
+
+async function backendFetch<T>(path: string, options: RequestInit, payload?: Record<string, unknown>): Promise<T> {
+  const { apiBase, token } = await getWorkerAuthContext(payload);
+  const url = `${apiBase}${path}`;
+  const headers: Record<string, string> = {
+    ...(options.headers as Record<string, string> | undefined),
+    Authorization: `Bearer ${token}`,
+  };
+  if (options.body && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json';
+  }
+
+  const response = await fetch(url, { ...options, headers });
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    const retryable = response.status === 429;
+    let message = body || `Request failed with status ${response.status}`;
+    if (response.status === 404 && path.includes('/bulk/epic')) {
+      message = `Bulk API endpoint was not found at ${url}. Confirm the backend is deployed with the latest bulk Jira routes. Response: ${body || 'Not Found'}`;
+    } else {
+      message = `Request failed at ${url} with status ${response.status}: ${message}`;
+    }
+    const error = new Error(message) as Error & { status?: number; retryable?: boolean };
+    error.status = response.status;
+    error.retryable = retryable;
+    throw error;
+  }
+  return await response.json() as T;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function broadcastProgress(action: string, tabId: number | undefined, message: string, percent: number): void {
+  chrome.runtime.sendMessage({
+    action,
+    tabId,
+    payload: { message, percent: Math.max(0, Math.min(100, Math.round(percent))) }
+  }).catch(() => {});
+}
+
+function stringifyDescription(description: unknown): string {
+  if (typeof description === 'string') return description;
+  if (!description || typeof description !== 'object') return '';
+  const parts: string[] = [];
+  const walk = (node: unknown) => {
+    if (Array.isArray(node)) {
+      node.forEach(walk);
+      return;
+    }
+    if (!node || typeof node !== 'object') return;
+    const value = node as Record<string, unknown>;
+    if (typeof value.text === 'string') parts.push(value.text);
+    if (Array.isArray(value.content)) value.content.forEach(walk);
+  };
+  walk(description);
+  return parts.join(' ');
+}
+
+function buildIssueContext(story: BulkStory) {
+  return {
+    issue_key: story.key,
+    summary: story.summary || '',
+    description: stringifyDescription(story.description),
+    acceptance_criteria: story.acceptanceCriteria || '',
+  };
+}
+
+async function startBulkFetch(message: BulkMessage): Promise<unknown> {
+  if (!await isBulkModeEnabled()) throw new Error('BULK_MODE is disabled.');
+  const payload = message.payload || {};
+  const jiraConnectionId = Number(payload.jiraConnectionId);
+  const epicKey = String(payload.epicKey || '').trim();
+  if (!jiraConnectionId || !epicKey) throw new Error('BULK_FETCH requires jiraConnectionId and epicKey.');
+
+  broadcastProgress('bulkFetchProgress', message.tabId, `Fetching stories for ${epicKey}...`, 10);
+  const result = await backendFetch<unknown>(
+    `/jira/connections/${jiraConnectionId}/bulk/epic`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ epic_key: epicKey, max_results: Number(payload.maxResults || 100) })
+    },
+    payload
+  );
+  broadcastProgress('bulkFetchProgress', message.tabId, `Fetched stories for ${epicKey}.`, 100);
+  return result;
+}
+
+async function startBulkGeneration(message: BulkMessage): Promise<unknown> {
+  if (!await isBulkModeEnabled()) throw new Error('BULK_MODE is disabled.');
+  const payload = message.payload || {};
+  const stories = (Array.isArray(payload.stories) ? payload.stories : []) as BulkStory[];
+  const jiraConnectionId = Number(payload.jiraConnectionId);
+  const issueTypeId = String(payload.issueTypeId || payload.issue_type_id || '');
+  const projectKey = String(payload.projectKey || payload.project_key || '');
+  if (!jiraConnectionId || !issueTypeId || stories.length === 0) {
+    throw new Error('BULK_GENERATE requires jiraConnectionId, issueTypeId, and stories.');
+  }
+
+  const results: unknown[] = [];
+  for (let index = 0; index < stories.length; index += 1) {
+    const story = stories[index];
+    const percent = (index / stories.length) * 100;
+    broadcastProgress('bulkGenerationProgress', message.tabId, `Generating tests for ${story.key} (${index + 1}/${stories.length})...`, percent);
+
+    const body = {
+      selected_text: undefined,
+      issue_context: buildIssueContext(story),
+      jira_connection_id: jiraConnectionId,
+      instance_url: payload.instanceUrl || payload.instance_url || null,
+      project_key: projectKey || (story.key.includes('-') ? story.key.split('-')[0] : ''),
+      project_id: payload.projectId || payload.project_id || undefined,
+      issue_type_id: issueTypeId,
+      issue_type_name: payload.issueTypeName || payload.issue_type_name || 'Story',
+      supporting_context: payload.supportingContext || payload.supporting_context || '',
+    };
+
+    try {
+      const generated = await backendFetch<unknown>('/ai/test-cases', { method: 'POST', body: JSON.stringify(body) }, payload);
+      results.push({ storyKey: story.key, ok: true, result: generated });
+    } catch (error) {
+      const err = error as Error & { status?: number; retryable?: boolean };
+      if (err.status === 429 || err.retryable) {
+        broadcastProgress('bulkGenerationProgress', message.tabId, `Rate limited. Cooling down before retrying ${story.key}...`, percent);
+        await sleep(BULK_RATE_LIMIT_COOLDOWN_MS);
+        const generated = await backendFetch<unknown>('/ai/test-cases', { method: 'POST', body: JSON.stringify(body) }, payload);
+        results.push({ storyKey: story.key, ok: true, result: generated, retried: true });
+      } else {
+        results.push({ storyKey: story.key, ok: false, error: err.message });
+      }
+    }
+
+    if (index < stories.length - 1) await sleep(BULK_REQUEST_DELAY_MS);
+  }
+
+  broadcastProgress('bulkGenerationProgress', message.tabId, 'Bulk test generation complete.', 100);
+  return { results };
+}
+
+async function startBulkAnalysis(message: BulkMessage): Promise<unknown> {
+  if (!await isBulkModeEnabled()) throw new Error('BULK_MODE is disabled.');
+  const payload = message.payload || {};
+  const stories = (Array.isArray(payload.stories) ? payload.stories : []) as BulkStory[];
+  const jiraConnectionId = Number(payload.jiraConnectionId);
+  const issueTypeId = String(payload.issueTypeId || payload.issue_type_id || '');
+  const projectKey = String(payload.projectKey || payload.project_key || '');
+  if (!jiraConnectionId || !issueTypeId || stories.length === 0) {
+    throw new Error('BULK_ANALYZE requires jiraConnectionId, issueTypeId, and stories.');
+  }
+
+  broadcastProgress('bulkAnalysisProgress', message.tabId, `Analyzing ${stories.length} stories...`, 25);
+  const storyBundle = stories
+    .map((story, index) => `Story ${index + 1}: ${story.key}\nSummary: ${story.summary || ''}\nDescription: ${stringifyDescription(story.description)}`)
+    .join('\n\n');
+  const body = {
+    selected_text: `Analyze these ${stories.length} stories for contradictions, redundancies, missing requirements, and cross-story risks.\n\n${storyBundle}`,
+    issue_context: undefined,
+    jira_connection_id: jiraConnectionId,
+    instance_url: payload.instanceUrl || payload.instance_url || null,
+    project_key: projectKey || (stories[0].key.includes('-') ? stories[0].key.split('-')[0] : ''),
+    project_id: payload.projectId || payload.project_id || undefined,
+    issue_type_id: issueTypeId,
+    issue_type_name: payload.issueTypeName || payload.issue_type_name || 'Story',
+  };
+  const result = await backendFetch<unknown>('/ai/generate', { method: 'POST', body: JSON.stringify(body) }, payload);
+  broadcastProgress('bulkAnalysisProgress', message.tabId, 'Cross-story audit complete.', 100);
+  return result;
+}
+
+async function fetchAttachment(message: BulkMessage): Promise<unknown> {
+  const payload = message.payload || {};
+  const jiraConnectionId = Number(payload.jiraConnectionId);
+  const attachmentId = String(payload.attachmentId || '');
+  if (!jiraConnectionId || !attachmentId) throw new Error('FETCH_ATTACHMENT requires jiraConnectionId and attachmentId.');
+
+  const { apiBase, token } = await getWorkerAuthContext(payload);
+  const url = `${apiBase}/jira/connections/${jiraConnectionId}/attachments/${attachmentId}`;
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    throw new Error(`Attachment fetch failed at ${url} with status ${response.status}: ${body || response.statusText}`);
+  }
+  const buffer = await response.arrayBuffer();
+  const bytes = Array.from(new Uint8Array(buffer));
+  return {
+    attachmentId,
+    contentType: response.headers.get('Content-Type') || 'application/octet-stream',
+    filename: response.headers.get('Content-Disposition') || '',
+    bytes,
+  };
+}
+
+async function startBrdCompare(message: BulkMessage): Promise<unknown> {
+  if (!await isBulkModeEnabled()) throw new Error('BULK_MODE is disabled.');
+  const payload = message.payload || {};
+  if (payload.goalId !== 'brd-compare') throw new Error('Unsupported bulk goal.');
+  const stories = (Array.isArray(payload.stories) ? payload.stories : []) as BulkStory[];
+  const brdText = String(payload.brdText || '');
+  const jiraConnectionId = Number(payload.jiraConnectionId);
+  const issueTypeId = String(payload.issueTypeId || payload.issue_type_id || '');
+  const projectKey = String(payload.projectKey || payload.project_key || '');
+  if (!jiraConnectionId || !issueTypeId || !brdText || stories.length === 0) {
+    throw new Error('brd-compare requires jiraConnectionId, issueTypeId, brdText, and stories.');
+  }
+
+  broadcastProgress('brdComparisonProgress', message.tabId, 'Comparing BRD against selected stories...', 30);
+  const storyBundle = stories
+    .map((story) => `${story.key}: ${story.summary || ''}\n${stringifyDescription(story.description)}`)
+    .join('\n\n');
+  const body = {
+    selected_text: `Compare this BRD against the Jira stories. Identify missing stories, contradictions, ambiguous requirements, and uncovered acceptance criteria.\n\nBRD:\n${brdText}\n\nStories:\n${storyBundle}`,
+    jira_connection_id: jiraConnectionId,
+    instance_url: payload.instanceUrl || payload.instance_url || null,
+    project_key: projectKey || (stories[0].key.includes('-') ? stories[0].key.split('-')[0] : ''),
+    project_id: payload.projectId || payload.project_id || undefined,
+    issue_type_id: issueTypeId,
+    issue_type_name: payload.issueTypeName || payload.issue_type_name || 'Story',
+  };
+  const result = await backendFetch<unknown>('/ai/generate', { method: 'POST', body: JSON.stringify(body) }, payload);
+  broadcastProgress('brdComparisonProgress', message.tabId, 'BRD comparison complete.', 100);
+  return result;
+}
+
+async function handleBulkAction(message: BulkMessage): Promise<unknown> {
+  switch (message.action) {
+    case 'BULK_FETCH':
+      return startBulkFetch(message);
+    case 'BULK_GENERATE':
+      return startBulkGeneration(message);
+    case 'BULK_ANALYZE':
+      return startBulkAnalysis(message);
+    case 'FETCH_ATTACHMENT':
+      return fetchAttachment(message);
+    case 'PROCESS_GOAL':
+      return startBrdCompare(message);
+    default:
+      throw new Error(`Unsupported bulk action: ${(message as { action?: string }).action}`);
   }
 }
 
@@ -247,6 +566,17 @@ chrome.tabs.onActivated.addListener((activeInfo) => {
 
 // 3. Listen for Sidepanel Requests (Initial Hydration)
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.action) {
+    handleBulkAction(message as BulkMessage)
+      .then((result) => sendResponse({ ok: true, result }))
+      .catch((err: unknown) => {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        console.error('[BugMind-BG] Bulk action failed:', errorMessage);
+        sendResponse({ ok: false, error: errorMessage });
+      });
+    return true;
+  }
+
   if (message.type === 'GET_CURRENT_CONTEXT') {
     const { tabId, force } = message as GetCurrentContextMessage;
     if (tabContextCache[tabId] && !force) {

@@ -1,5 +1,8 @@
 import {
   BugReport,
+  BulkFetchResult,
+  BulkProgressPayload,
+  BulkStory,
   CreatedIssue,
   IssueContextPayload,
   IssueData,
@@ -133,6 +136,55 @@ export interface XrayPublishRequestPayload {
   link_type?: string;
 }
 
+export interface BulkFetchRequestPayload {
+  jiraConnectionId: number;
+  epicKey: string;
+  maxResults?: number;
+  apiBase?: string;
+  authToken?: string;
+}
+
+export interface BulkGenerateRequestPayload extends ProjectRequestParams {
+  jiraConnectionId: number;
+  stories: BulkStory[];
+  issueTypeId: string;
+  issueTypeName?: string;
+  instanceUrl?: string | null;
+  supportingContext?: string;
+  apiBase?: string;
+  authToken?: string;
+}
+
+export interface BulkAnalyzeRequestPayload extends ProjectRequestParams {
+  jiraConnectionId: number;
+  stories: BulkStory[];
+  issueTypeId: string;
+  issueTypeName?: string;
+  instanceUrl?: string | null;
+  apiBase?: string;
+  authToken?: string;
+}
+
+export interface BrdCompareRequestPayload extends BulkAnalyzeRequestPayload {
+  goalId: 'brd-compare';
+  brdText: string;
+}
+
+export interface FetchAttachmentRequestPayload {
+  jiraConnectionId: number;
+  attachmentId: string;
+  apiBase?: string;
+  authToken?: string;
+}
+
+export type BulkWorkerResponsePayload<T = unknown> = {
+  ok: true;
+  result: T;
+} | {
+  ok: false;
+  error: string;
+};
+
 export interface AISettingsResponsePayload {
   custom_model?: string;
   has_custom_key?: boolean;
@@ -220,6 +272,8 @@ export type JiraBootstrapResponsePayload = JiraBootstrapContext;
 export type UsageResponsePayload = Usage;
 export type XrayDefaultsResponsePayload = XrayDefaultsResponse;
 export type XrayPublishResponsePayload = XrayPublishResult;
+export type BulkFetchResponsePayload = BulkFetchResult;
+export type BulkProgressMessagePayload = BulkProgressPayload;
 
 export function buildIssueContextPayload(issueData: IssueData | null | undefined): IssueContextPayload {
   return {

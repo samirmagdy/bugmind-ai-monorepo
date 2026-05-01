@@ -4,9 +4,9 @@ import {
   Plus, ChevronDown, Bug,
   Loader2, Send, AlertCircle, Zap, RefreshCw,
   Compass, ArrowRight, Check, Layout, AlertTriangle, BrainCircuit, Paperclip, X, ClipboardList,
-  Trash2, Copy, ArrowUp, ArrowDown, Square, CheckSquare
+  Trash2, Copy, ArrowUp, ArrowDown, Square, CheckSquare, FileText
 } from 'lucide-react';
-import { BugReport, JiraField, JiraFieldOption, JiraUser, SupportingArtifact, TestCase, ManualBugInput, AnalysisCoverageItem } from '../../types';
+import { BugReport, JiraField, JiraFieldOption, JiraUser, SupportingArtifact, TestCase, ManualBugInput, AnalysisCoverageItem, MainWorkflow } from '../../types';
 import AutoResizeTextarea from '../common/AutoResizeTextarea';
 import { ActionButton, SurfaceCard, StatusBadge, StatusPanel } from '../common/DesignSystem';
 import LuxurySearchableSelect, { SelectOption, SelectValue } from '../common/LuxurySearchableSelect';
@@ -143,7 +143,8 @@ const MainView: React.FC = () => {
     ai: { 
       generateBugs, generateTestCases, handleManualGenerate, 
       handleUpdateBug, handleUpdateTestCase, publishTestCasesToXray, 
-      searchUsers, preparePreviewBug, regenerateBug
+      searchUsers, preparePreviewBug, regenerateBug,
+      bulkFetchEpic, bulkGenerateTests, bulkAnalyzeStories, bulkCompareBrd, bulkLoadAttachmentAsBrd
     } 
   } = useBugMind();
   const { log } = debug;
@@ -164,13 +165,13 @@ const MainView: React.FC = () => {
         ? 'Recommended: Run AI Gap Analysis to uncover missing scenarios'
         : 'Recommended: I Found a Bug for quick reporting';
 
-  const setWorkflow = (mainWorkflow: 'home' | 'manual' | 'analysis' | 'tests') => {
+  const setWorkflow = (mainWorkflow: MainWorkflow) => {
     let nextIssueType = session.selectedIssueType;
     if (mainWorkflow === 'manual' && session.defaultBugIssueType) {
       nextIssueType = session.defaultBugIssueType;
     } else if (mainWorkflow === 'analysis' && session.defaultGapAnalysisIssueType) {
       nextIssueType = session.defaultGapAnalysisIssueType;
-    } else if (mainWorkflow === 'tests' && session.defaultTestCaseIssueType) {
+    } else if ((mainWorkflow === 'tests' || mainWorkflow === 'bulk') && session.defaultTestCaseIssueType) {
       nextIssueType = session.defaultTestCaseIssueType;
     }
 
@@ -184,6 +185,41 @@ const MainView: React.FC = () => {
 
   const splitListInput = (value: string) => value.split(/[\n,]+/).map(item => item.trim()).filter(Boolean);
   const selectedTestCaseCount = session.testCases.filter(testCase => testCase.selected !== false).length;
+  const selectedBulkStoryCount = session.bulkSelectedStoryKeys.length;
+  const allBulkStoriesSelected = session.bulkStories.length > 0 && selectedBulkStoryCount === session.bulkStories.length;
+
+  const toggleBulkStory = (storyKey: string) => {
+    const selected = new Set(session.bulkSelectedStoryKeys);
+    if (selected.has(storyKey)) {
+      selected.delete(storyKey);
+    } else {
+      selected.add(storyKey);
+    }
+    updateSession({ bulkSelectedStoryKeys: Array.from(selected) });
+  };
+
+  const setAllBulkStoriesSelected = (selected: boolean) => {
+    updateSession({ bulkSelectedStoryKeys: selected ? session.bulkStories.map(story => story.key) : [] });
+  };
+
+  const handleBrdFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (file.size > 600_000) {
+      updateSession({ error: 'BRD files must be 600 KB or smaller for browser-side extraction.' });
+      event.target.value = '';
+      return;
+    }
+    const acceptedExtensions = /\.(txt|md|csv|json|xml|yaml|yml)$/i;
+    if (!file.type.startsWith('text/') && !acceptedExtensions.test(file.name)) {
+      updateSession({ error: 'Upload a text-based BRD file here, or paste DOCX/PDF text into the BRD field.' });
+      event.target.value = '';
+      return;
+    }
+    const text = (await file.text()).trim();
+    updateSession({ bulkBrdText: text, success: `Loaded BRD text from ${file.name}.` });
+    event.target.value = '';
+  };
 
   const addTestCase = () => {
     updateSession({
@@ -806,6 +842,30 @@ const MainView: React.FC = () => {
                         </div>
                       </div>
                     </div>
+
+                    <div className="border-t border-[var(--border-soft)]">
+                      <div className="group relative flex items-center justify-between gap-4 rounded-[1.1rem] py-5 px-1 transition-colors hover:bg-[var(--surface-soft)]/70">
+                        <button type="button" onClick={() => setWorkflow('bulk')} className="absolute inset-0" aria-label="Bulk Epic Workflows" />
+                        <div className="flex items-center gap-3">
+                          <div className="w-12 h-12 rounded-[1.1rem] flex items-center justify-center shrink-0 bg-[var(--surface-accent-strong)] text-[var(--primary-blue)]">
+                            <Layout size={20} />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h4 className="workflow-card-title text-[15px]">Bulk Epic Workflows</h4>
+                              <StatusBadge tone="info">Beta</StatusBadge>
+                            </div>
+                            <p className="workflow-card-subtitle">Fetch child stories, run cross-story audit, generate tests, or compare BRD coverage.</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="rounded-full border border-[var(--card-border)] bg-[var(--bg-elevated)] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--text-primary)]">
+                            Start
+                          </span>
+                          <ArrowRight size={16} className="text-[var(--text-muted)] transition-transform group-hover:translate-x-0.5" />
+                        </div>
+                      </div>
+                    </div>
                   </SurfaceCard>
                 ) : (
                   <div className="space-y-4 animate-in fade-in slide-in-from-bottom-3 duration-500">
@@ -822,12 +882,14 @@ const MainView: React.FC = () => {
                                 ? 'I Found a Bug'
                                 : session.mainWorkflow === 'analysis'
                                   ? 'AI Gap Analysis'
-                                  : 'Generate Test Cases'}
+                                  : session.mainWorkflow === 'bulk'
+                                    ? 'Bulk Epic Workflows'
+                                    : 'Generate Test Cases'}
                             </h3>
                           </div>
                         </div>
                         <div className="step-badge">
-                          {session.mainWorkflow === 'manual' ? 'BUG' : session.mainWorkflow === 'analysis' ? 'AI' : 'QA'}
+                          {session.mainWorkflow === 'manual' ? 'BUG' : session.mainWorkflow === 'analysis' ? 'AI' : session.mainWorkflow === 'bulk' ? 'BULK' : 'QA'}
                         </div>
                       </div>
 
@@ -963,6 +1025,184 @@ const MainView: React.FC = () => {
                             <Zap size={16} />
                             Run Gap Analysis
                           </ActionButton>
+                        </div>
+                      ) : session.mainWorkflow === 'bulk' ? (
+                        <div className="space-y-4">
+                          <p className="text-[12px] text-[var(--text-secondary)] leading-relaxed">
+                            Start from an Epic, choose the stories to process, then run bulk test generation, cross-story audit, or BRD comparison.
+                          </p>
+
+                          <div className="space-y-2">
+                            <label className="context-label uppercase tracking-wider mb-1.5 block ml-1">Epic Key</label>
+                            <div className="flex gap-2">
+                              <input
+                                value={session.bulkEpicKey}
+                                onChange={e => updateSession({ bulkEpicKey: e.target.value.toUpperCase() })}
+                                className="min-w-0 flex-1 bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-[1rem] px-3 py-2.5 text-xs font-bold text-[var(--text-primary)] outline-none"
+                                placeholder={session.issueData?.key || 'PROJ-100'}
+                              />
+                              <ActionButton
+                                onClick={bulkFetchEpic}
+                                variant="secondary"
+                                disabled={session.loading || !session.jiraConnectionId || !session.bulkEpicKey.trim()}
+                                className="h-10 px-4 text-[11px]"
+                              >
+                                <RefreshCw size={14} className={session.loading ? 'animate-spin' : ''} />
+                                Fetch
+                              </ActionButton>
+                            </div>
+                          </div>
+
+                          {session.bulkProgressMessage && (
+                            <div className="rounded-[1rem] border border-[var(--border-soft)] bg-[var(--surface-soft)] px-3 py-3">
+                              <div className="flex items-center justify-between gap-3 text-[11px] font-bold text-[var(--text-primary)]">
+                                <span>{session.bulkProgressMessage}</span>
+                                <span>{session.bulkProgressPercent}%</span>
+                              </div>
+                              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--bg-input)]">
+                                <div
+                                  className="h-full rounded-full bg-[var(--primary-blue)] transition-all"
+                                  style={{ width: `${session.bulkProgressPercent}%` }}
+                                />
+                              </div>
+                            </div>
+                          )}
+
+                          {session.bulkStories.length > 0 && (
+                            <div className="space-y-3">
+                              <div className="flex items-center justify-between gap-3">
+                                <div>
+                                  <div className="context-label uppercase tracking-wider mb-0.5">Stories</div>
+                                  <div className="text-[12px] font-bold text-[var(--text-primary)]">{selectedBulkStoryCount}/{session.bulkStories.length} selected</div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setAllBulkStoriesSelected(!allBulkStoriesSelected)}
+                                  className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--primary-blue)]"
+                                >
+                                  {allBulkStoriesSelected ? 'Clear' : 'Select All'}
+                                </button>
+                              </div>
+
+                              <div className="max-h-[320px] space-y-2 overflow-y-auto pr-1">
+                                {session.bulkStories.map((story) => {
+                                  const selected = session.bulkSelectedStoryKeys.includes(story.key);
+                                  const riskTone = story.risk_score >= 60 ? 'danger' : story.risk_score >= 35 ? 'warning' : 'success';
+                                  return (
+                                    <button
+                                      key={story.key}
+                                      type="button"
+                                      onClick={() => toggleBulkStory(story.key)}
+                                      className={`w-full rounded-[1rem] border px-3 py-3 text-left transition-colors ${
+                                        selected
+                                          ? 'border-[var(--border-active)] bg-[var(--surface-accent)]'
+                                          : 'border-[var(--border-soft)] bg-[var(--bg-input)] hover:bg-[var(--surface-soft)]'
+                                      }`}
+                                    >
+                                      <div className="flex items-start justify-between gap-3">
+                                        <div className="min-w-0">
+                                          <div className="flex items-center gap-2">
+                                            {selected ? <CheckSquare size={14} className="text-[var(--primary-blue)]" /> : <Square size={14} className="text-[var(--text-muted)]" />}
+                                            <span className="text-[11px] font-black text-[var(--text-primary)]">{story.key}</span>
+                                            {story.status && <span className="text-[10px] text-[var(--text-muted)]">{story.status}</span>}
+                                          </div>
+                                          <div className="mt-1 line-clamp-2 text-[12px] font-bold text-[var(--text-primary)]">{story.summary}</div>
+                                          {story.risk_reasons.length > 0 && (
+                                            <div className="mt-2 flex flex-wrap gap-1">
+                                              {story.risk_reasons.slice(0, 3).map((reason) => (
+                                                <span key={`${story.key}-${reason}`} className="rounded-full bg-[var(--surface-soft)] px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+                                                  {reason.replace(/_/g, ' ')}
+                                                </span>
+                                              ))}
+                                            </div>
+                                          )}
+                                        </div>
+                                        <StatusBadge tone={riskTone}>{story.risk_score}</StatusBadge>
+                                      </div>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+
+                              {session.bulkEpicAttachments.length > 0 && (
+                                <div className="rounded-[1rem] border border-[var(--border-soft)] bg-[var(--surface-soft)] px-3 py-3">
+                                  <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                                    <Paperclip size={12} />
+                                    Epic Attachments
+                                  </div>
+                                  <div className="mt-2 flex flex-wrap gap-2">
+                                    {session.bulkEpicAttachments.map((attachment) => (
+                                      <button
+                                        key={attachment.id}
+                                        type="button"
+                                        onClick={() => { void bulkLoadAttachmentAsBrd(attachment.id); }}
+                                        disabled={session.loading}
+                                        className="rounded-full border border-[var(--border-soft)] bg-[var(--bg-input)] px-2.5 py-1 text-[10px] font-bold text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:opacity-50"
+                                        title="Load attachment as BRD text"
+                                      >
+                                        {attachment.filename}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              <div className="grid grid-cols-1 gap-2">
+                                <ActionButton
+                                  onClick={bulkGenerateTests}
+                                  variant="primary"
+                                  disabled={session.loading || selectedBulkStoryCount === 0 || requiresIssueType}
+                                  className="h-10 text-[12px]"
+                                >
+                                  <Check size={15} />
+                                  Generate Tests for Selected
+                                </ActionButton>
+                                <ActionButton
+                                  onClick={bulkAnalyzeStories}
+                                  variant="secondary"
+                                  disabled={session.loading || selectedBulkStoryCount === 0 || requiresIssueType}
+                                  className="h-10 text-[12px]"
+                                >
+                                  <BrainCircuit size={15} />
+                                  Run Cross-Story Audit
+                                </ActionButton>
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="space-y-3 rounded-[1rem] border border-[var(--border-soft)] bg-[var(--surface-soft)]/65 p-3">
+                            <div className="flex items-center justify-between gap-3">
+                              <div>
+                                <div className="context-label uppercase tracking-wider mb-0.5">BRD Compare</div>
+                                <div className="text-[11px] text-[var(--text-muted)]">Paste BRD text or load a text document.</div>
+                              </div>
+                              <label className="flex cursor-pointer items-center gap-1 rounded-full border border-[var(--border-soft)] bg-[var(--bg-input)] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--text-primary)]">
+                                <FileText size={12} />
+                                Load
+                                <input
+                                  type="file"
+                                  accept=".txt,.md,.csv,.json,.xml,.yaml,.yml,text/*,application/json"
+                                  className="hidden"
+                                  onChange={(event) => { void handleBrdFile(event); }}
+                                />
+                              </label>
+                            </div>
+                            <AutoResizeTextarea
+                              value={session.bulkBrdText}
+                              onChange={e => updateSession({ bulkBrdText: e.target.value })}
+                              className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-[1rem] p-3 text-xs text-[var(--text-secondary)] outline-none min-h-[92px]"
+                              placeholder="Paste BRD requirements here."
+                            />
+                            <ActionButton
+                              onClick={bulkCompareBrd}
+                              variant="secondary"
+                              disabled={session.loading || selectedBulkStoryCount === 0 || requiresIssueType || !session.bulkBrdText.trim()}
+                              className="h-10 text-[12px]"
+                            >
+                              <ClipboardList size={15} />
+                              Compare BRD to Selected Stories
+                            </ActionButton>
+                          </div>
                         </div>
                       ) : (
                         <div className="space-y-3">
