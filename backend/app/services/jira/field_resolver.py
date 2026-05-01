@@ -3,7 +3,7 @@ import datetime
 import re
 from app.services.jira.contract_aliases import canonicalize_ai_payload, normalize_ai_field_key
 
-class JiraFieldResolver:
+class BugJiraPayloadResolver:
     def __init__(self, mapping_config: Dict[str, Any], schema: List[Dict[str, Any]], platform: str = "cloud"):
         self.mapping_config = mapping_config
         self.schema = {field["key"]: field for field in schema}
@@ -198,3 +198,9 @@ class JiraFieldResolver:
                 parts.append(f"*Actual Result:*\n{actual}")
                 
         return "\n\n".join(parts)
+
+
+# Backward-compatible alias for older imports. New bug submission/generation code
+# should use BugJiraPayloadResolver so test-case flows do not appear to depend on
+# bug-specific Jira description formatting.
+JiraFieldResolver = BugJiraPayloadResolver

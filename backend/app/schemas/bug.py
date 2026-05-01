@@ -8,7 +8,7 @@ class IssueContext(BaseModel):
     description: str = ""
     acceptance_criteria: str = ""
 
-class AIWorkItemGenerationRequest(BaseModel):
+class FindingGenerationRequest(BaseModel):
     selected_text: Optional[str] = None
     issue_context: Optional[IssueContext] = None
     jira_connection_id: int
@@ -23,6 +23,20 @@ class AIWorkItemGenerationRequest(BaseModel):
     bug_count: Optional[int] = None
     focus_bug_summary: Optional[str] = None
     refinement_prompt: Optional[str] = None
+    supporting_context: Optional[str] = None
+
+
+class TestCaseGenerationRequest(BaseModel):
+    selected_text: Optional[str] = None
+    issue_context: Optional[IssueContext] = None
+    jira_connection_id: int
+    instance_url: Optional[str] = None
+    project_key: str
+    project_id: Optional[str] = None
+    issue_type_id: str
+    issue_type_name: Optional[str] = None
+    model: Optional[str] = None
+    custom_instructions: Optional[str] = None
     supporting_context: Optional[str] = None
 
 class StructBugField(BaseModel):
@@ -153,7 +167,7 @@ class BulkStoryInput(BaseModel):
     acceptance_criteria: Optional[str] = None
 
 
-class BulkAIBaseRequest(BaseModel):
+class BulkFindingBaseRequest(BaseModel):
     jira_connection_id: int
     instance_url: Optional[str] = None
     project_key: str
@@ -165,7 +179,19 @@ class BulkAIBaseRequest(BaseModel):
     supporting_context: Optional[str] = None
 
 
-class BulkTestGenerationRequest(BulkAIBaseRequest):
+class BulkTestCaseGenerationRequest(BaseModel):
+    jira_connection_id: int
+    instance_url: Optional[str] = None
+    project_key: str
+    project_id: Optional[str] = None
+    issue_type_id: str
+    issue_type_name: Optional[str] = None
+    stories: List[BulkStoryInput]
+    model: Optional[str] = None
+    supporting_context: Optional[str] = None
+
+
+class BulkTestGenerationRequest(BulkTestCaseGenerationRequest):
     pass
 
 
@@ -181,11 +207,11 @@ class BulkTestGenerationResponse(BaseModel):
     warnings: List[str] = []
 
 
-class BulkAnalyzeRequest(BulkAIBaseRequest):
+class BulkAnalyzeRequest(BulkFindingBaseRequest):
     pass
 
 
-class BulkBrdCompareRequest(BulkAIBaseRequest):
+class BulkBrdCompareRequest(BulkFindingBaseRequest):
     brd_text: str
 
 
@@ -226,6 +252,8 @@ class XrayTestSuitePublishResponse(BaseModel):
 
 
 # Backward-compatible aliases while the rest of the codebase migrates.
-BugGenerationRequest = AIWorkItemGenerationRequest
+AIWorkItemGenerationRequest = FindingGenerationRequest
+BugGenerationRequest = FindingGenerationRequest
+TestGenerationRequest = TestCaseGenerationRequest
 GeneratedBugResponse = GeneratedFindingResponse
 BugGenerationResponse = GapAnalysisResponse

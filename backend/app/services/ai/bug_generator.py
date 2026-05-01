@@ -4,150 +4,15 @@ import re
 from collections import Counter
 from typing import Dict, Any, Optional
 
-from app.services.ai.openrouter_client import OpenRouterClient
 from fastapi import HTTPException
+
+from app.services.ai.base_generator import BaseAIGenerator
 
 
 logger = logging.getLogger(__name__)
 
 
-class BugGenerator:
-    def __init__(self, api_key: Optional[str] = None):
-        self.ai_client = OpenRouterClient(api_key=api_key)
-
-    def _sanitize_for_ai(self, text: str) -> str:
-        if not text:
-            return text
-
-        sanitized = text
-        sanitized = re.sub(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", "[REDACTED_EMAIL]", sanitized, flags=re.IGNORECASE)
-        sanitized = re.sub(r"\b(?:Bearer\s+)?[A-Za-z0-9_\-]{20,}\b", "[REDACTED_TOKEN]", sanitized, flags=re.IGNORECASE)
-        sanitized = re.sub(r"\b\d{7,}\b", "[REDACTED_NUMBER]", sanitized)
-        sanitized = re.sub(r"([?&](?:token|access_token|refresh_token|api[_-]?key|apikey|auth|authorization)=)[^&\s]+", r"\1[REDACTED_TOKEN]", sanitized, flags=re.IGNORECASE)
-        return sanitized
-
-    def _get_message_content(self, response: Dict[str, Any]) -> str:
-        choices = response.get("choices") or []
-        if not choices:
-            raise ValueError("The AI provider returned no choices.")
-
-        message = choices[0].get("message") or {}
-        content = message.get("content")
-
-        if isinstance(content, str):
-            return content.strip()
-
-        # Some providers/models can return structured content parts instead of a plain string.
-        if isinstance(content, list):
-            text_parts = []
-            for item in content:
-                if isinstance(item, dict):
-                    if isinstance(item.get("text"), str):
-                        text_parts.append(item["text"])
-                    elif item.get("type") == "text" and isinstance(item.get("content"), str):
-                        text_parts.append(item["content"])
-                elif isinstance(item, str):
-                    text_parts.append(item)
-            return "\n".join(part.strip() for part in text_parts if part and part.strip()).strip()
-
-        return ""
-
-    def _extract_json(self, content: str) -> Dict[str, Any]:
-        """
-        Robustly extracts JSON from AI response, handling markdown blocks or leading/trailing text.
-        """
-        if not content or not content.strip():
-            raise ValueError("The AI provider returned an empty response.")
-
-        content = content.strip()
-
-        # 1. Try finding a JSON markdown block
-        json_match = re.search(r"```json\s*([\s\S]*?)\s*```", content)
-        if json_match:
-            try:
-                return json.loads(json_match.group(1).strip())
-            except:
-                pass
-
-        # 1b. Try any fenced block if the model omitted the language tag
-        fenced_match = re.search(r"```\s*([\s\S]*?)\s*```", content)
-        if fenced_match:
-            try:
-                return json.loads(fenced_match.group(1).strip())
-            except:
-                pass
-        
-        # 2. Try finding the first { and last }
-        brace_match = re.search(r"({[\s\S]*})", content)
-        if brace_match:
-            try:
-                return json.loads(brace_match.group(1).strip())
-            except:
-                pass
-        
-        # 3. Last resort: raw parse
-        return json.loads(content.strip())
-
-    async def _generate_and_parse_json(self, system_prompt: str, user_prompt: str, model: str = None, expect_test_suite: bool = False) -> Dict[str, Any]:
-        response = await self.ai_client.generate_completion(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            model=model
-        )
-
-        content = self._get_message_content(response)
-        parsed = self._extract_json(content)
-
-        if expect_test_suite:
-            if not isinstance(parsed.get("test_cases"), list):
-                raise ValueError("The AI provider did not return a valid test_cases array.")
-            if "coverage_score" not in parsed:
-                raise ValueError("The AI provider did not return a coverage_score.")
-
-        return parsed
-
-    async def _generate_with_json_retry(
-        self,
-        system_prompt: str,
-        user_prompt: str,
-        model: str = None,
-        expect_test_suite: bool = False,
-    ) -> Dict[str, Any]:
-        try:
-            return await self._generate_and_parse_json(
-                system_prompt,
-                user_prompt,
-                model=model,
-                expect_test_suite=expect_test_suite,
-            )
-        except HTTPException:
-            raise
-        except Exception as exc:
-            logger.warning("AI JSON parse failed on first attempt: %s", exc)
-            retry_prompt = system_prompt + """
-
-            CRITICAL RETRY INSTRUCTION:
-            Return one valid JSON object only.
-            Do not include markdown fences.
-            Do not include prose before or after the JSON.
-            Do not leave any field empty.
-            """
-            try:
-                return await self._generate_and_parse_json(
-                    retry_prompt,
-                    user_prompt,
-                    model=model,
-                    expect_test_suite=expect_test_suite,
-                )
-            except HTTPException:
-                raise
-            except Exception as retry_exc:
-                logger.exception("AI JSON parse failed after retry")
-                raise HTTPException(
-                    status_code=502,
-                    detail="AI returned an unreadable response. Please try again."
-                ) from retry_exc
-
+class BugGenerator(BaseAIGenerator):
     def _clean_schema_for_ai(self, schema: list) -> list:
         """
         Aggressively filters and minifies the Jira schema to prevent AI prompt bloat.
@@ -189,14 +54,6 @@ class BugGenerator:
             cleaned.append(f)
             
         return cleaned
-
-    def _truncate_context(self, text: str, max_chars: int = 15000) -> str:
-        """
-        Truncates the story context to stay within token limits.
-        """
-        if len(text) > max_chars:
-            return text[:max_chars] + "\n... (text truncated due to length) ..."
-        return text
 
     def _extract_acceptance_targets(self, context_text: str) -> list[str]:
         if not context_text:
@@ -520,67 +377,3 @@ class BugGenerator:
         except Exception as e:
             logger.exception("AI bug generation failed")
             raise HTTPException(status_code=502, detail=f"AI Bug Generation Failed: {str(e)}")
-
-    async def generate_test_cases(
-        self,
-        context_text: str,
-        model: str = None,
-        custom_instructions: str = None,
-        issue_type_name: str = None,
-        supporting_context: str = None,
-    ) -> Dict[str, Any]:
-        """
-        Converts a Jira story context into a comprehensive test suite.
-        """
-        instruction_block = f"\nPERSONALITY & STYLE GUIDE: {custom_instructions}" if custom_instructions else ""
-
-        system_prompt = f"""
-        You are BugMind, a Lead QA Engineer. 
-        Read the provided User Story and Acceptance Criteria.
-        Generate a comprehensive set of manual test cases to verify this story.
-        {instruction_block}
-
-        Source issue type: {issue_type_name or "Story"}
-
-        REQUIREMENTS:
-        - Cover positive, negative, edge, regression, validation, permissions/security, accessibility/UX, and integration risks where relevant.
-        - Include traceability to acceptance criteria or story sections in "acceptance_criteria_refs".
-        - Include "preconditions" when setup, data, permissions, device, or environment matter.
-        - Include "test_type" as one of Positive, Negative, Edge, Regression, Security, Accessibility, Integration, or Manual.
-        - Include concise "labels" and "components" only when strongly implied by the story.
-        - Each test must have a non-empty title, at least one step, and a non-empty expected_result.
-        
-        OUTPUT FORMAT (JSON ONLY):
-        {{
-            "test_cases": [
-                {{
-                    "title": "Clear case title",
-                    "steps": ["Step 1", "Step 2"],
-                    "expected_result": "What should happen",
-                    "priority": "High",
-                    "test_type": "Positive",
-                    "preconditions": "User is authenticated with permission X",
-                    "acceptance_criteria_refs": ["AC1"],
-                    "labels": ["checkout"],
-                    "components": ["Payments"]
-                }}
-            ],
-            "coverage_score": 95.0
-        }}
-        """
-
-        try:
-            truncated_context = self._truncate_context(self._sanitize_for_ai(context_text))
-            user_prompt = f"Story Context:\n{truncated_context}"
-            if supporting_context:
-                user_prompt += f"\n\nSupporting Context:\n{self._truncate_context(self._sanitize_for_ai(supporting_context), 10000)}"
-            return await self._generate_with_json_retry(
-                system_prompt,
-                user_prompt,
-                model=model,
-                expect_test_suite=True
-            )
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise HTTPException(status_code=502, detail=f"AI Test Suite Generation Failed: {str(e)}")

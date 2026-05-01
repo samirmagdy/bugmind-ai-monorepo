@@ -3,6 +3,7 @@ import { TabSession, BugReport, Usage, INITIAL_SESSION, TestCase, MissingField, 
 import { ApiError, apiRequest, getErrorMessage, readJsonResponse, throwApiErrorResponse } from '../services/api';
 import {
   AIGenerationRequestPayload,
+  AITestCaseGenerationRequestPayload,
   GapAnalysisResponsePayload,
   ManualBugGenerationResponsePayload,
   AIPreviewRequestPayload,
@@ -521,7 +522,7 @@ export const AIProvider: React.FC<{
     updateSession({ loading: true, error: null, success: null, gapAnalysisSummary: null }, currentTabId);
     try {
       const { projectKey, projectId } = getProjectRequestParams();
-      const payload: AIGenerationRequestPayload = {
+      const payload: AITestCaseGenerationRequestPayload = {
         issue_context: buildIssueContext(),
         jira_connection_id: session.jiraConnectionId,
         instance_url: session.instanceUrl,

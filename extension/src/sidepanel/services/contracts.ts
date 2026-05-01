@@ -93,6 +93,18 @@ export interface AIGenerationRequestPayload extends ProjectRequestParams {
   supporting_context?: string;
 }
 
+export interface AITestCaseGenerationRequestPayload extends ProjectRequestParams {
+  issue_context?: IssueContextPayload;
+  selected_text?: string;
+  jira_connection_id: number;
+  instance_url?: string | null;
+  issue_type_id: string;
+  issue_type_name?: string;
+  model?: string;
+  custom_instructions?: string;
+  supporting_context?: string;
+}
+
 export interface AIPreviewRequestPayload extends ProjectRequestParams {
   jira_connection_id: number;
   instance_url?: string | null;

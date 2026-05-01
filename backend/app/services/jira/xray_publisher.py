@@ -1,0 +1,422 @@
+from typing import Any, Optional
+
+import httpx
+from fastapi import HTTPException, Request
+from sqlalchemy.orm import Session
+
+from app.core.audit import log_audit
+from app.core.config import settings
+from app.core.idempotency import idempotency_store
+from app.models.jira import JiraConnection
+from app.models.user import User
+from app.schemas.bug import XrayPublishedTest, XrayTestSuitePublishRequest, XrayTestSuitePublishResponse
+from app.services.jira.adapters.server import JiraServerAdapter
+from app.services.jira.connection_service import get_adapter, get_owned_connection
+from app.services.jira.metadata_engine import JiraMetadataEngine
+
+
+def resolve_link_type_candidates(link_type: Optional[str], available_types: list[str]) -> list[str]:
+    candidates: list[str] = []
+    for candidate in [link_type, "Tests", "Test", "Relates"]:
+        if candidate and candidate not in candidates:
+            candidates.append(candidate)
+
+    if available_types:
+        available_lookup = {name.lower(): name for name in available_types}
+        resolved: list[str] = []
+        for candidate in candidates:
+            match = available_lookup.get(candidate.lower())
+            if match and match not in resolved:
+                resolved.append(match)
+        if resolved:
+            return resolved
+    return candidates
+
+
+def normalize_folder_path(folder_path: Optional[str], story_issue_key: str) -> str:
+    raw_value = (folder_path or story_issue_key or "").strip()
+    normalized = raw_value.replace("\\", "/")
+    normalized = "/".join(part.strip() for part in normalized.split("/") if part.strip())
+    if not normalized:
+        raise HTTPException(status_code=400, detail="A valid Xray folder path is required")
+    return normalized
+
+
+def resolve_test_issue_type_id(issue_types: list[dict], test_issue_type_id: Optional[str], test_issue_type_name: Optional[str]) -> str:
+    if isinstance(issue_types, dict):
+        issue_types = issue_types.get("issue_types", []) or []
+    if test_issue_type_id:
+        return str(test_issue_type_id)
+
+    desired_name = (test_issue_type_name or "Test").strip().lower()
+    exact_match = next((item for item in issue_types if str(item.get("name", "")).strip().lower() == desired_name), None)
+    if exact_match:
+        return str(exact_match["id"])
+
+    partial_match = next((item for item in issue_types if desired_name in str(item.get("name", "")).strip().lower()), None)
+    if partial_match:
+        return str(partial_match["id"])
+
+    fallback = next((item for item in issue_types if "test" in str(item.get("name", "")).strip().lower()), None)
+    if fallback:
+        return str(fallback["id"])
+
+    raise HTTPException(status_code=400, detail="Could not find an Xray Test issue type in the selected project")
+
+
+def detect_repository_path_field_id(fields: list[dict], repository_path_field_id: Optional[str]) -> Optional[str]:
+    if repository_path_field_id:
+        return repository_path_field_id
+
+    preferred_names = (
+        "test repository path",
+        "repository path",
+        "test repository",
+        "test repo path",
+    )
+    for field in fields:
+        name = str(field.get("name", "")).strip().lower()
+        if any(candidate in name for candidate in preferred_names):
+            return field.get("key") or field.get("id")
+    return None
+
+
+def format_test_issue_description(story_issue_key: str, test_case: dict) -> str:
+    steps = test_case.get("steps", []) or []
+    lines = [f"Source Story: {story_issue_key}"]
+    if test_case.get("test_type"):
+        lines.extend(["", f"Test Type: {str(test_case.get('test_type')).strip()}"])
+    if test_case.get("preconditions"):
+        lines.extend(["", "Preconditions:", str(test_case.get("preconditions", "")).strip()])
+    refs = test_case.get("acceptance_criteria_refs") or []
+    if refs:
+        lines.extend(["", "Acceptance Criteria References:", ", ".join(str(ref) for ref in refs)])
+    lines.extend(["", "Steps:"])
+    for idx, step in enumerate(steps, start=1):
+        lines.append(f"{idx}. {step}")
+    lines.extend(["", "Expected Result:", str(test_case.get("expected_result", "")).strip()])
+    lines.extend(["", f"Priority: {str(test_case.get('priority', '')).strip()}"])
+    labels = test_case.get("labels") or []
+    components = test_case.get("components") or []
+    if labels:
+        lines.extend(["", "Labels:", ", ".join(str(label) for label in labels)])
+    if components:
+        lines.extend(["", "Components:", ", ".join(str(component) for component in components)])
+    return "\n".join(lines).strip()
+
+
+def _folder_id(folder: dict[str, Any]) -> Optional[str]:
+    value = folder.get("id") or folder.get("folderId") or folder.get("folder_id")
+    return str(value).strip() if value is not None and str(value).strip() else None
+
+
+def _folder_name(folder: dict[str, Any]) -> str:
+    return str(folder.get("name") or folder.get("folderName") or "").strip()
+
+
+def _folder_parent_id(folder: dict[str, Any]) -> Optional[str]:
+    value = folder.get("parentId") or folder.get("parent_id") or folder.get("parent")
+    if isinstance(value, dict):
+        value = value.get("id")
+    return str(value).strip() if value is not None and str(value).strip() else None
+
+
+def _folder_path(folder: dict[str, Any]) -> str:
+    raw_path = str(folder.get("path") or folder.get("fullPath") or "").strip()
+    if raw_path:
+        return "/" + "/".join(part.strip() for part in raw_path.split("/") if part.strip())
+    return ""
+
+
+def _flatten_xray_folders(folders: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    flattened: list[dict[str, Any]] = []
+    stack = list(folders)
+    while stack:
+        folder = stack.pop(0)
+        if not isinstance(folder, dict):
+            continue
+        flattened.append(folder)
+        for child_key in ("children", "folders"):
+            children = folder.get(child_key)
+            if isinstance(children, list):
+                stack.extend(child for child in children if isinstance(child, dict))
+    return flattened
+
+
+def _find_xray_folder(
+    folders: list[dict[str, Any]],
+    *,
+    name: Optional[str] = None,
+    parent_id: Optional[str] = None,
+    path: Optional[str] = None,
+) -> Optional[dict[str, Any]]:
+    normalized_path = normalize_folder_path(path, "") if path else None
+    for folder in _flatten_xray_folders(folders):
+        if normalized_path and _folder_path(folder).strip("/") == normalized_path:
+            return folder
+        if name:
+            folder_parent = _folder_parent_id(folder)
+            parent_matches = (
+                not parent_id
+                or folder_parent == str(parent_id)
+                or (str(parent_id) == "0" and folder_parent in (None, "", "0"))
+            )
+            if parent_matches and _folder_name(folder).lower() == name.strip().lower():
+                return folder
+    return None
+
+
+def ensure_xray_folder(adapter: JiraServerAdapter, project_key: str, folder_path: str) -> str:
+    parent_id = "0"
+    current_path_parts: list[str] = []
+
+    for part in [segment for segment in folder_path.split("/") if segment.strip()]:
+        name = part.strip()
+        current_path_parts.append(name)
+        folders = adapter.get_xray_folders(project_key)
+        existing = _find_xray_folder(
+            folders,
+            name=name,
+            parent_id=parent_id,
+            path="/".join(current_path_parts),
+        )
+        if existing:
+            existing_id = _folder_id(existing)
+            if existing_id:
+                parent_id = existing_id
+                continue
+
+        try:
+            created = adapter.create_xray_folder(project_key, parent_id, name)
+        except HTTPException:
+            refreshed = adapter.get_xray_folders(project_key)
+            existing = _find_xray_folder(
+                refreshed,
+                name=name,
+                parent_id=parent_id,
+                path="/".join(current_path_parts),
+            )
+            existing_id = _folder_id(existing or {})
+            if existing_id:
+                parent_id = existing_id
+                continue
+            raise
+
+        created_id = _folder_id(created)
+        if not created_id:
+            refreshed = adapter.get_xray_folders(project_key)
+            created = _find_xray_folder(
+                refreshed,
+                name=name,
+                parent_id=parent_id,
+                path="/".join(current_path_parts),
+            ) or {}
+            created_id = _folder_id(created)
+        if not created_id:
+            raise HTTPException(status_code=400, detail=f"Xray created folder '{name}' but did not return a folder id")
+        parent_id = created_id
+
+    return parent_id
+
+
+def add_xray_manual_steps(adapter: JiraServerAdapter, issue_key: str, test_case: dict) -> None:
+    steps = [str(step).strip() for step in (test_case.get("steps") or []) if str(step).strip()]
+    expected_result = str(test_case.get("expected_result") or "").strip()
+    preconditions = str(test_case.get("preconditions") or "").strip()
+    last_index = len(steps) - 1
+    for index, step in enumerate(steps):
+        adapter.add_xray_step(
+            issue_key,
+            step,
+            data=preconditions if index == 0 and preconditions else None,
+            result=expected_result if index == last_index else None,
+        )
+
+
+def _field_key_by_name(fields: list[dict], names: tuple[str, ...]) -> Optional[str]:
+    normalized_names = {name.strip().lower() for name in names}
+    for field in fields:
+        key = field.get("key") or field.get("id")
+        name = str(field.get("name", "")).strip().lower()
+        if key in normalized_names or name in normalized_names:
+            return str(key)
+    return None
+
+
+def apply_optional_xray_fields(fields_payload: dict, test_fields: list[dict], test_case: dict) -> None:
+    field_keys = {str(field.get("key") or field.get("id")) for field in test_fields}
+
+    priority = str(test_case.get("priority") or "").strip()
+    if priority and "priority" in field_keys:
+        fields_payload["priority"] = {"name": priority}
+
+    labels = [str(label).strip() for label in (test_case.get("labels") or []) if str(label).strip()]
+    if labels and "labels" in field_keys:
+        fields_payload["labels"] = labels
+
+    components = [str(component).strip() for component in (test_case.get("components") or []) if str(component).strip()]
+    if components and "components" in field_keys:
+        fields_payload["components"] = [{"name": component} for component in components]
+
+    test_type = str(test_case.get("test_type") or "").strip()
+    test_type_field = _field_key_by_name(test_fields, ("test type", "xray test type"))
+    if test_type and test_type_field:
+        fields_payload[test_type_field] = {"value": test_type}
+
+    preconditions = str(test_case.get("preconditions") or "").strip()
+    precondition_field = _field_key_by_name(test_fields, ("precondition", "preconditions"))
+    if preconditions and precondition_field:
+        fields_payload[precondition_field] = preconditions
+
+
+def get_xray_cloud_access_token() -> str:
+    if not settings.XRAY_CLOUD_CLIENT_ID or not settings.XRAY_CLOUD_CLIENT_SECRET:
+        raise HTTPException(
+            status_code=501,
+            detail="Xray Cloud requires XRAY_CLOUD_CLIENT_ID and XRAY_CLOUD_CLIENT_SECRET to be configured",
+        )
+
+    try:
+        response = httpx.post(
+            "https://xray.cloud.getxray.app/api/v2/authenticate",
+            json={
+                "client_id": settings.XRAY_CLOUD_CLIENT_ID,
+                "client_secret": settings.XRAY_CLOUD_CLIENT_SECRET,
+            },
+            timeout=httpx.Timeout(30.0, connect=10.0),
+            trust_env=False,
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to authenticate to Xray Cloud: {str(exc)}")
+
+    if response.status_code != 200:
+        raise HTTPException(status_code=400, detail="Failed to authenticate to Xray Cloud")
+
+    token = response.text.strip().strip('"')
+    if not token:
+        raise HTTPException(status_code=400, detail="Xray Cloud authentication returned an empty token")
+    return token
+
+
+class XrayServerPublisher:
+    def __init__(self, db: Session, current_user: User, request: Request):
+        self.db = db
+        self.current_user = current_user
+        self.request = request
+
+    def publish(self, conn_id: int, req: XrayTestSuitePublishRequest) -> XrayTestSuitePublishResponse:
+        conn = get_owned_connection(self.db, self.current_user.id, conn_id)
+        adapter = get_adapter(conn)
+        engine = JiraMetadataEngine(adapter)
+
+        project_metadata = engine.get_project_metadata(req.xray_project_id)
+        test_issue_type_id = resolve_test_issue_type_id(project_metadata, req.test_issue_type_id, req.test_issue_type_name)
+        test_fields = engine.get_field_schema(req.xray_project_id, test_issue_type_id)
+        repository_path_field_id = detect_repository_path_field_id(test_fields, req.repository_path_field_id)
+        folder_path = normalize_folder_path(req.folder_path, req.story_issue_key)
+        xray_project_key = req.xray_project_key or str(project_metadata.get("project_key") or "").strip()
+        xray_folder_id: Optional[str] = None
+        uses_raven_repository = isinstance(adapter, JiraServerAdapter) and bool(xray_project_key)
+        if uses_raven_repository:
+            xray_folder_id = ensure_xray_folder(adapter, xray_project_key, folder_path)
+
+        available_link_types: list[str] = []
+        try:
+            available_link_types = adapter.get_issue_link_types()
+        except HTTPException:
+            available_link_types = []
+
+        link_candidates = resolve_link_type_candidates(req.link_type, available_link_types)
+        created_tests: list[XrayPublishedTest] = []
+        warnings: list[str] = []
+        link_type_used: Optional[str] = None
+
+        try:
+            for test_case in req.test_cases:
+                test_case_payload = test_case.model_dump()
+                fields = {
+                    "project": {"key": req.xray_project_key} if req.xray_project_key else {"id": req.xray_project_id},
+                    "summary": test_case.title,
+                    "description": format_test_issue_description(req.story_issue_key, test_case_payload),
+                    "issuetype": {"id": test_issue_type_id},
+                }
+                apply_optional_xray_fields(fields, test_fields, test_case_payload)
+                if repository_path_field_id:
+                    fields[repository_path_field_id] = folder_path
+
+                issue_key = adapter.create_issue({"fields": fields})
+                created_tests.append(XrayPublishedTest(id=issue_key, key=issue_key, self=""))
+                if isinstance(adapter, JiraServerAdapter):
+                    add_xray_manual_steps(adapter, issue_key, test_case_payload)
+                    if xray_project_key and xray_folder_id:
+                        adapter.add_test_to_folder(xray_project_key, xray_folder_id, issue_key)
+
+                linked = False
+                for candidate in link_candidates:
+                    try:
+                        adapter.link_issues(issue_key, candidate, req.story_issue_key)
+                        linked = True
+                        if not link_type_used:
+                            link_type_used = candidate
+                        break
+                    except HTTPException:
+                        continue
+
+                if not linked:
+                    warnings.append(f"Created {issue_key} but could not link it to {req.story_issue_key}")
+        except HTTPException as exc:
+            rollback_failed_keys: list[str] = []
+            for created_test in reversed(created_tests):
+                try:
+                    adapter.delete_issue(created_test.key)
+                except HTTPException:
+                    rollback_failed_keys.append(created_test.key)
+            detail = exc.detail
+            if rollback_failed_keys:
+                detail = {
+                    "error": "Xray test publish failed and some created tests could not be rolled back.",
+                    "jira_error": exc.detail,
+                    "rollback_failed_issue_keys": rollback_failed_keys,
+                }
+            raise HTTPException(status_code=exc.status_code, detail=detail) from exc
+
+        if not repository_path_field_id and not uses_raven_repository:
+            warnings.append("Created tests without setting an Xray repository path because no repository path field was detected")
+
+        response = XrayTestSuitePublishResponse(
+            created_tests=created_tests,
+            folder_path=folder_path,
+            repository_path_field_id=repository_path_field_id,
+            link_type_used=link_type_used,
+            warnings=warnings,
+        )
+        idempotency_store.store_response(
+            "jira.xray_publish",
+            str(self.current_user.id),
+            self.request.headers.get("Idempotency-Key"),
+            req.model_dump(),
+            response.model_dump(),
+        )
+        log_audit(
+            "jira.xray_publish",
+            self.current_user.id,
+            db=self.db,
+            jira_connection_id=req.jira_connection_id,
+            project_id=req.xray_project_id,
+            request_path=str(self.request.url.path),
+            created_test_keys=[test.key for test in created_tests],
+            warnings=warnings,
+        )
+        return response
+
+
+class XrayCloudPublisher:
+    def __init__(self, db: Session, current_user: User, request: Request):
+        self.db = db
+        self.current_user = current_user
+        self.request = request
+
+    def publish(self, conn_id: int, req: XrayTestSuitePublishRequest) -> XrayTestSuitePublishResponse:
+        # Current Cloud behavior is Jira issue publishing. Keeping it explicit prevents
+        # Server/DC Raven repository APIs from being mistaken for Xray Cloud APIs.
+        return XrayServerPublisher(self.db, self.current_user, self.request).publish(conn_id, req)

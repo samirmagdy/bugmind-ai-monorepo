@@ -8,7 +8,6 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
 from app.api import deps
-from app.api.v1.jira import resolve_jira_bootstrap_context
 from app.core import security
 from app.core.audit import log_audit
 from app.core.rate_limit import rate_limiter
@@ -33,6 +32,7 @@ from app.schemas.token import (
 from app.schemas.user import UserCreate, UserResponse
 from app.services.auth.google import verify_google_id_token
 from app.services.auth.mail import send_password_reset_code
+from app.services.jira.bootstrap_service import resolve_jira_bootstrap_context
 
 router = APIRouter()
 logger = logging.getLogger("bugmind.http")

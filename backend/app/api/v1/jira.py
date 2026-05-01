@@ -39,6 +39,30 @@ from app.core.idempotency import idempotency_store
 from app.core.rate_limit import rate_limiter
 from app.core.request_security import enforce_secure_jira_ssl, validate_connection_host
 from app.core.config import settings
+from app.services.jira.bulk_epic_service import fetch_epic_children
+from app.services.jira.bootstrap_service import (
+    resolve_jira_bootstrap_context as resolve_jira_bootstrap_context_service,
+    select_issue_type as service_select_issue_type,
+    serialize_issue_type,
+)
+from app.services.jira.connection_service import (
+    get_adapter as build_jira_adapter,
+    get_owned_connection,
+    normalize_instance_url,
+    verify_connection_credentials,
+)
+from app.services.jira.connection_management import (
+    create_user_connection,
+    delete_user_connection,
+    list_user_connections,
+    update_user_connection,
+)
+from app.services.jira.document_extractor import decode_text_attachment
+from app.services.jira.xray_publisher import (
+    XrayCloudPublisher,
+    XrayServerPublisher,
+    resolve_link_type_candidates as service_resolve_link_type_candidates,
+)
 
 router = APIRouter()
 MAX_BRD_ATTACHMENT_BYTES = 10 * 1024 * 1024
@@ -48,61 +72,19 @@ MAX_BRD_PDF_PAGES = 50
 from cryptography.fernet import InvalidToken
 
 def get_adapter(connection: JiraConnection):
-    enforce_secure_jira_ssl(connection.verify_ssl)
-    safe_host_url = validate_connection_host(connection.host_url, connection.auth_type.value)
-    try:
-        token = security.decrypt_credential(connection.encrypted_token)
-    except InvalidToken:
-        raise HTTPException(
-            status_code=401, 
-            detail="Jira Connection Stale: Encryption keys have changed. Please delete and re-add this connection."
-        )
-    if connection.auth_type == JiraAuthType.CLOUD:
-        return JiraCloudAdapter(safe_host_url, connection.username, token, verify_ssl=connection.verify_ssl)
-    return JiraServerAdapter(safe_host_url, connection.username, token, verify_ssl=connection.verify_ssl)
+    return build_jira_adapter(connection)
 
 
 def _verify_connection_credentials(auth_type: JiraAuthType, host_url: str, username: str, token: str, verify_ssl: bool) -> None:
-    adapter = (
-        JiraCloudAdapter(host_url, username, token, verify_ssl=verify_ssl)
-        if auth_type == JiraAuthType.CLOUD
-        else JiraServerAdapter(host_url, username, token, verify_ssl=verify_ssl)
-    )
-    adapter.get_current_user()
+    verify_connection_credentials(auth_type, host_url, username, token, verify_ssl)
 
 
 def _normalize_instance_url(url: Optional[str]) -> str:
-    trimmed = (url or "").strip().lower().rstrip("/")
-    if not trimmed:
-        return ""
-
-    if not (trimmed.startswith("http://") or trimmed.startswith("https://")):
-        trimmed = f"https://{trimmed}"
-
-    try:
-        parsed = urlparse(trimmed)
-        scheme = parsed.scheme or "https"
-        netloc = parsed.netloc
-        
-        path = parsed.path.rstrip("/")
-        for marker in ("/browse/", "/issues/", "/projects/", "/rest/"):
-            if marker in path:
-                path = path.split(marker, 1)[0]
-                break
-        
-        normalized = f"{scheme}://{netloc}{path}"
-        return normalized.rstrip("/")
-    except Exception:
-        return trimmed
+    return normalize_instance_url(url)
 
 
 def _serialize_issue_type(issue_type: dict) -> JiraIssueTypeResponse:
-    return JiraIssueTypeResponse(
-        id=str(issue_type.get("id", "")),
-        name=str(issue_type.get("name", "")),
-        icon_url=issue_type.get("iconUrl") or issue_type.get("icon_url"),
-        subtask=bool(issue_type.get("subtask", False)),
-    )
+    return serialize_issue_type(issue_type)
 
 
 def _project_key_from_issue_key(issue_key: Optional[str]) -> Optional[str]:
@@ -309,15 +291,7 @@ def _decode_text_attachment(content: bytes, content_type: str, filename: str) ->
 
 
 def _select_issue_type(issue_types: list[dict], issue_type_id: Optional[str]) -> Optional[dict]:
-    if issue_type_id:
-        exact = next((item for item in issue_types if str(item.get("id")) == str(issue_type_id)), None)
-        if exact:
-            return exact
-
-    bug_type = next((item for item in issue_types if "bug" in str(item.get("name", "")).strip().lower()), None)
-    if bug_type:
-        return bug_type
-    return issue_types[0] if issue_types else None
+    return service_select_issue_type(issue_types, issue_type_id)
 
 
 def _normalize_folder_path(folder_path: Optional[str], story_issue_key: str) -> str:
@@ -369,21 +343,7 @@ def _detect_repository_path_field_id(fields: list[dict], repository_path_field_i
 
 
 def _resolve_link_type_candidates(link_type: Optional[str], available_types: list[str]) -> list[str]:
-    candidates: list[str] = []
-    for candidate in [link_type, "Tests", "Test", "Relates"]:
-        if candidate and candidate not in candidates:
-            candidates.append(candidate)
-
-    if available_types:
-        available_lookup = {name.lower(): name for name in available_types}
-        resolved: list[str] = []
-        for candidate in candidates:
-            match = available_lookup.get(candidate.lower())
-            if match and match not in resolved:
-                resolved.append(match)
-        if resolved:
-            return resolved
-    return candidates
+    return service_resolve_link_type_candidates(link_type, available_types)
 
 
 def _format_test_issue_description(story_issue_key: str, test_case: dict) -> str:
@@ -580,6 +540,7 @@ def resolve_jira_bootstrap_context(
     current_user: User,
     request: Request
 ) -> JiraBootstrapContextResponse:
+    return resolve_jira_bootstrap_context_service(req, db, current_user, request)
     connections = db.query(JiraConnection).filter(
         JiraConnection.user_id == current_user.id
     ).order_by(JiraConnection.is_active.desc(), JiraConnection.id.asc()).all()
@@ -741,7 +702,7 @@ def list_connections(
     db: Session = Depends(deps.get_db), 
     current_user: User = Depends(deps.get_current_user)
 ):
-    return db.query(JiraConnection).filter(JiraConnection.user_id == current_user.id).order_by(JiraConnection.is_active.desc(), JiraConnection.id.asc()).all()
+    return list_user_connections(db, current_user)
 
 
 @router.post("/bootstrap-context", response_model=JiraBootstrapContextResponse)
@@ -759,32 +720,7 @@ def create_connection(
     db: Session = Depends(deps.get_db), 
     current_user: User = Depends(deps.get_current_user)
 ):
-    if not conn_in.token or not conn_in.token.strip():
-        raise HTTPException(status_code=400, detail="API Token cannot be empty")
-    enforce_secure_jira_ssl(conn_in.verify_ssl)
-    safe_host_url = validate_connection_host(conn_in.host_url, conn_in.auth_type.value)
-    _verify_connection_credentials(conn_in.auth_type, safe_host_url, conn_in.username, conn_in.token, conn_in.verify_ssl)
-
-    encrypted = security.encrypt_credential(conn_in.token)
-    db.query(JiraConnection).filter(JiraConnection.user_id == current_user.id).update(
-        {JiraConnection.is_active: False},
-        synchronize_session=False
-    )
-
-    conn = JiraConnection(
-        user_id=current_user.id,
-        auth_type=conn_in.auth_type,
-        host_url=safe_host_url,
-        username=conn_in.username,
-        encrypted_token=encrypted,
-        verify_ssl=conn_in.verify_ssl,
-        is_active=True,
-    )
-    db.add(conn)
-    db.commit()
-    db.refresh(conn)
-    log_audit("jira.connection_create", current_user.id, db=db, connection_id=conn.id, host_url=conn.host_url)
-    return conn
+    return create_user_connection(db, current_user, conn_in)
 
 @router.patch("/connections/{conn_id}", response_model=JiraConnectionResponse)
 def update_connection(
@@ -793,53 +729,7 @@ def update_connection(
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
-    conn = db.query(JiraConnection).filter(JiraConnection.id == conn_id, JiraConnection.user_id == current_user.id).first()
-    if not conn:
-        raise HTTPException(status_code=404, detail="Connection not found")
-    
-    update_data = conn_in.model_dump(exclude_unset=True)
-    effective_auth_type = update_data.get("auth_type", conn.auth_type)
-    effective_verify_ssl = update_data.get("verify_ssl", conn.verify_ssl)
-    effective_host_url = conn.host_url
-    effective_username = update_data.get("username", conn.username)
-    effective_token = None
-    if "verify_ssl" in update_data and update_data["verify_ssl"] is not None:
-        enforce_secure_jira_ssl(update_data["verify_ssl"])
-    if "host_url" in update_data and update_data["host_url"]:
-        update_data["host_url"] = validate_connection_host(update_data["host_url"], effective_auth_type.value)
-        effective_host_url = update_data["host_url"]
-    if "token" in update_data:
-        token_val = update_data.pop("token")
-        if token_val and token_val.strip():
-            update_data["encrypted_token"] = security.encrypt_credential(token_val)
-            effective_token = token_val.strip()
-
-    should_verify = any(key in update_data for key in ("auth_type", "host_url", "username", "verify_ssl", "encrypted_token"))
-    if should_verify:
-        if effective_token is None:
-            effective_token = security.decrypt_credential(conn.encrypted_token)
-        _verify_connection_credentials(
-            effective_auth_type,
-            effective_host_url,
-            effective_username,
-            effective_token,
-            effective_verify_ssl,
-        )
-    
-    if update_data.get("is_active") is True:
-        db.query(JiraConnection).filter(
-            JiraConnection.user_id == current_user.id,
-            JiraConnection.id != conn_id
-        ).update({JiraConnection.is_active: False}, synchronize_session=False)
-
-    for field, value in update_data.items():
-        setattr(conn, field, value)
-    
-    db.add(conn)
-    db.commit()
-    db.refresh(conn)
-    log_audit("jira.connection_update", current_user.id, db=db, connection_id=conn_id)
-    return conn
+    return update_user_connection(db, current_user, conn_id, conn_in)
 
 @router.delete("/connections/{conn_id}", status_code=204)
 def delete_connection(
@@ -847,21 +737,7 @@ def delete_connection(
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
-    conn = db.query(JiraConnection).filter(JiraConnection.id == conn_id, JiraConnection.user_id == current_user.id).first()
-    if not conn:
-        raise HTTPException(status_code=404, detail="Connection not found")
-
-    was_active = bool(conn.is_active)
-    db.delete(conn)
-
-    if was_active:
-        replacement = db.query(JiraConnection).filter(JiraConnection.user_id == current_user.id).order_by(JiraConnection.id.asc()).first()
-        if replacement:
-            replacement.is_active = True
-            db.add(replacement)
-
-    db.commit()
-    log_audit("jira.connection_delete", current_user.id, db=db, connection_id=conn_id)
+    delete_user_connection(db, current_user, conn_id)
     return None
 
 @router.get("/connections/{conn_id}/projects")
@@ -914,50 +790,18 @@ def bulk_fetch_epic_children(
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
-    epic_key = req.epic_key.strip().upper()
-    if not epic_key or "-" not in epic_key:
-        raise HTTPException(status_code=400, detail="A valid Epic issue key is required")
-
-    conn = db.query(JiraConnection).filter(JiraConnection.id == conn_id, JiraConnection.user_id == current_user.id).first()
-    if not conn:
-        raise HTTPException(status_code=404, detail="Connection not found")
-
+    conn = get_owned_connection(db, current_user.id, conn_id)
     adapter = get_adapter(conn)
-    jql = _build_epic_children_jql(epic_key)
-    issues = adapter.search_issues(
-        jql,
-        fields=["summary", "description", "issuetype", "status", "attachment", "parent"],
-        max_results=max(1, min(req.max_results, 250)),
-    )
-    normalized_issues = [_normalize_bulk_issue(issue) for issue in issues]
-
-    epic_attachments: list[JiraAttachmentResponse] = []
-    try:
-        epic = adapter.fetch_issue(epic_key)
-        fields = epic.get("fields", {}) if isinstance(epic, dict) else {}
-        raw_attachments = fields.get("attachment") or []
-        epic_attachments = [
-            _attachment_response(attachment, epic_key)
-            for attachment in raw_attachments
-            if isinstance(attachment, dict) and attachment.get("id")
-        ]
-    except HTTPException:
-        epic_attachments = []
-
+    response = fetch_epic_children(adapter, req.epic_key, req.max_results)
     log_audit(
         "jira.bulk_fetch_epic",
         current_user.id,
         db=db,
         jira_connection_id=conn.id,
-        epic_key=epic_key,
-        issue_count=len(normalized_issues),
+        epic_key=response.epic_key,
+        issue_count=len(response.issues),
     )
-    return JiraBulkFetchResponse(
-        epic_key=epic_key,
-        jql=jql,
-        issues=normalized_issues,
-        epic_attachments=epic_attachments,
-    )
+    return response
 
 
 @router.get("/connections/{conn_id}/attachments/{attachment_id}")
@@ -967,9 +811,7 @@ def fetch_jira_attachment(
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
-    conn = db.query(JiraConnection).filter(JiraConnection.id == conn_id, JiraConnection.user_id == current_user.id).first()
-    if not conn:
-        raise HTTPException(status_code=404, detail="Connection not found")
+    conn = get_owned_connection(db, current_user.id, conn_id)
 
     adapter = get_adapter(conn)
     content, content_type, filename = adapter.fetch_attachment(attachment_id)
@@ -988,13 +830,11 @@ def fetch_jira_attachment_text(
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
-    conn = db.query(JiraConnection).filter(JiraConnection.id == conn_id, JiraConnection.user_id == current_user.id).first()
-    if not conn:
-        raise HTTPException(status_code=404, detail="Connection not found")
+    conn = get_owned_connection(db, current_user.id, conn_id)
 
     adapter = get_adapter(conn)
     content, content_type, filename = adapter.fetch_attachment(attachment_id)
-    text, truncated = _decode_text_attachment(content, content_type, filename)
+    text, truncated = decode_text_attachment(content, content_type, filename)
     if not text:
         raise HTTPException(status_code=400, detail="The selected attachment does not contain readable BRD text")
 
@@ -1125,7 +965,7 @@ def _publish_xray_cloud_test_suite(
     db: Session,
     request: Request,
 ) -> XrayTestSuitePublishResponse:
-    return _publish_xray_server_test_suite(req.jira_connection_id, req, current_user, db, request)
+    return XrayCloudPublisher(db, current_user, request).publish(req.jira_connection_id, req)
 
 
 def _publish_xray_server_test_suite(
@@ -1135,115 +975,7 @@ def _publish_xray_server_test_suite(
     db: Session,
     request: Request,
 ) -> XrayTestSuitePublishResponse:
-    conn = db.query(JiraConnection).filter(
-        JiraConnection.id == conn_id,
-        JiraConnection.user_id == current_user.id
-    ).first()
-    if not conn:
-        raise HTTPException(status_code=404, detail="Connection not found")
-
-    adapter = get_adapter(conn)
-    engine = JiraMetadataEngine(adapter)
-
-    project_metadata = engine.get_project_metadata(req.xray_project_id)
-    test_issue_type_id = _resolve_test_issue_type_id(project_metadata, req.test_issue_type_id, req.test_issue_type_name)
-    test_fields = engine.get_field_schema(req.xray_project_id, test_issue_type_id)
-    repository_path_field_id = _detect_repository_path_field_id(test_fields, req.repository_path_field_id)
-    folder_path = _normalize_folder_path(req.folder_path, req.story_issue_key)
-    xray_project_key = req.xray_project_key or str(project_metadata.get("project_key") or "").strip()
-    xray_folder_id: Optional[str] = None
-    uses_raven_repository = isinstance(adapter, JiraServerAdapter) and bool(xray_project_key)
-    if uses_raven_repository:
-        xray_folder_id = _ensure_xray_folder(adapter, xray_project_key, folder_path)
-
-    available_link_types: list[str] = []
-    try:
-        available_link_types = adapter.get_issue_link_types()
-    except HTTPException:
-        available_link_types = []
-
-    link_candidates = _resolve_link_type_candidates(req.link_type, available_link_types)
-    created_tests: list[XrayPublishedTest] = []
-    warnings: list[str] = []
-    link_type_used: Optional[str] = None
-
-    try:
-        for test_case in req.test_cases:
-            test_case_payload = test_case.model_dump()
-            fields = {
-                "project": {"key": req.xray_project_key} if req.xray_project_key else {"id": req.xray_project_id},
-                "summary": test_case.title,
-                "description": _format_test_issue_description(req.story_issue_key, test_case_payload),
-                "issuetype": {"id": test_issue_type_id},
-            }
-            _apply_optional_xray_fields(fields, test_fields, test_case_payload)
-            if repository_path_field_id:
-                fields[repository_path_field_id] = folder_path
-
-            issue_key = adapter.create_issue({"fields": fields})
-            created_tests.append(XrayPublishedTest(id=issue_key, key=issue_key, self=""))
-            if isinstance(adapter, JiraServerAdapter):
-                _add_xray_manual_steps(adapter, issue_key, test_case_payload)
-                if xray_project_key and xray_folder_id:
-                    adapter.add_test_to_folder(xray_project_key, xray_folder_id, issue_key)
-
-            linked = False
-            for candidate in link_candidates:
-                try:
-                    adapter.link_issues(issue_key, candidate, req.story_issue_key)
-                    linked = True
-                    if not link_type_used:
-                        link_type_used = candidate
-                    break
-                except HTTPException:
-                    continue
-
-            if not linked:
-                warnings.append(f"Created {issue_key} but could not link it to {req.story_issue_key}")
-    except HTTPException as exc:
-        rollback_failed_keys: list[str] = []
-        for created_test in reversed(created_tests):
-            try:
-                adapter.delete_issue(created_test.key)
-            except HTTPException:
-                rollback_failed_keys.append(created_test.key)
-        detail = exc.detail
-        if rollback_failed_keys:
-            detail = {
-                "error": "Xray test publish failed and some created tests could not be rolled back.",
-                "jira_error": exc.detail,
-                "rollback_failed_issue_keys": rollback_failed_keys,
-            }
-        raise HTTPException(status_code=exc.status_code, detail=detail) from exc
-
-    if not repository_path_field_id and not uses_raven_repository:
-        warnings.append("Created tests without setting an Xray repository path because no repository path field was detected")
-
-    response = XrayTestSuitePublishResponse(
-        created_tests=created_tests,
-        folder_path=folder_path,
-        repository_path_field_id=repository_path_field_id,
-        link_type_used=link_type_used,
-        warnings=warnings,
-    )
-    idempotency_store.store_response(
-        "jira.xray_publish",
-        str(current_user.id),
-        request.headers.get("Idempotency-Key"),
-        req.model_dump(),
-        response.model_dump(),
-    )
-    log_audit(
-        "jira.xray_publish",
-        current_user.id,
-        db=db,
-        jira_connection_id=req.jira_connection_id,
-        project_id=req.xray_project_id,
-        request_path=str(request.url.path),
-        created_test_keys=[test.key for test in created_tests],
-        warnings=warnings,
-    )
-    return response
+    return XrayServerPublisher(db, current_user, request).publish(conn_id, req)
 
 @router.post("/connections/{conn_id}/xray/test-suite", response_model=XrayTestSuitePublishResponse)
 def publish_xray_test_suite(
