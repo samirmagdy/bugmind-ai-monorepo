@@ -145,6 +145,50 @@ class TestSuiteResponse(BaseModel):
     coverage_score: float
 
 
+class BulkStoryInput(BaseModel):
+    key: str
+    summary: str = ""
+    description: Any = None
+    acceptanceCriteria: Optional[str] = None
+    acceptance_criteria: Optional[str] = None
+
+
+class BulkAIBaseRequest(BaseModel):
+    jira_connection_id: int
+    instance_url: Optional[str] = None
+    project_key: str
+    project_id: Optional[str] = None
+    issue_type_id: str
+    issue_type_name: Optional[str] = None
+    stories: List[BulkStoryInput]
+    model: Optional[str] = None
+    supporting_context: Optional[str] = None
+
+
+class BulkTestGenerationRequest(BulkAIBaseRequest):
+    pass
+
+
+class BulkTestGenerationItem(BaseModel):
+    storyKey: str
+    ok: bool
+    result: Optional[TestSuiteResponse] = None
+    error: Optional[str] = None
+
+
+class BulkTestGenerationResponse(BaseModel):
+    results: List[BulkTestGenerationItem]
+    warnings: List[str] = []
+
+
+class BulkAnalyzeRequest(BulkAIBaseRequest):
+    pass
+
+
+class BulkBrdCompareRequest(BulkAIBaseRequest):
+    brd_text: str
+
+
 class XrayTestSuitePublishRequest(BaseModel):
     jira_connection_id: int
     story_issue_key: str

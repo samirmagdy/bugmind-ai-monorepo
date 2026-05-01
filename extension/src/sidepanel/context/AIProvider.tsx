@@ -1084,16 +1084,25 @@ export const AIProvider: React.FC<{
     updateSession({ loading: true, error: null, success: null, bulkProgressMessage: 'Starting bulk test generation...', bulkProgressPercent: 0 });
     try {
       const { projectKey, projectId } = getProjectRequestParams();
-      const result = await sendBulkWorkerMessage<{ results?: Array<{ storyKey?: string; ok?: boolean; result?: AITestCasesResponsePayload; error?: string }> }>('BULK_GENERATE', {
-        jiraConnectionId: session.jiraConnectionId,
+      const res = await apiRequest(`${apiBase}/ai/bulk/test-cases`, {
+        method: 'POST',
+        token: authToken,
+        onUnauthorized: refreshAuthToken,
+        body: JSON.stringify({
+        jira_connection_id: session.jiraConnectionId,
         stories,
-        issueTypeId: session.selectedIssueType.id,
-        issueTypeName: session.selectedIssueType.name,
-        instanceUrl: session.instanceUrl,
-        projectKey,
-        projectId,
-        supportingContext: session.generationSupportingContext,
+        issue_type_id: session.selectedIssueType.id,
+        issue_type_name: session.selectedIssueType.name,
+        instance_url: session.instanceUrl,
+        project_key: projectKey,
+        project_id: projectId,
+        supporting_context: session.generationSupportingContext,
+        })
       });
+      if (!res.ok) {
+        await throwApiErrorResponse(res, `Bulk test generation failed (${res.status})`);
+      }
+      const result = await readJsonResponse<{ results?: Array<{ storyKey?: string; ok?: boolean; result?: AITestCasesResponsePayload; error?: string }>; warnings?: string[] }>(res);
 
       const testCases = (result.results || []).flatMap((item) => {
         const storyKey = item.storyKey || 'Story';
@@ -1110,7 +1119,9 @@ export const AIProvider: React.FC<{
         coverageScore: null,
         bulkProgressMessage: `Generated ${testCases.length} test cases across ${stories.length} stories.`,
         bulkProgressPercent: 100,
-        success: failures.length ? `Generated ${testCases.length} test cases. ${failures.length} stories failed.` : `Generated ${testCases.length} test cases.`,
+        success: (result.warnings || []).length
+          ? (result.warnings || []).join(' ')
+          : failures.length ? `Generated ${testCases.length} test cases. ${failures.length} stories failed.` : `Generated ${testCases.length} test cases.`,
       });
       fetchUsage();
     } catch (err) {
@@ -1118,7 +1129,7 @@ export const AIProvider: React.FC<{
     } finally {
       updateSession({ loading: false });
     }
-  }, [fetchUsage, getProjectRequestParams, getSelectedBulkStories, normalizeFrontendTestCase, sendBulkWorkerMessage, session.generationSupportingContext, session.instanceUrl, session.jiraConnectionId, session.selectedIssueType, updateSession]);
+  }, [apiBase, authToken, fetchUsage, getProjectRequestParams, getSelectedBulkStories, normalizeFrontendTestCase, refreshAuthToken, session.generationSupportingContext, session.instanceUrl, session.jiraConnectionId, session.selectedIssueType, updateSession]);
 
   const bulkAnalyzeStories = useCallback(async () => {
     const stories = getSelectedBulkStories();
@@ -1130,15 +1141,24 @@ export const AIProvider: React.FC<{
     updateSession({ loading: true, error: null, success: null, bulkProgressMessage: 'Starting cross-story audit...', bulkProgressPercent: 0 });
     try {
       const { projectKey, projectId } = getProjectRequestParams();
-      const result = await sendBulkWorkerMessage<GapAnalysisResponsePayload>('BULK_ANALYZE', {
-        jiraConnectionId: session.jiraConnectionId,
+      const res = await apiRequest(`${apiBase}/ai/bulk/analyze`, {
+        method: 'POST',
+        token: authToken,
+        onUnauthorized: refreshAuthToken,
+        body: JSON.stringify({
+        jira_connection_id: session.jiraConnectionId,
         stories,
-        issueTypeId: session.selectedIssueType.id,
-        issueTypeName: session.selectedIssueType.name,
-        instanceUrl: session.instanceUrl,
-        projectKey,
-        projectId,
+        issue_type_id: session.selectedIssueType.id,
+        issue_type_name: session.selectedIssueType.name,
+        instance_url: session.instanceUrl,
+        project_key: projectKey,
+        project_id: projectId,
+        })
       });
+      if (!res.ok) {
+        await throwApiErrorResponse(res, `Bulk analysis failed (${res.status})`);
+      }
+      const result = await readJsonResponse<GapAnalysisResponsePayload>(res);
       const bugs = (result.bugs || []).map(toFrontendBug);
       updateSession({
         bugs,
@@ -1156,7 +1176,7 @@ export const AIProvider: React.FC<{
     } finally {
       updateSession({ loading: false });
     }
-  }, [fetchUsage, getProjectRequestParams, getSelectedBulkStories, normalizeGapAnalysisSummary, sendBulkWorkerMessage, session.instanceUrl, session.jiraConnectionId, session.selectedIssueType, toFrontendBug, updateSession]);
+  }, [apiBase, authToken, fetchUsage, getProjectRequestParams, getSelectedBulkStories, normalizeGapAnalysisSummary, refreshAuthToken, session.instanceUrl, session.jiraConnectionId, session.selectedIssueType, toFrontendBug, updateSession]);
 
   const bulkCompareBrd = useCallback(async () => {
     const stories = getSelectedBulkStories();
@@ -1168,17 +1188,25 @@ export const AIProvider: React.FC<{
     updateSession({ loading: true, error: null, success: null, bulkProgressMessage: 'Starting BRD comparison...', bulkProgressPercent: 0 });
     try {
       const { projectKey, projectId } = getProjectRequestParams();
-      const result = await sendBulkWorkerMessage<GapAnalysisResponsePayload>('PROCESS_GOAL', {
-        goalId: 'brd-compare',
-        jiraConnectionId: session.jiraConnectionId,
+      const res = await apiRequest(`${apiBase}/ai/bulk/brd-compare`, {
+        method: 'POST',
+        token: authToken,
+        onUnauthorized: refreshAuthToken,
+        body: JSON.stringify({
+        jira_connection_id: session.jiraConnectionId,
         stories,
-        brdText: session.bulkBrdText,
-        issueTypeId: session.selectedIssueType.id,
-        issueTypeName: session.selectedIssueType.name,
-        instanceUrl: session.instanceUrl,
-        projectKey,
-        projectId,
+        brd_text: session.bulkBrdText,
+        issue_type_id: session.selectedIssueType.id,
+        issue_type_name: session.selectedIssueType.name,
+        instance_url: session.instanceUrl,
+        project_key: projectKey,
+        project_id: projectId,
+        })
       });
+      if (!res.ok) {
+        await throwApiErrorResponse(res, `BRD comparison failed (${res.status})`);
+      }
+      const result = await readJsonResponse<GapAnalysisResponsePayload>(res);
       const bugs = (result.bugs || []).map(toFrontendBug);
       updateSession({
         bugs,
@@ -1196,7 +1224,7 @@ export const AIProvider: React.FC<{
     } finally {
       updateSession({ loading: false });
     }
-  }, [fetchUsage, getProjectRequestParams, getSelectedBulkStories, normalizeGapAnalysisSummary, sendBulkWorkerMessage, session.bulkBrdText, session.instanceUrl, session.jiraConnectionId, session.selectedIssueType, toFrontendBug, updateSession]);
+  }, [apiBase, authToken, fetchUsage, getProjectRequestParams, getSelectedBulkStories, normalizeGapAnalysisSummary, refreshAuthToken, session.bulkBrdText, session.instanceUrl, session.jiraConnectionId, session.selectedIssueType, toFrontendBug, updateSession]);
 
   const bulkLoadAttachmentAsBrd = useCallback(async (attachmentId: string) => {
     if (!session.jiraConnectionId || !attachmentId) return;

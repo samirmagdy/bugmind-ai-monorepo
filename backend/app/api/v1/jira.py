@@ -41,6 +41,9 @@ from app.core.request_security import enforce_secure_jira_ssl, validate_connecti
 from app.core.config import settings
 
 router = APIRouter()
+MAX_BRD_ATTACHMENT_BYTES = 10 * 1024 * 1024
+MAX_BRD_ATTACHMENT_TEXT_CHARS = 120_000
+MAX_BRD_PDF_PAGES = 50
 
 from cryptography.fernet import InvalidToken
 
@@ -205,7 +208,20 @@ def _normalize_bulk_issue(issue: dict) -> JiraBulkIssueResponse:
     )
 
 
-def _decode_text_attachment(content: bytes, content_type: str, filename: str) -> str:
+def _limit_extracted_attachment_text(text: str) -> tuple[str, bool]:
+    stripped = text.strip()
+    if len(stripped) <= MAX_BRD_ATTACHMENT_TEXT_CHARS:
+        return stripped, False
+    return stripped[:MAX_BRD_ATTACHMENT_TEXT_CHARS].rstrip(), True
+
+
+def _decode_text_attachment(content: bytes, content_type: str, filename: str) -> tuple[str, bool]:
+    if len(content) > MAX_BRD_ATTACHMENT_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail="The selected attachment is too large for BRD extraction. Use a file up to 10 MB or paste the relevant text manually.",
+        )
+
     normalized_type = (content_type or "").split(";", 1)[0].strip().lower()
     normalized_name = filename.strip().lower()
 
@@ -223,10 +239,10 @@ def _decode_text_attachment(content: bytes, content_type: str, filename: str) ->
     ):
         for encoding in ("utf-8-sig", "utf-8", "utf-16"):
             try:
-                return content.decode(encoding).strip()
+                return _limit_extracted_attachment_text(content.decode(encoding))
             except UnicodeDecodeError:
                 continue
-        return content.decode("utf-8", errors="replace").strip()
+        return _limit_extracted_attachment_text(content.decode("utf-8", errors="replace"))
 
     is_docx = (
         normalized_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -258,13 +274,19 @@ def _decode_text_attachment(content: bytes, content_type: str, filename: str) ->
             text = "".join(parts).strip()
             if text:
                 paragraphs.append(text)
-        return "\n\n".join(paragraphs).strip()
+        return _limit_extracted_attachment_text("\n\n".join(paragraphs))
 
     is_pdf = normalized_type == "application/pdf" or normalized_name.endswith(".pdf")
     if is_pdf:
         try:
             reader = PdfReader(BytesIO(content))
             pages = []
+            page_count = len(reader.pages)
+            if page_count > MAX_BRD_PDF_PAGES:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"The selected PDF has {page_count} pages. Use a PDF up to {MAX_BRD_PDF_PAGES} pages or paste the relevant BRD text manually.",
+                )
             for index, page in enumerate(reader.pages, start=1):
                 page_text = (page.extract_text() or "").strip()
                 if page_text:
@@ -278,7 +300,7 @@ def _decode_text_attachment(content: bytes, content_type: str, filename: str) ->
                 status_code=400,
                 detail="The selected PDF does not contain extractable text. Use an OCR/text PDF or paste the BRD text manually.",
             )
-        return text
+        return _limit_extracted_attachment_text(text)
 
     raise HTTPException(
         status_code=415,
@@ -972,7 +994,7 @@ def fetch_jira_attachment_text(
 
     adapter = get_adapter(conn)
     content, content_type, filename = adapter.fetch_attachment(attachment_id)
-    text = _decode_text_attachment(content, content_type, filename)
+    text, truncated = _decode_text_attachment(content, content_type, filename)
     if not text:
         raise HTTPException(status_code=400, detail="The selected attachment does not contain readable BRD text")
 
@@ -981,6 +1003,7 @@ def fetch_jira_attachment_text(
         filename=filename,
         mime_type=content_type,
         content=text,
+        truncated=truncated,
     )
 
 

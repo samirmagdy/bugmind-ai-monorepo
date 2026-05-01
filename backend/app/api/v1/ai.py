@@ -11,6 +11,11 @@ from app.models.subscription import Subscription, PlanType
 from app.models.usage import UsageLog
 from app.schemas.bug import (
     AIWorkItemGenerationRequest,
+    BulkAnalyzeRequest,
+    BulkBrdCompareRequest,
+    BulkTestGenerationItem,
+    BulkTestGenerationRequest,
+    BulkTestGenerationResponse,
     GapAnalysisResponse,
     ManualBugGenerationResponse,
     PreviewPreparationRequest,
@@ -43,6 +48,9 @@ logger = logging.getLogger(__name__)
 
 STANDARD_ISSUE_FIELDS = {"summary", "description", "issuetype", "project"}
 NON_CREATABLE_ISSUE_FIELDS = {"issuelinks"}
+BULK_STORY_CONTEXT_CHAR_LIMIT = 6_000
+BULK_COMBINED_CONTEXT_CHAR_LIMIT = 45_000
+BULK_BRD_TEXT_CHAR_LIMIT = 60_000
 
 
 def _get_field_mapping_record(
@@ -87,6 +95,68 @@ def _compose_story_context(selected_text: Optional[str], issue_context) -> str:
         return selected_text.strip()
 
     raise HTTPException(status_code=400, detail="Issue context is required for AI generation")
+
+
+def _stringify_bulk_description(value: object) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        parts: List[str] = []
+
+        def walk(node: object) -> None:
+            if isinstance(node, dict):
+                text = node.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+                content = node.get("content")
+                if isinstance(content, list):
+                    for child in content:
+                        walk(child)
+            elif isinstance(node, list):
+                for child in node:
+                    walk(child)
+
+        walk(value)
+        return " ".join(parts)
+    return ""
+
+
+def _truncate_text(value: str, limit: int, label: str, warnings: List[str]) -> str:
+    text = str(value or "").strip()
+    if len(text) <= limit:
+        return text
+    warnings.append(f"{label} was truncated to {limit} characters for reliable AI processing.")
+    return text[:limit].rstrip()
+
+
+def _bulk_story_context(story, warnings: List[str]) -> str:
+    description = _truncate_text(
+        _stringify_bulk_description(story.description),
+        BULK_STORY_CONTEXT_CHAR_LIMIT,
+        f"{story.key} description",
+        warnings,
+    )
+    acceptance_criteria = story.acceptance_criteria or story.acceptanceCriteria or ""
+    if acceptance_criteria:
+        acceptance_criteria = _truncate_text(
+            acceptance_criteria,
+            2_000,
+            f"{story.key} acceptance criteria",
+            warnings,
+        )
+    sections = [
+        f"Story: {story.key}",
+        f"Summary: {story.summary or ''}",
+        f"Description:\n{description}",
+    ]
+    if acceptance_criteria:
+        sections.append(f"Acceptance Criteria:\n{acceptance_criteria}")
+    return "\n".join(sections)
+
+
+def _bulk_combined_story_context(stories: list, warnings: List[str]) -> str:
+    combined = "\n\n".join(_bulk_story_context(story, warnings) for story in stories)
+    return _truncate_text(combined, BULK_COMBINED_CONTEXT_CHAR_LIMIT, "Combined story context", warnings)
 
 
 def _normalize_text_for_overlap(value: object) -> str:
@@ -665,6 +735,164 @@ async def generate_test_suite(
         issue_type_id=req.issue_type_id,
         request_path=str(request.url.path),
         generated_count=len(response.test_cases),
+    )
+    return response
+
+
+@router.post("/bulk/test-cases", response_model=BulkTestGenerationResponse)
+async def generate_bulk_test_suites(
+    request: Request,
+    req: BulkTestGenerationRequest,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    rate_limiter.check("ai.bulk_test_cases", str(current_user.id), limit=2, window_seconds=60)
+    LimitChecker.check_allowed(db, current_user.id)
+    if not req.stories:
+        raise HTTPException(status_code=400, detail="At least one story is required for bulk test generation")
+
+    conn = _get_owned_connection(db, current_user.id, req.jira_connection_id)
+    _assert_connection_matches_instance(conn, req.instance_url)
+
+    custom_api_key = decrypt_credential(current_user.encrypted_ai_api_key) if current_user.encrypted_ai_api_key else None
+    generator = BugGenerator(api_key=custom_api_key)
+    results: List[BulkTestGenerationItem] = []
+    warnings: List[str] = []
+
+    for story in req.stories[:50]:
+        story_warnings: List[str] = []
+        try:
+            story_context = _bulk_story_context(story, story_warnings)
+            suite = await generator.generate_test_cases(
+                story_context,
+                model=req.model or current_user.custom_ai_model,
+                issue_type_name=req.issue_type_name,
+                supporting_context=req.supporting_context,
+            )
+            normalized_tests = [
+                normalized
+                for raw_test in (suite.get("test_cases") or [])
+                if (normalized := _normalize_test_case(raw_test))
+            ]
+            if not normalized_tests:
+                raise HTTPException(status_code=502, detail="AI returned no usable test cases")
+            results.append(BulkTestGenerationItem(
+                storyKey=story.key,
+                ok=True,
+                result=TestSuiteResponse(
+                    test_cases=normalized_tests,
+                    coverage_score=_normalize_percentage(suite.get("coverage_score"), 0.0),
+                ),
+            ))
+            warnings.extend(story_warnings)
+        except HTTPException as exc:
+            results.append(BulkTestGenerationItem(storyKey=story.key, ok=False, error=str(exc.detail)))
+        except Exception as exc:
+            logger.exception("bulk_test_generation_failed story=%s", story.key)
+            results.append(BulkTestGenerationItem(storyKey=story.key, ok=False, error=str(exc)))
+
+    LimitChecker.record_usage(db, current_user.id, "/bulk/test-cases", 0)
+    log_audit(
+        "ai.bulk_test_cases",
+        current_user.id,
+        db=db,
+        jira_connection_id=req.jira_connection_id,
+        project_key=req.project_key,
+        issue_type_id=req.issue_type_id,
+        request_path=str(request.url.path),
+        story_count=len(req.stories),
+        success_count=sum(1 for item in results if item.ok),
+    )
+    return BulkTestGenerationResponse(results=results, warnings=list(dict.fromkeys(warnings)))
+
+
+@router.post("/bulk/analyze", response_model=GapAnalysisResponse)
+async def bulk_analyze_stories(
+    request: Request,
+    req: BulkAnalyzeRequest,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    rate_limiter.check("ai.bulk_analyze", str(current_user.id), limit=2, window_seconds=60)
+    LimitChecker.check_allowed(db, current_user.id)
+    if not req.stories:
+        raise HTTPException(status_code=400, detail="At least one story is required for bulk analysis")
+
+    warnings: List[str] = []
+    story_context = _bulk_combined_story_context(req.stories[:50], warnings)
+    bulk_req = AIWorkItemGenerationRequest(
+        selected_text=f"Analyze these {len(req.stories)} stories for contradictions, redundancies, missing requirements, and cross-story risks.\n\n{story_context}",
+        jira_connection_id=req.jira_connection_id,
+        instance_url=req.instance_url,
+        project_key=req.project_key,
+        project_id=req.project_id,
+        issue_type_id=req.issue_type_id,
+        issue_type_name=req.issue_type_name,
+        model=req.model,
+        bug_count=7,
+        supporting_context=req.supporting_context,
+    )
+    response = await _generate_findings_response(bulk_req, db, current_user, include_analysis_summary=True)
+    response.warnings = list(dict.fromkeys([*response.warnings, *warnings]))
+    LimitChecker.record_usage(db, current_user.id, "/bulk/analyze", 0)
+    log_audit(
+        "ai.bulk_analyze",
+        current_user.id,
+        db=db,
+        jira_connection_id=req.jira_connection_id,
+        project_key=req.project_key,
+        issue_type_id=req.issue_type_id,
+        request_path=str(request.url.path),
+        story_count=len(req.stories),
+    )
+    return response
+
+
+@router.post("/bulk/brd-compare", response_model=GapAnalysisResponse)
+async def bulk_compare_brd(
+    request: Request,
+    req: BulkBrdCompareRequest,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    rate_limiter.check("ai.bulk_brd_compare", str(current_user.id), limit=2, window_seconds=60)
+    LimitChecker.check_allowed(db, current_user.id)
+    if not req.stories:
+        raise HTTPException(status_code=400, detail="At least one story is required for BRD comparison")
+    if not req.brd_text.strip():
+        raise HTTPException(status_code=400, detail="BRD text is required for comparison")
+
+    warnings: List[str] = []
+    brd_text = _truncate_text(req.brd_text, BULK_BRD_TEXT_CHAR_LIMIT, "BRD text", warnings)
+    story_context = _bulk_combined_story_context(req.stories[:50], warnings)
+    bulk_req = AIWorkItemGenerationRequest(
+        selected_text=(
+            "Compare this BRD against the Jira stories. Identify missing stories, contradictions, "
+            "ambiguous requirements, and uncovered acceptance criteria.\n\n"
+            f"BRD:\n{brd_text}\n\nStories:\n{story_context}"
+        ),
+        jira_connection_id=req.jira_connection_id,
+        instance_url=req.instance_url,
+        project_key=req.project_key,
+        project_id=req.project_id,
+        issue_type_id=req.issue_type_id,
+        issue_type_name=req.issue_type_name,
+        model=req.model,
+        bug_count=7,
+        supporting_context=req.supporting_context,
+    )
+    response = await _generate_findings_response(bulk_req, db, current_user, include_analysis_summary=True)
+    response.warnings = list(dict.fromkeys([*response.warnings, *warnings]))
+    LimitChecker.record_usage(db, current_user.id, "/bulk/brd-compare", 0)
+    log_audit(
+        "ai.bulk_brd_compare",
+        current_user.id,
+        db=db,
+        jira_connection_id=req.jira_connection_id,
+        project_key=req.project_key,
+        issue_type_id=req.issue_type_id,
+        request_path=str(request.url.path),
+        story_count=len(req.stories),
     )
     return response
 

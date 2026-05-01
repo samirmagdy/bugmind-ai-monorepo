@@ -10,8 +10,6 @@ import { deobfuscate } from '../sidepanel/utils/StorageObfuscator';
 const VERSION = '1.2.0';
 const DEFAULT_API_BASE = 'https://bugmind-ai-monorepo.onrender.com/api/v1';
 const BULK_MODE_DEFAULT = true;
-const BULK_REQUEST_DELAY_MS = 1200;
-const BULK_RATE_LIMIT_COOLDOWN_MS = 10000;
 const DOMAINS = {
   JIRA_CLOUD: '.atlassian.net',
   BROWSE_PATH: '/browse/',
@@ -167,10 +165,6 @@ async function backendFetch<T>(path: string, options: RequestInit, payload?: Rec
   return await response.json() as T;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 function broadcastProgress(action: string, tabId: number | undefined, message: string, percent: number): void {
   chrome.runtime.sendMessage({
     action,
@@ -179,30 +173,21 @@ function broadcastProgress(action: string, tabId: number | undefined, message: s
   }).catch(() => {});
 }
 
-function stringifyDescription(description: unknown): string {
-  if (typeof description === 'string') return description;
-  if (!description || typeof description !== 'object') return '';
-  const parts: string[] = [];
-  const walk = (node: unknown) => {
-    if (Array.isArray(node)) {
-      node.forEach(walk);
-      return;
-    }
-    if (!node || typeof node !== 'object') return;
-    const value = node as Record<string, unknown>;
-    if (typeof value.text === 'string') parts.push(value.text);
-    if (Array.isArray(value.content)) value.content.forEach(walk);
-  };
-  walk(description);
-  return parts.join(' ');
-}
-
-function buildIssueContext(story: BulkStory) {
+function buildBulkAIRequest(payload: Record<string, unknown>, stories: BulkStory[]) {
+  const issueTypeId = String(payload.issueTypeId || payload.issue_type_id || '');
+  const projectKey = String(payload.projectKey || payload.project_key || '');
+  if (!issueTypeId || stories.length === 0) {
+    throw new Error('Bulk AI action requires issueTypeId and stories.');
+  }
   return {
-    issue_key: story.key,
-    summary: story.summary || '',
-    description: stringifyDescription(story.description),
-    acceptance_criteria: story.acceptanceCriteria || '',
+    jira_connection_id: Number(payload.jiraConnectionId),
+    stories,
+    instance_url: payload.instanceUrl || payload.instance_url || null,
+    project_key: projectKey || (stories[0].key.includes('-') ? stories[0].key.split('-')[0] : ''),
+    project_id: payload.projectId || payload.project_id || undefined,
+    issue_type_id: issueTypeId,
+    issue_type_name: payload.issueTypeName || payload.issue_type_name || 'Story',
+    supporting_context: payload.supportingContext || payload.supporting_context || '',
   };
 }
 
@@ -231,50 +216,18 @@ async function startBulkGeneration(message: BulkMessage): Promise<unknown> {
   const payload = message.payload || {};
   const stories = (Array.isArray(payload.stories) ? payload.stories : []) as BulkStory[];
   const jiraConnectionId = Number(payload.jiraConnectionId);
-  const issueTypeId = String(payload.issueTypeId || payload.issue_type_id || '');
-  const projectKey = String(payload.projectKey || payload.project_key || '');
-  if (!jiraConnectionId || !issueTypeId || stories.length === 0) {
+  if (!jiraConnectionId || stories.length === 0) {
     throw new Error('BULK_GENERATE requires jiraConnectionId, issueTypeId, and stories.');
   }
 
-  const results: unknown[] = [];
-  for (let index = 0; index < stories.length; index += 1) {
-    const story = stories[index];
-    const percent = (index / stories.length) * 100;
-    broadcastProgress('bulkGenerationProgress', message.tabId, `Generating tests for ${story.key} (${index + 1}/${stories.length})...`, percent);
-
-    const body = {
-      selected_text: undefined,
-      issue_context: buildIssueContext(story),
-      jira_connection_id: jiraConnectionId,
-      instance_url: payload.instanceUrl || payload.instance_url || null,
-      project_key: projectKey || (story.key.includes('-') ? story.key.split('-')[0] : ''),
-      project_id: payload.projectId || payload.project_id || undefined,
-      issue_type_id: issueTypeId,
-      issue_type_name: payload.issueTypeName || payload.issue_type_name || 'Story',
-      supporting_context: payload.supportingContext || payload.supporting_context || '',
-    };
-
-    try {
-      const generated = await backendFetch<unknown>('/ai/test-cases', { method: 'POST', body: JSON.stringify(body) }, payload);
-      results.push({ storyKey: story.key, ok: true, result: generated });
-    } catch (error) {
-      const err = error as Error & { status?: number; retryable?: boolean };
-      if (err.status === 429 || err.retryable) {
-        broadcastProgress('bulkGenerationProgress', message.tabId, `Rate limited. Cooling down before retrying ${story.key}...`, percent);
-        await sleep(BULK_RATE_LIMIT_COOLDOWN_MS);
-        const generated = await backendFetch<unknown>('/ai/test-cases', { method: 'POST', body: JSON.stringify(body) }, payload);
-        results.push({ storyKey: story.key, ok: true, result: generated, retried: true });
-      } else {
-        results.push({ storyKey: story.key, ok: false, error: err.message });
-      }
-    }
-
-    if (index < stories.length - 1) await sleep(BULK_REQUEST_DELAY_MS);
-  }
-
+  broadcastProgress('bulkGenerationProgress', message.tabId, `Generating tests for ${stories.length} stories...`, 10);
+  const result = await backendFetch<unknown>(
+    '/ai/bulk/test-cases',
+    { method: 'POST', body: JSON.stringify(buildBulkAIRequest(payload, stories)) },
+    payload,
+  );
   broadcastProgress('bulkGenerationProgress', message.tabId, 'Bulk test generation complete.', 100);
-  return { results };
+  return result;
 }
 
 async function startBulkAnalysis(message: BulkMessage): Promise<unknown> {
@@ -282,27 +235,16 @@ async function startBulkAnalysis(message: BulkMessage): Promise<unknown> {
   const payload = message.payload || {};
   const stories = (Array.isArray(payload.stories) ? payload.stories : []) as BulkStory[];
   const jiraConnectionId = Number(payload.jiraConnectionId);
-  const issueTypeId = String(payload.issueTypeId || payload.issue_type_id || '');
-  const projectKey = String(payload.projectKey || payload.project_key || '');
-  if (!jiraConnectionId || !issueTypeId || stories.length === 0) {
+  if (!jiraConnectionId || stories.length === 0) {
     throw new Error('BULK_ANALYZE requires jiraConnectionId, issueTypeId, and stories.');
   }
 
   broadcastProgress('bulkAnalysisProgress', message.tabId, `Analyzing ${stories.length} stories...`, 25);
-  const storyBundle = stories
-    .map((story, index) => `Story ${index + 1}: ${story.key}\nSummary: ${story.summary || ''}\nDescription: ${stringifyDescription(story.description)}`)
-    .join('\n\n');
-  const body = {
-    selected_text: `Analyze these ${stories.length} stories for contradictions, redundancies, missing requirements, and cross-story risks.\n\n${storyBundle}`,
-    issue_context: undefined,
-    jira_connection_id: jiraConnectionId,
-    instance_url: payload.instanceUrl || payload.instance_url || null,
-    project_key: projectKey || (stories[0].key.includes('-') ? stories[0].key.split('-')[0] : ''),
-    project_id: payload.projectId || payload.project_id || undefined,
-    issue_type_id: issueTypeId,
-    issue_type_name: payload.issueTypeName || payload.issue_type_name || 'Story',
-  };
-  const result = await backendFetch<unknown>('/ai/generate', { method: 'POST', body: JSON.stringify(body) }, payload);
+  const result = await backendFetch<unknown>(
+    '/ai/bulk/analyze',
+    { method: 'POST', body: JSON.stringify(buildBulkAIRequest(payload, stories)) },
+    payload,
+  );
   broadcastProgress('bulkAnalysisProgress', message.tabId, 'Cross-story audit complete.', 100);
   return result;
 }
@@ -350,26 +292,16 @@ async function startBrdCompare(message: BulkMessage): Promise<unknown> {
   const stories = (Array.isArray(payload.stories) ? payload.stories : []) as BulkStory[];
   const brdText = String(payload.brdText || '');
   const jiraConnectionId = Number(payload.jiraConnectionId);
-  const issueTypeId = String(payload.issueTypeId || payload.issue_type_id || '');
-  const projectKey = String(payload.projectKey || payload.project_key || '');
-  if (!jiraConnectionId || !issueTypeId || !brdText || stories.length === 0) {
+  if (!jiraConnectionId || !brdText || stories.length === 0) {
     throw new Error('brd-compare requires jiraConnectionId, issueTypeId, brdText, and stories.');
   }
 
   broadcastProgress('brdComparisonProgress', message.tabId, 'Comparing BRD against selected stories...', 30);
-  const storyBundle = stories
-    .map((story) => `${story.key}: ${story.summary || ''}\n${stringifyDescription(story.description)}`)
-    .join('\n\n');
-  const body = {
-    selected_text: `Compare this BRD against the Jira stories. Identify missing stories, contradictions, ambiguous requirements, and uncovered acceptance criteria.\n\nBRD:\n${brdText}\n\nStories:\n${storyBundle}`,
-    jira_connection_id: jiraConnectionId,
-    instance_url: payload.instanceUrl || payload.instance_url || null,
-    project_key: projectKey || (stories[0].key.includes('-') ? stories[0].key.split('-')[0] : ''),
-    project_id: payload.projectId || payload.project_id || undefined,
-    issue_type_id: issueTypeId,
-    issue_type_name: payload.issueTypeName || payload.issue_type_name || 'Story',
-  };
-  const result = await backendFetch<unknown>('/ai/generate', { method: 'POST', body: JSON.stringify(body) }, payload);
+  const result = await backendFetch<unknown>(
+    '/ai/bulk/brd-compare',
+    { method: 'POST', body: JSON.stringify({ ...buildBulkAIRequest(payload, stories), brd_text: brdText }) },
+    payload,
+  );
   broadcastProgress('brdComparisonProgress', message.tabId, 'BRD comparison complete.', 100);
   return result;
 }

@@ -98,6 +98,7 @@ class JiraAttachmentTextResponse(BaseModel):
     filename: str
     mime_type: Optional[str] = None
     content: str
+    truncated: bool = False
 
 
 class JiraBulkIssueResponse(BaseModel):

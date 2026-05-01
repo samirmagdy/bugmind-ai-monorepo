@@ -307,8 +307,6 @@ class JiraCloudAdapter(JiraAdapter):
                 payload["nextPageToken"] = next_page_token
 
             response = self._request("POST", "/rest/api/3/search/jql", json=payload)
-            if response.status_code in (404, 405):
-                response = self._request("POST", "/rest/api/2/search/jql", json=payload)
             if response.status_code != 200:
                 raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to search Jira issues"))
 
