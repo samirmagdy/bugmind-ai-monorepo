@@ -25,9 +25,11 @@ from sqlalchemy.pool import StaticPool
 from app.api import deps
 from app.core.database import Base
 from app.main import app
+from app.models.audit import AuditLog
+from app.models.jira import JiraAuthType, JiraConnection
 from app.models.user import User
-from app.models.workspace import Workspace, WorkspaceMember, WorkspaceRole
-from app.core.security import create_access_token, get_password_hash
+from app.models.workspace import Workspace, WorkspaceMember, WorkspaceRole, WorkspaceTemplate
+from app.core.security import create_access_token, encrypt_credential, get_password_hash
 
 engine = create_engine(
     "sqlite:///:memory:",
@@ -63,6 +65,9 @@ class WorkspaceTests(unittest.TestCase):
 
     def setUp(self):
         with SessionLocal() as db:
+            db.query(AuditLog).delete()
+            db.query(JiraConnection).delete()
+            db.query(WorkspaceTemplate).delete()
             db.query(WorkspaceMember).delete()
             db.query(Workspace).delete()
             db.query(User).delete()
@@ -128,6 +133,73 @@ class WorkspaceTests(unittest.TestCase):
                 WorkspaceMember.user_id == other_id
             ).first()
             self.assertEqual(member.role, WorkspaceRole.QA_ENGINEER)
+
+    def test_workspace_details_templates_connections_usage_and_audit(self):
+        ws_res = self.client.post("/api/v1/workspaces/", headers=self.headers, json={"name": "Ops WS"})
+        self.assertEqual(ws_res.status_code, 200, ws_res.text)
+        ws_id = ws_res.json()["id"]
+
+        template_res = self.client.post(
+            f"/api/v1/workspaces/{ws_id}/templates",
+            headers=self.headers,
+            json={
+                "name": "API QA",
+                "template_type": "test",
+                "content": {"body": "Cover auth, validation, and error responses."},
+            },
+        )
+        self.assertEqual(template_res.status_code, 200, template_res.text)
+        template_id = template_res.json()["id"]
+
+        detail_res = self.client.get(f"/api/v1/workspaces/{ws_id}", headers=self.headers)
+        self.assertEqual(detail_res.status_code, 200, detail_res.text)
+        detail = detail_res.json()
+        self.assertEqual(detail["role"], "owner")
+        self.assertEqual(detail["templates"][0]["name"], "API QA")
+
+        with SessionLocal() as db:
+            conn = JiraConnection(
+                user_id=self.test_user.id,
+                auth_type=JiraAuthType.CLOUD,
+                host_url="https://example.atlassian.net",
+                username="test@example.com",
+                encrypted_token=encrypt_credential("jira-token"),
+                verify_ssl=True,
+                is_active=True,
+            )
+            db.add(conn)
+            db.commit()
+            conn_id = conn.id
+
+        share_res = self.client.post(f"/api/v1/workspaces/{ws_id}/connections/{conn_id}/share", headers=self.headers)
+        self.assertEqual(share_res.status_code, 200, share_res.text)
+        self.assertTrue(share_res.json()["is_shared"])
+        self.assertEqual(share_res.json()["workspace_id"], ws_id)
+
+        connections_res = self.client.get(f"/api/v1/workspaces/{ws_id}/connections", headers=self.headers)
+        self.assertEqual(connections_res.status_code, 200, connections_res.text)
+        self.assertEqual(len(connections_res.json()), 1)
+
+        usage_res = self.client.get(f"/api/v1/workspaces/{ws_id}/usage", headers=self.headers)
+        self.assertEqual(usage_res.status_code, 200, usage_res.text)
+        usage = usage_res.json()
+        self.assertEqual(usage["members_count"], 1)
+        self.assertEqual(usage["templates_count"], 1)
+        self.assertEqual(usage["shared_connections_count"], 1)
+        self.assertGreaterEqual(usage["audit_events_count"], 2)
+
+        audit_res = self.client.get(f"/api/v1/workspaces/{ws_id}/audit-logs", headers=self.headers)
+        self.assertEqual(audit_res.status_code, 200, audit_res.text)
+        actions = {row["action"] for row in audit_res.json()}
+        self.assertIn("workspace.template_create", actions)
+        self.assertIn("workspace.connection_share", actions)
+
+        unshare_res = self.client.delete(f"/api/v1/workspaces/{ws_id}/connections/{conn_id}/share", headers=self.headers)
+        self.assertEqual(unshare_res.status_code, 200, unshare_res.text)
+        self.assertFalse(unshare_res.json()["is_shared"])
+
+        delete_res = self.client.delete(f"/api/v1/workspaces/{ws_id}/templates/{template_id}", headers=self.headers)
+        self.assertEqual(delete_res.status_code, 204, delete_res.text)
 
 if __name__ == "__main__":
     unittest.main()

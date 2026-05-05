@@ -33,6 +33,17 @@ export const WorkspaceDashboardView: React.FC = () => {
   const [templateName, setTemplateName] = useState('');
   const [templateType, setTemplateType] = useState<'bug' | 'test' | 'preset' | 'style'>('test');
   const [templateBody, setTemplateBody] = useState('');
+  const activeRole = session.activeWorkspaceRole || workspace?.role || null;
+  const canManageMembers = activeRole === 'owner' || activeRole === 'admin';
+  const canManageTemplates = canManageMembers || activeRole === 'qa_lead';
+
+  const formatApiError = (value: unknown, fallback: string): string => {
+    if (!value) return fallback;
+    if (typeof value === 'string') return value;
+    if (typeof value === 'object' && 'message' in value && typeof value.message === 'string') return value.message;
+    if (typeof value === 'object' && 'detail' in value) return formatApiError(value.detail, fallback);
+    return fallback;
+  };
 
   const fetchWorkspace = useCallback(async () => {
     if (!session.activeWorkspaceId) {
@@ -98,7 +109,7 @@ export const WorkspaceDashboardView: React.FC = () => {
         fetchWorkspace();
       } else {
         const data = await res.json();
-        alert(data.detail || 'Failed to invite user');
+        alert(formatApiError(data, 'Failed to invite user'));
       }
     } catch {
       alert('Error inviting user');
@@ -155,7 +166,7 @@ export const WorkspaceDashboardView: React.FC = () => {
         fetchWorkspace();
       } else {
         const data = await res.json();
-        alert(data.detail || 'Failed to create template');
+        alert(formatApiError(data, 'Failed to create template'));
       }
     } catch {
       alert('Error creating template');
@@ -180,7 +191,7 @@ export const WorkspaceDashboardView: React.FC = () => {
       fetchWorkspaceAdminData();
     } else {
       const data = await res.json();
-      alert(data.detail || 'Failed to share connection');
+      alert(formatApiError(data, 'Failed to share connection'));
     }
   };
 
@@ -261,31 +272,38 @@ export const WorkspaceDashboardView: React.FC = () => {
       {activeTab === 'members' && (
         <div className="space-y-4 animate-in fade-in duration-200">
           {/* Invite Section */}
-          {(session.activeWorkspaceRole === 'owner' || session.activeWorkspaceRole === 'admin') && (
+          {canManageMembers && (
               <SurfaceCard className="p-3 bg-[var(--surface-soft)] border-dashed">
                 <h3 className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-secondary)] mb-2 flex items-center gap-1.5">
                   <Plus size={12} /> Invite Member
                 </h3>
-                <div className="flex gap-2">
-                  <div className="flex-1">
+                <div className="grid grid-cols-[minmax(0,1fr)_118px] gap-2">
+                  <div className="min-w-0">
                     <input 
                       placeholder="user@example.com"
                       value={inviteEmail}
                       onChange={(e: React.ChangeEvent<HTMLInputElement>) => setInviteEmail(e.target.value)}
-                      className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-lg px-3 py-1.5 text-xs text-[var(--text-primary)] outline-none"
+                      className="h-10 w-full min-w-0 bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-3 text-xs text-[var(--text-primary)] outline-none"
                     />
                   </div>
                   <select 
                     value={inviteRole}
                     onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setInviteRole(e.target.value)}
-                    className="bg-[var(--bg-input)] text-[10px] border border-[var(--border-main)] rounded-lg px-2 h-8 text-[var(--text-main)] outline-none"
+                    className="h-10 w-full bg-[var(--bg-input)] text-[11px] border border-[var(--border-main)] rounded-xl px-2 text-[var(--text-main)] outline-none"
                   >
                     <option value="viewer">Viewer</option>
                     <option value="qa_engineer">Engineer</option>
                     <option value="qa_lead">Lead</option>
                     <option value="admin">Admin</option>
                   </select>
-                  <ActionButton variant="primary" className="h-8 px-3 text-[10px]" onClick={handleInvite}>Invite</ActionButton>
+                  <button
+                    type="button"
+                    onClick={handleInvite}
+                    disabled={!inviteEmail.trim()}
+                    className="col-span-2 flex h-10 w-full items-center justify-center rounded-xl bg-[var(--primary-gradient)] px-3 text-xs font-bold text-white shadow-[var(--shadow-button)] disabled:cursor-not-allowed disabled:bg-[var(--disabled-bg)] disabled:text-[var(--disabled-text)] disabled:shadow-none"
+                  >
+                    Invite
+                  </button>
                 </div>
               </SurfaceCard>
           )}
@@ -305,7 +323,7 @@ export const WorkspaceDashboardView: React.FC = () => {
                 </div>
                 
                 <div className="flex items-center gap-2">
-                  {(session.activeWorkspaceRole === 'owner' || session.activeWorkspaceRole === 'admin') && member.role !== 'owner' ? (
+                  {canManageMembers && member.role !== 'owner' ? (
                     <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                       <select 
                         value={member.role}
@@ -348,7 +366,7 @@ export const WorkspaceDashboardView: React.FC = () => {
                   <div className="text-xs font-semibold text-[var(--text-main)] truncate">{conn.host_url}</div>
                   <div className="text-[10px] text-[var(--text-muted)]">{conn.username}</div>
                 </div>
-                {(session.activeWorkspaceRole === 'owner' || session.activeWorkspaceRole === 'admin') && (
+                {canManageMembers && (
                   <button onClick={() => unshareConnection(conn.id)} className="p-1.5 hover:bg-[var(--error)]/10 rounded text-[var(--error)]" aria-label="Unshare connection">
                     <Trash2 size={12} />
                   </button>
@@ -356,7 +374,7 @@ export const WorkspaceDashboardView: React.FC = () => {
               </SurfaceCard>
             ))}
            </div>
-           {(session.activeWorkspaceRole === 'owner' || session.activeWorkspaceRole === 'admin') && (
+           {canManageMembers && (
             <SurfaceCard className="p-3 bg-[var(--surface-soft)] border-dashed">
               <h3 className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-secondary)] mb-2 flex items-center gap-1.5">
                 <Link2 size={12} /> Share Personal Connection
@@ -376,11 +394,11 @@ export const WorkspaceDashboardView: React.FC = () => {
       {activeTab === 'templates' && (
         <div className="space-y-3 animate-in fade-in duration-200">
            <p className="text-[10px] text-[var(--text-muted)] px-1 italic">Workspace templates for consistent QA style.</p>
-           {(session.activeWorkspaceRole === 'owner' || session.activeWorkspaceRole === 'admin' || session.activeWorkspaceRole === 'qa_lead') && (
+           {canManageTemplates && (
             <SurfaceCard className="p-3 bg-[var(--surface-soft)] border-dashed space-y-2">
-              <div className="flex gap-2">
-                <input value={templateName} onChange={(e) => setTemplateName(e.target.value)} placeholder="Template name" className="flex-1 bg-[var(--bg-input)] border border-[var(--border-main)] rounded-lg px-3 py-1.5 text-xs text-[var(--text-primary)] outline-none" />
-                <select value={templateType} onChange={(e) => setTemplateType(e.target.value as typeof templateType)} className="bg-[var(--bg-input)] text-[10px] border border-[var(--border-main)] rounded-lg px-2 h-8 text-[var(--text-main)] outline-none">
+              <div className="grid grid-cols-[minmax(0,1fr)_100px] gap-2">
+                <input value={templateName} onChange={(e) => setTemplateName(e.target.value)} placeholder="Template name" className="h-9 min-w-0 bg-[var(--bg-input)] border border-[var(--border-main)] rounded-lg px-3 text-xs text-[var(--text-primary)] outline-none" />
+                <select value={templateType} onChange={(e) => setTemplateType(e.target.value as typeof templateType)} className="h-9 bg-[var(--bg-input)] text-[10px] border border-[var(--border-main)] rounded-lg px-2 text-[var(--text-main)] outline-none">
                   <option value="bug">Bug</option>
                   <option value="test">Test</option>
                   <option value="preset">Preset</option>
@@ -388,7 +406,14 @@ export const WorkspaceDashboardView: React.FC = () => {
                 </select>
               </div>
               <textarea value={templateBody} onChange={(e) => setTemplateBody(e.target.value)} placeholder="Template content or prompt preset" className="w-full min-h-16 resize-y bg-[var(--bg-input)] border border-[var(--border-main)] rounded-lg px-3 py-2 text-xs text-[var(--text-primary)] outline-none" />
-              <ActionButton variant="primary" className="h-8 px-3 text-[10px]" onClick={createTemplate}>Save Template</ActionButton>
+              <button
+                type="button"
+                onClick={createTemplate}
+                disabled={!templateName.trim()}
+                className="flex h-9 w-full items-center justify-center rounded-lg bg-[var(--primary-gradient)] px-3 text-[10px] font-bold uppercase tracking-wider text-white shadow-[var(--shadow-button)] disabled:cursor-not-allowed disabled:bg-[var(--disabled-bg)] disabled:text-[var(--disabled-text)] disabled:shadow-none"
+              >
+                Save Template
+              </button>
             </SurfaceCard>
            )}
            <div className="space-y-2">
@@ -399,7 +424,7 @@ export const WorkspaceDashboardView: React.FC = () => {
                     <div className="text-[10px] text-[var(--text-muted)] uppercase">{template.template_type}</div>
                     <div className="mt-1 line-clamp-2 text-[10px] text-[var(--text-secondary)]">{String(template.content?.body || '')}</div>
                   </div>
-                  {(session.activeWorkspaceRole === 'owner' || session.activeWorkspaceRole === 'admin' || session.activeWorkspaceRole === 'qa_lead') && (
+                  {canManageTemplates && (
                     <button onClick={() => deleteTemplate(template.id)} className="p-1.5 hover:bg-[var(--error)]/10 rounded text-[var(--error)]" aria-label="Delete template">
                       <Trash2 size={12} />
                     </button>

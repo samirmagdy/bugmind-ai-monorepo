@@ -27,6 +27,8 @@ class JiraConnectionUpdate(BaseModel):
 class JiraConnectionResponse(JiraConnectionBase):
     id: int
     is_active: bool
+    workspace_id: Optional[int] = None
+    is_shared: bool = False
     has_xray_cloud_credentials: bool = False
 
     class Config:
