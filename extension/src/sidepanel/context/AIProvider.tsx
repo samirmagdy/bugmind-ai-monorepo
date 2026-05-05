@@ -957,7 +957,7 @@ export const AIProvider: React.FC<{
         duplicateMatches: [],
       });
     }
-  }, [session.bugs, session.jiraConnectionId, session.issueData?.key, session.instanceUrl, apiBase, authToken, refreshAuthToken, updateSession]);
+  }, [session.bugs, session.jiraConnectionId, session.issueData?.key, session.instanceUrl, apiBase, authToken, refreshAuthToken, updateSession, getProjectRequestParams]);
 
 
   const linkToExisting = useCallback(async (existingKey: string): Promise<DuplicateLinkResponse | null> => {
