@@ -550,161 +550,6 @@ def resolve_jira_bootstrap_context(
     request: Request
 ) -> JiraBootstrapContextResponse:
     return resolve_jira_bootstrap_context_service(req, db, current_user, request)
-    connections = db.query(JiraConnection).filter(
-        JiraConnection.user_id == current_user.id
-    ).order_by(JiraConnection.is_active.desc(), JiraConnection.id.asc()).all()
-    if not connections:
-        raise HTTPException(status_code=404, detail="No Jira connections found")
-
-    target_url = _normalize_instance_url(req.instance_url)
-    if not target_url:
-        raise HTTPException(status_code=400, detail="A valid Jira instance URL is required")
-
-    ranked_matches = []
-    for connection in connections:
-        normalized_host = _normalize_instance_url(connection.host_url)
-        if normalized_host and (
-            target_url == normalized_host or
-            target_url.startswith(f"{normalized_host}/") or
-            target_url.startswith(normalized_host)
-        ):
-            ranked_matches.append((len(normalized_host), connection))
-
-    ranked_matches.sort(key=lambda item: item[0], reverse=True)
-    conn = ranked_matches[0][1] if ranked_matches else (next((item for item in connections if item.is_active), None) or connections[0])
-
-    adapter = get_adapter(conn)
-    engine = JiraMetadataEngine(adapter)
-
-    canonical_project_id = req.project_id
-    canonical_project_key = req.project_key or _project_key_from_issue_key(req.issue_key)
-    canonical_issue_type_id = req.issue_type_id
-
-    issue_context: dict = {}
-    needs_issue_lookup = bool(req.issue_key and not (canonical_project_id and canonical_project_key and canonical_issue_type_id))
-    if needs_issue_lookup:
-        try:
-            issue_context = adapter.get_issue_context(req.issue_key)
-        except HTTPException as exc:
-            if exc.status_code not in (400, 404):
-                raise
-            issue_context = {}
-    canonical_project_id = issue_context.get("project_id") or canonical_project_id
-    canonical_project_key = issue_context.get("project_key") or canonical_project_key
-    canonical_issue_type_id = canonical_issue_type_id or issue_context.get("issue_type_id")
-
-    if not (canonical_project_id or canonical_project_key):
-        raise HTTPException(status_code=400, detail="Could not resolve Jira project context from the current page")
-
-    project_context: Optional[dict] = None
-    issue_types_raw: list[dict] = []
-    selected_issue_type_raw: Optional[dict] = None
-    visible_fields: list[str] = []
-    ai_mapping: dict = {}
-    field_defaults: dict = {}
-    metadata_fields: list[dict] = []
-
-    project_candidates: list[str] = []
-    for candidate in [
-        canonical_project_id,
-        canonical_project_key,
-        req.project_id,
-        req.project_key,
-    ]:
-        if candidate and str(candidate) not in project_candidates:
-            project_candidates.append(str(candidate))
-
-    # Phase 1: Resolve Project & Issue Types
-    last_project_error: Optional[HTTPException] = None
-    for project_candidate in project_candidates:
-        try:
-            project_context = engine.get_project_metadata(project_candidate)
-            issue_types_raw = project_context.get("issue_types", [])
-            canonical_project_id = project_context.get("project_id")
-            canonical_project_key = project_context.get("project_key")
-            break
-        except HTTPException as exc:
-            last_project_error = exc
-            continue
-
-    if not issue_types_raw and last_project_error:
-        raise last_project_error
-    if not issue_types_raw:
-        raise HTTPException(status_code=400, detail="No Jira issue types could be resolved for the selected project")
-
-    # Phase 2: Resolve Fields & Metadata
-    if issue_types_raw:
-        selected_issue_type_raw = _select_issue_type(issue_types_raw, canonical_issue_type_id)
-        if not selected_issue_type_raw:
-            raise HTTPException(status_code=400, detail="Could not resolve a Jira issue type for the selected project")
-
-        if selected_issue_type_raw:
-            selected_issue_type_id = str(selected_issue_type_raw.get("id", ""))
-            
-            field_resolution_candidates = []
-            for candidate in [canonical_project_id, canonical_project_key, req.project_id, req.project_key]:
-                if candidate and str(candidate) not in field_resolution_candidates:
-                    field_resolution_candidates.append(str(candidate))
-
-            last_field_error: Optional[HTTPException] = None
-            for field_resolution_ref in field_resolution_candidates:
-                try:
-                    metadata_fields = engine.get_field_schema(field_resolution_ref, selected_issue_type_id)
-                    if metadata_fields:
-                        break
-                except HTTPException as exc:
-                    last_field_error = exc
-                    continue
-
-            if not metadata_fields and last_field_error:
-                raise last_field_error
-
-            mapping_query = db.query(JiraFieldMapping).filter(
-                JiraFieldMapping.user_id == current_user.id,
-                JiraFieldMapping.project_key == canonical_project_key,
-                JiraFieldMapping.issue_type_id == selected_issue_type_id
-            )
-            canonical_mapping_project_id = canonical_project_id if str(canonical_project_id).isdigit() else None
-            if canonical_mapping_project_id is None:
-                mapping_query = mapping_query.filter(JiraFieldMapping.project_id.is_(None))
-            else:
-                mapping_query = mapping_query.filter(JiraFieldMapping.project_id == canonical_mapping_project_id)
-            mapping = mapping_query.first()
-            visible_fields = mapping.visible_fields if mapping else []
-            ai_mapping = mapping.field_mappings if mapping else {}
-            field_defaults = mapping.field_defaults if mapping else {}
-
-    metadata_response: Optional[JiraMetadataResponse] = None
-    if canonical_project_id or canonical_project_key:
-        metadata_response = JiraMetadataResponse(
-            project_key=canonical_project_key or str(canonical_project_id),
-            project_id=canonical_project_id,
-            issue_type_id=str(selected_issue_type_raw.get("id", "")) if selected_issue_type_raw else canonical_issue_type_id,
-            fields=[JiraFieldResponse(**field) for field in metadata_fields]
-        )
-
-    response = JiraBootstrapContextResponse(
-        connection_id=conn.id,
-        instance_url=_normalize_instance_url(conn.host_url),
-        platform=conn.auth_type,
-        verify_ssl=conn.verify_ssl,
-        issue_types=[_serialize_issue_type(issue_type) for issue_type in issue_types_raw],
-        selected_issue_type=_serialize_issue_type(selected_issue_type_raw) if selected_issue_type_raw else None,
-        visible_fields=visible_fields,
-        ai_mapping=ai_mapping,
-        field_defaults=field_defaults,
-        jira_metadata=metadata_response
-    )
-    log_audit(
-        "jira.bootstrap_context",
-        current_user.id,
-        db=db,
-        jira_connection_id=conn.id,
-        instance_url=response.instance_url,
-        project_key=req.project_key,
-        request_path=str(request.url.path),
-    )
-    return response
 
 @router.get("/connections", response_model=list[JiraConnectionResponse])
 def list_connections(
@@ -755,9 +600,7 @@ def get_projects(
     db: Session = Depends(deps.get_db), 
     current_user: User = Depends(deps.get_current_user)
 ):
-    conn = db.query(JiraConnection).filter(JiraConnection.id == conn_id, JiraConnection.user_id == current_user.id).first()
-    if not conn:
-        raise HTTPException(status_code=404, detail="Connection not found")
+    conn = get_owned_connection(db, current_user.id, conn_id)
         
     adapter = get_adapter(conn)
     return adapter.get_projects()
@@ -769,9 +612,7 @@ def get_current_jira_user(
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
-    conn = db.query(JiraConnection).filter(JiraConnection.id == conn_id, JiraConnection.user_id == current_user.id).first()
-    if not conn:
-        raise HTTPException(status_code=404, detail="Connection not found")
+    conn = get_owned_connection(db, current_user.id, conn_id)
 
     adapter = get_adapter(conn)
     return adapter.get_current_user()
@@ -784,9 +625,7 @@ def fetch_jira_issue(
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
-    conn = db.query(JiraConnection).filter(JiraConnection.id == conn_id, JiraConnection.user_id == current_user.id).first()
-    if not conn:
-        raise HTTPException(status_code=404, detail="Connection not found")
+    conn = get_owned_connection(db, current_user.id, conn_id)
 
     adapter = get_adapter(conn)
     return adapter.fetch_issue(issue_key)
@@ -863,12 +702,7 @@ def get_xray_defaults(
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
-    conn = db.query(JiraConnection).filter(
-        JiraConnection.id == conn_id,
-        JiraConnection.user_id == current_user.id
-    ).first()
-    if not conn:
-        raise HTTPException(status_code=404, detail="Connection not found")
+    conn = get_owned_connection(db, current_user.id, conn_id)
 
     adapter = get_adapter(conn)
     projects = adapter.get_projects()
@@ -913,12 +747,7 @@ def search_jira_users(
     if len(query) < 2:
         return []
 
-    conn = db.query(JiraConnection).filter(
-        JiraConnection.id == request.jira_connection_id,
-        JiraConnection.user_id == current_user.id
-    ).first()
-    if not conn:
-        raise HTTPException(status_code=404, detail="Connection not found")
+    conn = get_owned_connection(db, current_user.id, request.jira_connection_id)
 
     adapter = get_adapter(conn)
     results = adapter.search_users(
@@ -1011,12 +840,7 @@ def publish_xray_test_suite(
         if not req.test_cases:
             raise HTTPException(status_code=400, detail="No test cases were provided for Xray publishing")
 
-        conn = db.query(JiraConnection).filter(
-            JiraConnection.id == conn_id,
-            JiraConnection.user_id == current_user.id
-        ).first()
-        if not conn:
-            raise HTTPException(status_code=404, detail="Connection not found")
+        conn = get_owned_connection(db, current_user.id, conn_id)
 
         if conn.auth_type == JiraAuthType.CLOUD:
             return _publish_xray_cloud_test_suite(req, current_user, db, request)
@@ -1037,12 +861,7 @@ def test_xray_cloud_connection(
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
-    conn = db.query(JiraConnection).filter(
-        JiraConnection.id == conn_id,
-        JiraConnection.user_id == current_user.id
-    ).first()
-    if not conn:
-        raise HTTPException(status_code=404, detail="Connection not found")
+    conn = get_owned_connection(db, current_user.id, conn_id)
 
     from app.services.jira.xray_cloud import XrayCloudClient
     client = XrayCloudClient(conn)

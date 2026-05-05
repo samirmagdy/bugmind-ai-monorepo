@@ -46,15 +46,22 @@ def select_issue_type(issue_types: list[dict], issue_type_id: Optional[str]) -> 
     return issue_types[0] if issue_types else None
 
 
+from app.models.workspace import WorkspaceMember
+
 def resolve_jira_bootstrap_context(
     req: JiraBootstrapContextRequest,
     db: Session,
     current_user: User,
     request: Request,
 ) -> JiraBootstrapContextResponse:
-    connections = db.query(JiraConnection).filter(
-        JiraConnection.user_id == current_user.id,
-    ).order_by(JiraConnection.is_active.desc(), JiraConnection.id.asc()).all()
+    # 1. Fetch connections (personal + shared via workspaces)
+    connections = db.query(JiraConnection).outerjoin(
+        WorkspaceMember, JiraConnection.workspace_id == WorkspaceMember.workspace_id
+    ).filter(
+        (JiraConnection.user_id == current_user.id) |
+        (WorkspaceMember.user_id == current_user.id)
+    ).distinct().order_by(JiraConnection.is_active.desc(), JiraConnection.id.asc()).all()
+    
     if not connections:
         raise HTTPException(status_code=404, detail="No Jira connections found")
 
@@ -150,20 +157,38 @@ def resolve_jira_bootstrap_context(
     if not metadata_fields and last_field_error:
         raise last_field_error
 
-    mapping_query = db.query(JiraFieldMapping).filter(
+    # 2. Fetch field mappings (personal first, then shared)
+    mapping = db.query(JiraFieldMapping).filter(
         JiraFieldMapping.user_id == current_user.id,
         JiraFieldMapping.project_key == canonical_project_key,
         JiraFieldMapping.issue_type_id == selected_issue_type_id,
     )
     canonical_mapping_project_id = canonical_project_id if str(canonical_project_id).isdigit() else None
     if canonical_mapping_project_id is None:
-        mapping_query = mapping_query.filter(JiraFieldMapping.project_id.is_(None))
+        mapping = mapping.filter(JiraFieldMapping.project_id.is_(None))
     else:
-        mapping_query = mapping_query.filter(JiraFieldMapping.project_id == canonical_mapping_project_id)
-    mapping = mapping_query.first()
-    visible_fields = mapping.visible_fields if mapping else []
-    ai_mapping = mapping.field_mappings if mapping else {}
-    field_defaults = mapping.field_defaults if mapping else {}
+        mapping = mapping.filter(JiraFieldMapping.project_id == canonical_mapping_project_id)
+    
+    mapping_record = mapping.first()
+    if not mapping_record:
+        # Fallback to shared workspace mapping
+        mapping_record = db.query(JiraFieldMapping).join(
+            WorkspaceMember, JiraFieldMapping.workspace_id == WorkspaceMember.workspace_id
+        ).filter(
+            WorkspaceMember.user_id == current_user.id,
+            JiraFieldMapping.is_shared == True,
+            JiraFieldMapping.project_key == canonical_project_key,
+            JiraFieldMapping.issue_type_id == selected_issue_type_id,
+        )
+        if canonical_mapping_project_id is None:
+            mapping_record = mapping_record.filter(JiraFieldMapping.project_id.is_(None))
+        else:
+            mapping_record = mapping_record.filter(JiraFieldMapping.project_id == canonical_mapping_project_id)
+        mapping_record = mapping_record.first()
+
+    visible_fields = mapping_record.visible_fields if mapping_record else []
+    ai_mapping = mapping_record.field_mappings if mapping_record else {}
+    field_defaults = mapping_record.field_defaults if mapping_record else {}
 
     metadata_response = JiraMetadataResponse(
         project_key=canonical_project_key or str(canonical_project_id),

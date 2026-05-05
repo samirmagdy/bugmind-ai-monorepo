@@ -110,6 +110,7 @@ def _get_field_mapping_record(
     query = db.query(JiraFieldMapping).join(
         WorkspaceMember, JiraFieldMapping.workspace_id == WorkspaceMember.workspace_id
     ).filter(
+        JiraFieldMapping.is_shared == True,
         JiraFieldMapping.project_key == project_key,
         JiraFieldMapping.issue_type_id == issue_type_id,
         WorkspaceMember.user_id == user_id,
