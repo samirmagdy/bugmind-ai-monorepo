@@ -1,5 +1,5 @@
 import { createContext } from 'react';
-import { BugReport, TestCase, Usage } from '../types';
+import { BugReport, DuplicateLinkResponse, TestCase, Usage } from '../types';
 
 export interface AIContextType {
   usage: Usage | null;
@@ -29,6 +29,9 @@ export interface AIContextType {
   bulkLoadAttachmentAsBrd: (attachmentId: string) => Promise<void>;
   validateBug: (index: number) => Promise<boolean>;
   preparePreviewBug: (index: number) => void;
+  // Phase 2: Duplicate detection
+  checkDuplicates: (bugIndex: number) => Promise<void>;
+  linkToExisting: (existingKey: string) => Promise<DuplicateLinkResponse | null>;
 }
 
 export const AIContext = createContext<AIContextType | undefined>(undefined);

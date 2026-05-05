@@ -27,7 +27,16 @@ from app.schemas.jira import (
     JiraUserSearchRequest,
     XrayDefaultsResponse,
 )
-from app.schemas.bug import XrayTestSuitePublishRequest, XrayTestSuitePublishResponse, XrayPublishedTest
+from app.schemas.bug import (
+    XrayTestSuitePublishRequest,
+    XrayTestSuitePublishResponse,
+    XrayPublishedTest,
+    DuplicateCheckRequest,
+    DuplicateCheckResponse,
+    DuplicateMatchResponse,
+    DuplicateLinkRequest,
+    DuplicateLinkResponse,
+)
 from app.core import security
 from app.services.jira.adapters.cloud import JiraCloudAdapter
 from app.services.jira.adapters.server import JiraServerAdapter
@@ -1021,3 +1030,106 @@ def publish_xray_test_suite(
             req.model_dump(),
         )
         raise
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Phase 2: Duplicate Detection
+# ═══════════════════════════════════════════════════════════════════════════
+
+from app.services.jira.duplicate_detector import (
+    DuplicateCandidate,
+    find_duplicates,
+)
+
+
+@router.post("/duplicates/check", response_model=DuplicateCheckResponse)
+def check_duplicates(
+    req: DuplicateCheckRequest,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """Check if a bug candidate has potential duplicates in Jira."""
+    rate_limiter.check("jira.duplicates", str(current_user.id), limit=15, window_seconds=60)
+
+    conn = get_owned_connection(db, current_user.id, req.jira_connection_id)
+    adapter = get_adapter(conn)
+    instance_url = req.instance_url or normalize_instance_url(conn.host_url)
+
+    candidate = DuplicateCandidate(
+        summary=req.candidate_summary,
+        description=req.candidate_description,
+        error_message=req.error_message,
+        component=req.component,
+        labels=req.labels,
+        screen_or_page=req.screen_or_page,
+        api_endpoint=req.api_endpoint,
+    )
+
+    matches, check_failed, failure_reason = find_duplicates(
+        adapter=adapter,
+        project_key=req.project_key,
+        candidate=candidate,
+        instance_url=instance_url,
+        story_key=req.story_key,
+    )
+
+    log_audit(
+        "jira.duplicates.check",
+        current_user.id,
+        db=db,
+        jira_connection_id=req.jira_connection_id,
+        project_key=req.project_key,
+        matches_found=len(matches),
+        check_failed=check_failed,
+    )
+
+    return DuplicateCheckResponse(
+        matches=[
+            DuplicateMatchResponse(**m.model_dump())
+            for m in matches
+        ],
+        check_failed=check_failed,
+        failure_reason=failure_reason,
+    )
+
+
+@router.post("/duplicates/link", response_model=DuplicateLinkResponse)
+def link_to_existing(
+    req: DuplicateLinkRequest,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """Link the current story to an existing bug instead of creating a duplicate."""
+    rate_limiter.check("jira.duplicates.link", str(current_user.id), limit=10, window_seconds=60)
+
+    conn = get_owned_connection(db, current_user.id, req.jira_connection_id)
+    adapter = get_adapter(conn)
+
+    # Resolve link type
+    link_type = req.link_type
+    if not link_type:
+        try:
+            available_types = adapter.get_issue_link_types()
+            candidates = service_resolve_link_type_candidates("Relates", available_types)
+            link_type = candidates[0] if candidates else "Relates"
+        except Exception:
+            link_type = "Relates"
+
+    try:
+        adapter.link_issues(req.story_key, link_type, req.existing_issue_key)
+        log_audit(
+            "jira.duplicates.link",
+            current_user.id,
+            db=db,
+            jira_connection_id=req.jira_connection_id,
+            story_key=req.story_key,
+            linked_issue_key=req.existing_issue_key,
+            link_type=link_type,
+        )
+        return DuplicateLinkResponse(linked=True, link_type_used=link_type)
+    except HTTPException as exc:
+        return DuplicateLinkResponse(
+            linked=False,
+            link_type_used=link_type,
+            error=str(exc.detail),
+        )

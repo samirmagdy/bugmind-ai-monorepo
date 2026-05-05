@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { useBugMind } from '../../hooks/useBugMind';
 import {
   ArrowLeft, AlertTriangle, Send, ChevronLeft, ChevronRight,
-  Layout, AlignLeft, ShieldAlert
+  Layout, AlignLeft, ShieldAlert, Search, ExternalLink, Link2, Loader2, Info
 } from 'lucide-react';
 import JiraMarkdown from '../common/JiraMarkdown';
 import { ActionButton, StatusPanel, SurfaceCard } from '../common/DesignSystem';
@@ -137,7 +137,7 @@ function formatStepsForPreview(stepsText: string | undefined): string {
 }
 
 const PreviewView: React.FC = () => {
-  const { session, updateSession, ai: { submitBugs, preparePreviewBug } } = useBugMind();
+  const { session, updateSession, ai: { submitBugs, preparePreviewBug, checkDuplicates, linkToExisting } } = useBugMind();
   const restoredPreviewRef = useRef<number | null>(null);
   
   const bugIndex = session.previewBugIndex;
@@ -264,6 +264,126 @@ const PreviewView: React.FC = () => {
           </ul>
         </StatusPanel>
       )}
+
+      {/* Duplicate Detection Panel */}
+      <SurfaceCard className="space-y-3 rounded-[1.5rem] p-5">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Search size={14} className="text-[var(--text-muted)]" />
+            <span className="text-[10px] font-black uppercase tracking-[0.15em] text-[var(--text-muted)]">
+              Duplicate Check
+            </span>
+          </div>
+          <button
+            onClick={() => bugIndex !== null && checkDuplicates(bugIndex)}
+            disabled={session.duplicateCheckLoading}
+            className="flex items-center gap-1.5 rounded-full border border-[var(--card-border)] bg-[var(--surface-soft)] px-3 py-1.5 text-[10px] font-bold text-[var(--status-info)] hover:opacity-80 transition-opacity disabled:opacity-40"
+          >
+            {session.duplicateCheckLoading ? (
+              <><Loader2 size={12} className="animate-spin" /> Checking...</>
+            ) : (
+              <><Search size={12} /> Check for Duplicates</>
+            )}
+          </button>
+        </div>
+
+        {session.duplicateCheckFailed && (
+          <div className="flex items-center gap-2 rounded-[0.9rem] bg-[var(--status-warning)]/8 border border-[var(--status-warning)]/20 px-3 py-2">
+            <Info size={12} className="text-[var(--status-warning)] shrink-0" />
+            <span className="text-[10px] text-[var(--text-muted)]">
+              {session.duplicateCheckFailureReason || 'Duplicate check unavailable. You can still publish.'}
+            </span>
+          </div>
+        )}
+
+        {session.duplicateMatches.length > 0 && (
+          <div className="space-y-2">
+            {session.duplicateMatches.map((match) => {
+              const isHigh = match.confidence === 'high';
+              const isMedium = match.confidence === 'medium';
+              const borderColor = isHigh
+                ? 'border-[var(--status-danger)]/40'
+                : isMedium
+                ? 'border-[var(--status-warning)]/40'
+                : 'border-[var(--card-border)]';
+              const bgColor = isHigh
+                ? 'bg-[var(--status-danger)]/5'
+                : isMedium
+                ? 'bg-[var(--status-warning)]/5'
+                : 'bg-[var(--surface-soft)]';
+              const confidenceColor = isHigh
+                ? 'text-[var(--status-danger)]'
+                : isMedium
+                ? 'text-[var(--status-warning)]'
+                : 'text-[var(--text-muted)]';
+
+              return (
+                <div key={match.issue_key} className={`rounded-[1rem] border ${borderColor} ${bgColor} p-3 space-y-2`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className={`text-[9px] font-black uppercase tracking-wider ${confidenceColor}`}>
+                        {match.confidence}
+                      </span>
+                      <span className="text-[10px] font-bold text-[var(--status-info)]">
+                        {match.issue_key}
+                      </span>
+                      <span className="text-[10px] text-[var(--text-muted)] truncate">
+                        {match.status}
+                      </span>
+                    </div>
+                    <span className="text-[9px] font-mono text-[var(--text-muted)] shrink-0">
+                      {Math.round(match.similarity_score * 100)}%
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-[var(--text-main)] font-medium leading-snug">
+                    {match.summary}
+                  </p>
+                  <p className="text-[10px] text-[var(--text-muted)] italic">
+                    {match.reason}
+                  </p>
+                  <div className="flex items-center gap-2 pt-1">
+                    {match.url && (
+                      <a
+                        href={match.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 rounded-full border border-[var(--card-border)] bg-[var(--surface-soft)] px-2.5 py-1 text-[9px] font-bold text-[var(--status-info)] hover:opacity-80"
+                      >
+                        <ExternalLink size={10} /> Open in Jira
+                      </a>
+                    )}
+                    <button
+                      onClick={async () => {
+                        const result = await linkToExisting(match.issue_key);
+                        if (result?.linked) {
+                          updateSession({
+                            success: `Linked ${session.issueData?.key} to ${match.issue_key} (${result.link_type_used})`,
+                            view: 'main',
+                            mainWorkflow: session.gapAnalysisSummary ? 'analysis' : session.mainWorkflow,
+                            previewBugIndex: null,
+                            duplicateMatches: [],
+                          });
+                        } else {
+                          updateSession({ error: result?.error || 'Could not link issues.' });
+                        }
+                      }}
+                      className="flex items-center gap-1 rounded-full border border-[var(--card-border)] bg-[var(--surface-soft)] px-2.5 py-1 text-[9px] font-bold text-[var(--text-muted)] hover:text-[var(--status-info)] hover:opacity-80"
+                    >
+                      <Link2 size={10} /> Link Instead
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {!session.duplicateCheckLoading && !session.duplicateCheckFailed && session.duplicateMatches.length === 0 && (
+          <p className="text-[10px] text-[var(--text-muted)] italic">
+            Click &quot;Check for Duplicates&quot; to search for similar existing bugs before publishing.
+          </p>
+        )}
+      </SurfaceCard>
 
       {/* High Fidelity Preview Card */}
       <SurfaceCard className="space-y-6 rounded-[1.5rem] p-7 pb-16 shadow-[var(--shadow-card)] relative overflow-hidden">

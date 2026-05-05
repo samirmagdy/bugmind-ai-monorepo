@@ -943,6 +943,52 @@ Valid test categories for `test_categories` field:
 
 Default categories (when `test_categories` is omitted): `Positive`, `Negative`, `Boundary`, `Regression`
 
+### Duplicate Detection (Phase 2)
+
+#### Duplicate check flow
+
+1. `POST /api/v1/jira/duplicates/check` — Search for existing bugs matching a candidate
+2. User reviews matches in the PreviewView panel
+3. `POST /api/v1/jira/duplicates/link` — Link story to existing bug instead of creating
+
+#### How duplicate detection works
+
+The system uses deterministic text similarity (no AI calls):
+
+1. Extracts keywords from the candidate bug summary
+2. Searches Jira via JQL for bugs with similar summaries, matching error signatures, linked to the same story, and recently created
+3. Scores each result using a weighted composite:
+   - Title token similarity (Jaccard): **40%**
+   - Error signature match: **25%**
+   - Component/label overlap: **15%**
+   - API endpoint/path match: **10%**
+   - Recency bonus (< 90 days): **10%**
+
+#### Confidence scores
+
+| Confidence | Score Range | User Experience |
+|------------|-----------|-----------------|
+| High       | ≥ 0.80    | Red warning card, strong visual emphasis |
+| Medium     | ≥ 0.55    | Amber warning card |
+| Low        | ≥ 0.35    | Subtle info card |
+
+Matches below 0.35 are not shown.
+
+#### How to override warnings
+
+- Duplicate warnings are **advisory only** — they never block publishing
+- Click **"Publish to Jira"** to create the bug regardless
+- Click **"Link Instead"** to link your story to the existing bug
+- Click **"Open in Jira"** to review the potential duplicate first
+
+#### Limitations
+
+- Text similarity only (no semantic/embedding analysis)
+- Requires the candidate and existing bugs to share visible keywords
+- Only searches within the same Jira project
+- Maximum 10 matches returned per check
+- If Jira search fails, the check is marked as failed but publishing proceeds normally
+
 ## Data Contracts Summary
 
 ### `BugDraft`

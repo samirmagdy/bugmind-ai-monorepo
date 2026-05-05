@@ -299,3 +299,54 @@ BugGenerationRequest = FindingGenerationRequest
 TestGenerationRequest = TestCaseGenerationRequest
 GeneratedBugResponse = GeneratedFindingResponse
 BugGenerationResponse = GapAnalysisResponse
+
+
+# ── Phase 2: Duplicate detection schemas ──────────────────────────────────
+
+class DuplicateCheckRequest(BaseModel):
+    """Request to check a generated bug candidate for duplicates."""
+    jira_connection_id: int
+    project_key: str
+    story_key: Optional[str] = None
+    instance_url: Optional[str] = None
+    candidate_summary: str = ""
+    candidate_description: str = ""
+    error_message: str = ""
+    component: str = ""
+    labels: List[str] = []
+    screen_or_page: str = ""
+    api_endpoint: str = ""
+
+
+class DuplicateMatchResponse(BaseModel):
+    """One potential duplicate found in Jira."""
+    issue_key: str
+    summary: str
+    status: str = "Unknown"
+    priority: str = "Unknown"
+    similarity_score: float = 0.0
+    confidence: str = "low"  # "high" | "medium" | "low"
+    reason: str = ""
+    url: str = ""
+
+
+class DuplicateCheckResponse(BaseModel):
+    """Response from the duplicate check endpoint."""
+    matches: List[DuplicateMatchResponse] = []
+    check_failed: bool = False
+    failure_reason: str = ""
+
+
+class DuplicateLinkRequest(BaseModel):
+    """Request to link the current story to an existing bug."""
+    jira_connection_id: int
+    story_key: str
+    existing_issue_key: str
+    link_type: Optional[str] = None
+
+
+class DuplicateLinkResponse(BaseModel):
+    """Response from the link-to-existing endpoint."""
+    linked: bool = False
+    link_type_used: str = ""
+    error: Optional[str] = None

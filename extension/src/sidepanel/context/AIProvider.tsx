@@ -1,5 +1,5 @@
 import React, { useState, useRef, useMemo, useCallback, useEffect } from 'react';
-import { TabSession, BugReport, Usage, INITIAL_SESSION, TestCase, MissingField, IssueContextPayload, SupportingArtifact, ManualBugInput, GapAnalysisSummary, BulkFetchResult, BulkProgressPayload, BulkStory } from '../types';
+import { TabSession, BugReport, Usage, INITIAL_SESSION, TestCase, MissingField, IssueContextPayload, SupportingArtifact, ManualBugInput, GapAnalysisSummary, BulkFetchResult, BulkProgressPayload, BulkStory, DuplicateCheckResponse, DuplicateLinkResponse } from '../types';
 import { ApiError, apiRequest, getErrorMessage, readJsonResponse, throwApiErrorResponse } from '../services/api';
 import {
   AIGenerationRequestPayload,
@@ -21,6 +21,8 @@ import {
   BulkWorkerResponsePayload,
   buildIssueContextPayload,
   buildProjectRequestParams,
+  DuplicateCheckRequestPayload,
+  DuplicateLinkRequestPayload,
 } from '../services/contracts';
 import { AIContext } from './ai-context';
 
@@ -885,9 +887,102 @@ export const AIProvider: React.FC<{
       updateSession({ view: 'main', previewBugIndex: null, validationErrors: [], resolvedPayload: null, error: 'Could not find the draft for review.' });
       return;
     }
-    updateSession({ view: 'preview', previewBugIndex: index, validationErrors: [], resolvedPayload: null });
+    updateSession({
+      view: 'preview',
+      previewBugIndex: index,
+      validationErrors: [],
+      resolvedPayload: null,
+      duplicateMatches: [],
+      duplicateCheckFailed: false,
+      duplicateCheckFailureReason: '',
+      duplicateCheckLoading: false,
+    });
     void validateBug(index);
   }, [session.bugs.length, updateSession, validateBug]);
+
+
+  // ── Phase 2: Duplicate detection ─────────────────────────────────────
+
+  const checkDuplicates = useCallback(async (bugIndex: number) => {
+    const bug = session.bugs[bugIndex];
+    if (!bug || !session.jiraConnectionId) return;
+
+    const { projectKey } = getProjectRequestParams();
+    if (!projectKey) return;
+
+    updateSession({ duplicateCheckLoading: true, duplicateCheckFailed: false, duplicateCheckFailureReason: '' });
+
+    try {
+      const payload: DuplicateCheckRequestPayload = {
+        jira_connection_id: session.jiraConnectionId,
+        project_key: projectKey,
+        story_key: session.issueData?.key || undefined,
+        instance_url: session.instanceUrl,
+        candidate_summary: bug.summary || '',
+        candidate_description: bug.description || '',
+        error_message: bug.actual_result || '',
+        component: '',
+        labels: bug.labels || [],
+      };
+
+      const res = await apiRequest(`${apiBase}/jira/duplicates/check`, {
+        method: 'POST',
+        token: authToken,
+        onUnauthorized: refreshAuthToken,
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        updateSession({
+          duplicateCheckLoading: false,
+          duplicateCheckFailed: true,
+          duplicateCheckFailureReason: 'Duplicate check request failed.',
+          duplicateMatches: [],
+        });
+        return;
+      }
+
+      const data = await readJsonResponse<DuplicateCheckResponse>(res);
+      updateSession({
+        duplicateCheckLoading: false,
+        duplicateMatches: data.matches || [],
+        duplicateCheckFailed: data.check_failed || false,
+        duplicateCheckFailureReason: data.failure_reason || '',
+      });
+    } catch {
+      updateSession({
+        duplicateCheckLoading: false,
+        duplicateCheckFailed: true,
+        duplicateCheckFailureReason: 'Duplicate check could not be completed.',
+        duplicateMatches: [],
+      });
+    }
+  }, [session.bugs, session.jiraConnectionId, session.issueData?.key, session.instanceUrl, apiBase, authToken, refreshAuthToken, updateSession]);
+
+
+  const linkToExisting = useCallback(async (existingKey: string): Promise<DuplicateLinkResponse | null> => {
+    if (!session.jiraConnectionId || !session.issueData?.key) return null;
+
+    try {
+      const payload: DuplicateLinkRequestPayload = {
+        jira_connection_id: session.jiraConnectionId,
+        story_key: session.issueData.key,
+        existing_issue_key: existingKey,
+      };
+
+      const res = await apiRequest(`${apiBase}/jira/duplicates/link`, {
+        method: 'POST',
+        token: authToken,
+        onUnauthorized: refreshAuthToken,
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) return null;
+      return await readJsonResponse<DuplicateLinkResponse>(res);
+    } catch {
+      return null;
+    }
+  }, [session.jiraConnectionId, session.issueData?.key, apiBase, authToken, refreshAuthToken]);
 
   const submitBugs = useCallback(async (index?: number) => {
     if (submitBugsInFlightRef.current) return;
@@ -1290,8 +1385,10 @@ export const AIProvider: React.FC<{
     bulkCompareBrd,
     bulkLoadAttachmentAsBrd,
     validateBug,
-    preparePreviewBug
-  }), [usage, fetchUsage, customModel, customKey, hasCustomKeySaved, clearCustomKeyRequested, fetchAISettings, generateBugs, generateTestCases, handleManualGenerate, submitBugs, regenerateBug, searchUsers, handleUpdateBug, handleUpdateTestCase, publishTestCasesToXray, bulkFetchEpic, bulkGenerateTests, bulkAnalyzeStories, bulkCompareBrd, bulkLoadAttachmentAsBrd, validateBug, preparePreviewBug]);
+    preparePreviewBug,
+    checkDuplicates,
+    linkToExisting,
+  }), [usage, fetchUsage, customModel, customKey, hasCustomKeySaved, clearCustomKeyRequested, fetchAISettings, generateBugs, generateTestCases, handleManualGenerate, submitBugs, regenerateBug, searchUsers, handleUpdateBug, handleUpdateTestCase, publishTestCasesToXray, bulkFetchEpic, bulkGenerateTests, bulkAnalyzeStories, bulkCompareBrd, bulkLoadAttachmentAsBrd, validateBug, preparePreviewBug, checkDuplicates, linkToExisting]);
 
   return <AIContext.Provider value={value}>{children}</AIContext.Provider>;
 };

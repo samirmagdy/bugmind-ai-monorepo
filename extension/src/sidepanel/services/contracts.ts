@@ -319,3 +319,26 @@ export function buildProjectRequestParams(issueData: ProjectIssueLike | null | u
     project_id,
   };
 }
+
+// ── Phase 2: Duplicate Detection contracts ───────────────────────────────
+
+export interface DuplicateCheckRequestPayload {
+  jira_connection_id: number;
+  project_key: string;
+  story_key?: string | null;
+  instance_url?: string | null;
+  candidate_summary: string;
+  candidate_description: string;
+  error_message?: string;
+  component?: string;
+  labels?: string[];
+  screen_or_page?: string;
+  api_endpoint?: string;
+}
+
+export interface DuplicateLinkRequestPayload {
+  jira_connection_id: number;
+  story_key: string;
+  existing_issue_key: string;
+  link_type?: string | null;
+}

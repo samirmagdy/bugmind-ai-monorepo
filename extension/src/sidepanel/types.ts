@@ -204,6 +204,11 @@ export interface TabSession {
   previewBugIndex: number | null;
   validationErrors: string[];
   resolvedPayload: ResolvedPayload | null;
+  // Phase 2: Duplicate detection
+  duplicateMatches: DuplicateMatch[];
+  duplicateCheckFailed: boolean;
+  duplicateCheckFailureReason: string;
+  duplicateCheckLoading: boolean;
 }
 
 export interface JiraConnection {
@@ -375,7 +380,11 @@ export const INITIAL_SESSION: TabSession = {
   bulkBrdText: '',
   previewBugIndex: null,
   validationErrors: [],
-  resolvedPayload: null
+  resolvedPayload: null,
+  duplicateMatches: [],
+  duplicateCheckFailed: false,
+  duplicateCheckFailureReason: '',
+  duplicateCheckLoading: false,
 };
 
 
@@ -417,4 +426,28 @@ export interface StoryAnalysis {
   content_warnings: string[];
   selected_categories?: string[] | null;
   include_description?: boolean;
+}
+
+// Phase 2: Duplicate detection
+export interface DuplicateMatch {
+  issue_key: string;
+  summary: string;
+  status: string;
+  priority: string;
+  similarity_score: number;
+  confidence: 'high' | 'medium' | 'low';
+  reason: string;
+  url: string;
+}
+
+export interface DuplicateCheckResponse {
+  matches: DuplicateMatch[];
+  check_failed: boolean;
+  failure_reason: string;
+}
+
+export interface DuplicateLinkResponse {
+  linked: boolean;
+  link_type_used: string;
+  error?: string | null;
 }
