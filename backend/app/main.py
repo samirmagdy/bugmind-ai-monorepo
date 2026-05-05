@@ -1,6 +1,7 @@
 import logging
 import traceback
 import time
+from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 from uuid import uuid4
 
@@ -27,6 +28,7 @@ REQUIRED_COLUMNS = {
     "users": {"google_subject", "email_verified_at"},
     "password_reset_codes": {"email", "code_hash", "expires_at", "used_at"},
 }
+APP_STARTED_AT = time.time()
 
 
 def _normalize_request_origin(raw_origin: str) -> str:
@@ -37,9 +39,17 @@ def _normalize_request_origin(raw_origin: str) -> str:
         return f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
     return raw_origin.rstrip("/")
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await _run_startup_checks()
+    yield
+
+
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
+    lifespan=lifespan,
     openapi_url=f"{settings.API_V1_STR}/openapi.json" if settings.docs_enabled else None,
     docs_url="/docs" if settings.docs_enabled else None,
     redoc_url="/redoc" if settings.docs_enabled else None,
@@ -146,8 +156,7 @@ async def add_security_headers(request: Request, call_next):
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     return response
 
-@app.on_event("startup")
-async def startup_event():
+async def _run_startup_checks():
     logger.info("ENVIRONMENT: %s", settings.ENVIRONMENT)
     logger.info("DATABASE_URL: %s", settings.DATABASE_URL.split("@")[-1] if "@" in settings.DATABASE_URL else "masked")
     # 1. Verify Security Keys
@@ -245,7 +254,14 @@ def health_jira():
 
 @app.get("/metrics", tags=["System"])
 def metrics():
-    return {"status": "ok", "message": "Metrics placeholder"}
+    return {
+        "status": "ok",
+        "service": settings.PROJECT_NAME,
+        "version": settings.VERSION,
+        "environment": settings.ENVIRONMENT,
+        "uptime_seconds": round(time.time() - APP_STARTED_AT, 3),
+        "trace_id": get_trace_id(),
+    }
 
 from app.api.v1.api import api_router
 

@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from sqlalchemy.orm import Session
+from app.core.security import decrypt_credential
 from app.services.jobs.worker import update_job_progress, check_cancelled
 from app.services.jira.bulk_epic_service import fetch_epic_children
 from app.services.jira.connection_service import get_adapter, get_owned_connection
@@ -48,7 +49,8 @@ async def epic_test_generation_processor(job_id: str, db: Session, user: User, c
             update_job_progress(db, job_id, 100.0, "Completed - No Stories Found", {"stories": [], "epic_key": epic_key, "warnings": ["No stories found in this epic."]})
             return
 
-        ai_generator = TestCaseGenerator()
+        custom_api_key = decrypt_credential(user.encrypted_ai_api_key) if user.encrypted_ai_api_key else None
+        ai_generator = TestCaseGenerator(api_key=custom_api_key)
         results = []
         warnings = []
         

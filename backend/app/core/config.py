@@ -3,9 +3,14 @@ from pathlib import Path
 from typing import Any, Optional
 
 from pydantic import field_validator
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=str(Path(__file__).resolve().parents[3] / ".env"),
+        extra="ignore",
+    )
+
     PROJECT_NAME: str = "BugMind AI API"
     VERSION: str = "1.0.0"
     API_V1_STR: str = "/api/v1"
@@ -120,9 +125,5 @@ class Settings(BaseSettings):
     @property
     def docs_enabled(self) -> bool:
         return self.EXPOSE_API_DOCS or not self.is_production
-
-    class Config:
-        env_file = str(Path(__file__).resolve().parents[3] / ".env")
-        extra = "ignore"
 
 settings = Settings()

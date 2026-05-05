@@ -23,7 +23,8 @@ def create_epic_test_generation_job(
         user_id=current_user.id,
         job_type="epic_test_generation",
         target_key=request.epic_key,
-        project_key=request.project_key or request.epic_key.split("-", 1)[0]
+        project_key=request.project_key or request.epic_key.split("-", 1)[0],
+        workspace_id=current_user.default_workspace_id,
     )
     
     background_tasks.add_task(
@@ -51,6 +52,7 @@ def create_epic_audit_job(
         "epic_audit",
         request.epic_key,
         request.project_key or request.epic_key.split("-", 1)[0],
+        workspace_id=current_user.default_workspace_id,
     )
     background_tasks.add_task(
         process_job,
@@ -90,6 +92,7 @@ def create_brd_coverage_job(
         "brd_coverage",
         request.epic_key,
         request.project_key or request.epic_key.split("-", 1)[0],
+        workspace_id=current_user.default_workspace_id,
     )
     background_tasks.add_task(
         process_job,

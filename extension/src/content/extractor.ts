@@ -140,7 +140,6 @@ const messageListener = (
 
 function initialize() {
   if (window.__BugMindInjected === VERSION) {
-    console.log(`[BugMind] Version ${VERSION} already active.`);
     return;
   }
 
@@ -242,7 +241,6 @@ function initialize() {
   };
 
   notifyContextChange();
-  console.log('[BugMind] AI Content Engine Ready.');
 }
 
 initialize();

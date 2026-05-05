@@ -10,6 +10,7 @@ import { deobfuscate } from '../sidepanel/utils/StorageObfuscator';
 const VERSION = '1.2.0';
 const DEFAULT_API_BASE = 'https://bugmind-ai-monorepo.onrender.com/api/v1';
 const BULK_MODE_DEFAULT = true;
+const DEBUG_LOGS = false;
 const DOMAINS = {
   JIRA_CLOUD: '.atlassian.net',
   BROWSE_PATH: '/browse/',
@@ -61,6 +62,12 @@ interface BulkMessage {
   action: 'BULK_FETCH' | 'BULK_GENERATE' | 'BULK_ANALYZE' | 'PROCESS_GOAL' | 'FETCH_ATTACHMENT';
   tabId?: number;
   payload?: Record<string, unknown>;
+}
+
+function debugLog(message: string): void {
+  if (DEBUG_LOGS) {
+    console.info(message);
+  }
 }
 
 function normalizeJiraUrl(url: string | null | undefined): string {
@@ -255,28 +262,16 @@ async function fetchAttachment(message: BulkMessage): Promise<unknown> {
   const attachmentId = String(payload.attachmentId || '');
   if (!jiraConnectionId || !attachmentId) throw new Error('FETCH_ATTACHMENT requires jiraConnectionId and attachmentId.');
 
-  const { apiBase, token } = await getWorkerAuthContext(payload);
-  const url = `${apiBase}/jira/connections/${jiraConnectionId}/attachments/${attachmentId}/text`;
-  const response = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
-  if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    let message = body || response.statusText;
-    try {
-      const parsed = JSON.parse(body) as { detail?: unknown };
-      if (typeof parsed.detail === 'string') message = parsed.detail;
-    } catch {
-      // Use raw body.
-    }
-    throw new Error(`Attachment text fetch failed at ${url} with status ${response.status}: ${message}`);
-  }
-  const data = await response.json() as {
+  const data = await backendFetch<{
     id?: string;
     filename?: string;
     mime_type?: string;
     content?: string;
-  };
+  }>(
+    `/jira/connections/${jiraConnectionId}/attachments/${attachmentId}/text`,
+    { method: 'GET' },
+    payload,
+  );
   return {
     attachmentId,
     contentType: data.mime_type || 'text/plain',
@@ -332,7 +327,7 @@ const tabScriptInjectionInFlight = new Map<number, Promise<boolean>>();
 const REFRESH_DEBOUNCE_MS = 1200;
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('[BugMind-BG] Extension installed. Ready for context discovery.');
+  debugLog('[BugMind-BG] Extension installed. Ready for context discovery.');
 });
 
 // Sidebar setup (MV3)
@@ -371,7 +366,7 @@ async function ensureContentScript(tabId: number): Promise<boolean> {
     }
 
     const injectPromise = (async () => {
-      console.log(`[BugMind-BG] Content script not ready on tab ${tabId}. Attempting runtime injection...`);
+      debugLog(`[BugMind-BG] Content script not ready on tab ${tabId}. Attempting runtime injection...`);
       try {
         await chrome.scripting.executeScript({
           target: { tabId },
@@ -496,14 +491,14 @@ refreshExistingTabs();
 // 1. Listen for Tab Updates (Navigation)
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status === 'complete' && tab.url) {
-    console.log(`[BugMind-BG] Tab ${tabId} navigation complete. Refreshing context...`);
+    debugLog(`[BugMind-BG] Tab ${tabId} navigation complete. Refreshing context...`);
     refreshTabContext(tabId, tab.url);
   }
 });
 
 // 2. Listen for Tab Activation (Switching)
 chrome.tabs.onActivated.addListener((activeInfo) => {
-  console.log(`[BugMind-BG] Tab ${activeInfo.tabId} activated.`);
+  debugLog(`[BugMind-BG] Tab ${activeInfo.tabId} activated.`);
   refreshTabContext(activeInfo.tabId);
 });
 
@@ -563,7 +558,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   // 1. Clean chrome.storage.local metadata
   const key = `bugmind_tab_${tabId}`;
   chrome.storage.local.remove([key], () => {
-    console.log(`[BugMind-BG] Cleaned up storage for tab ${tabId}`);
+    debugLog(`[BugMind-BG] Cleaned up storage for tab ${tabId}`);
   });
 
   // 2. Clean IndexedDB bug data
@@ -577,7 +572,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
         const tx = db.transaction(['tab_bugs'], 'readwrite');
         const store = tx.objectStore('tab_bugs');
         store.delete(tabId);
-        tx.oncomplete = () => console.log(`[BugMind-BG] Cleaned up IndexedDB bugs for tab ${tabId}`);
+        tx.oncomplete = () => debugLog(`[BugMind-BG] Cleaned up IndexedDB bugs for tab ${tabId}`);
       }
       db.close();
     };

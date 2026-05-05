@@ -29,6 +29,6 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     with op.batch_alter_table('audit_logs', schema=None) as batch_op:
-        batch_op.drop_constraint(None, type_='foreignkey')
+        batch_op.drop_constraint('fk_audit_logs_workspace_id', type_='foreignkey')
         batch_op.drop_index(batch_op.f('ix_audit_logs_workspace_id'))
         batch_op.drop_column('workspace_id')

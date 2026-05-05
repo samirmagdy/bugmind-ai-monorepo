@@ -2,9 +2,10 @@ import React, { useState } from 'react';
 import { useBugMind } from '../../hooks/useBugMind';
 import { X, Cloud, Key, CheckCircle, AlertTriangle, Loader2 } from 'lucide-react';
 import { ActionButton, SurfaceCard } from '../common/DesignSystem';
+import { apiRequest, getErrorMessage, readJsonResponse, throwApiErrorResponse } from '../../services/api';
 
 export const XrayCloudWizard: React.FC = () => {
-  const { session, updateSession, jira, auth: { apiBase, authToken } } = useBugMind();
+  const { session, updateSession, jira, auth: { apiBase, authToken, refreshSession } } = useBugMind();
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
   const [isTesting, setIsTesting] = useState(false);
@@ -33,23 +34,22 @@ export const XrayCloudWizard: React.FC = () => {
       }
 
       // Now call the test endpoint
-      const res = await fetch(`${apiBase}/jira/connections/${session.jiraConnectionId}/xray/test-connection`, {
+      const res = await apiRequest(`${apiBase}/jira/connections/${session.jiraConnectionId}/xray/test-connection`, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${authToken}`,
-          'Accept': 'application/json'
-        }
+        headers: { 'Accept': 'application/json' },
+        token: authToken,
+        onUnauthorized: refreshSession,
       });
-      const data = await res.json();
       if (!res.ok) {
-        throw new Error(data?.detail || "Failed to authenticate with Xray Cloud.");
+        await throwApiErrorResponse(res, "Failed to authenticate with Xray Cloud.");
       }
+      await readJsonResponse<unknown>(res);
 
       setTestSuccess(true);
       await jira.fetchConnections(); // refresh connections
     } catch (err: unknown) {
       setTestSuccess(false);
-      setErrorMsg(err instanceof Error ? err.message : 'Authentication failed.');
+      setErrorMsg(getErrorMessage(err));
     } finally {
       setIsTesting(false);
     }

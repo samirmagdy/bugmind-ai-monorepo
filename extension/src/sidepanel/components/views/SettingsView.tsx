@@ -1,9 +1,10 @@
 import { useEffect, useState, useRef } from 'react';
 import { X, ChevronDown, Loader2, AlertCircle, RefreshCw, Pencil, FolderOpen, Save, User, Search, Plus, Zap, Check, Moon, Sun, Users, Layout, Shield, ChevronRight } from 'lucide-react';
 import { useBugMind } from '../../hooks/useBugMind';
-import { IssueType, JiraField, JiraProject, JiraUser } from '../../types';
+import { IssueType, JiraConnection, JiraField, JiraProject, JiraUser } from '../../types';
 import { ActionButton, StatusBadge, StatusPanel, SurfaceCard } from '../common/DesignSystem';
 import LuxurySearchableSelect, { SelectOption, SelectValue } from '../common/LuxurySearchableSelect';
+import { apiRequest, readJsonResponse, throwApiErrorResponse } from '../../services/api';
 
 const HIDDEN_SYSTEM_FIELD_KEYS = new Set([
   'summary',
@@ -464,7 +465,7 @@ const SettingsView: React.FC = () => {
     session, updateSession, handleSaveSettings, saveFieldSettings,
     ai: { customKey, setCustomKey, hasCustomKeySaved, clearCustomKeyRequested, setClearCustomKeyRequested, customModel, setCustomModel, searchUsers },
     jira, refreshIssue, currentTabId,
-    auth: { apiBase, setApiBase, authToken },
+    auth: { apiBase, setApiBase, authToken, refreshSession },
     debug: { log }
   } = useBugMind();
   const [editingConnectionId, setEditingConnectionId] = useState<number | null>(null);
@@ -472,6 +473,7 @@ const SettingsView: React.FC = () => {
   const [projectsByConnection, setProjectsByConnection] = useState<Record<number, JiraProject[]>>({});
   const [showAddConnection, setShowAddConnection] = useState(false);
   const [showCreateWorkspace, setShowCreateWorkspace] = useState(false);
+  const [connectionToDelete, setConnectionToDelete] = useState<JiraConnection | null>(null);
   const [newWorkspaceName, setNewWorkspaceName] = useState('');
   const [newConnection, setNewConnection] = useState({
     auth_type: 'cloud',
@@ -482,6 +484,12 @@ const SettingsView: React.FC = () => {
   });
   const [isCreatingConnection, setIsCreatingConnection] = useState(false);
   const editableJiraFields = (session.jiraMetadata?.fields || []).filter((field: JiraField) => !isSystemManagedField(field));
+
+  const request = (url: string, options: RequestInit = {}) => apiRequest(url, {
+    ...options,
+    token: authToken,
+    onUnauthorized: refreshSession,
+  });
 
   const updateFieldDefault = (field: JiraField, nextValue: unknown) => {
     const nextDefaults = { ...(session.fieldDefaults || {}) };
@@ -511,29 +519,26 @@ const SettingsView: React.FC = () => {
     if (!newWorkspaceName.trim()) return;
     updateSession({ loading: true });
     try {
-      const res = await fetch(`${apiBase}/workspaces/`, {
+      const res = await request(`${apiBase}/workspaces/`, {
         method: 'POST',
-        headers: { 
-          'Authorization': `Bearer ${authToken}`,
-          'Content-Type': 'application/json'
-        },
         body: JSON.stringify({ name: newWorkspaceName })
       });
+      if (!res.ok) await throwApiErrorResponse(res, 'Failed to create workspace');
       if (res.ok) {
-        const ws = await res.json();
+        const ws = await readJsonResponse<{ id: number }>(res);
         setNewWorkspaceName('');
         setShowCreateWorkspace(false);
         // Refresh workspaces list in session
-        const wsRes = await fetch(`${apiBase}/workspaces/`, {
-          headers: { 'Authorization': `Bearer ${authToken}` }
-        });
+        const wsRes = await request(`${apiBase}/workspaces/`);
+        if (!wsRes.ok) await throwApiErrorResponse(wsRes, 'Failed to refresh workspaces');
         if (wsRes.ok) {
-          const workspaces = await wsRes.json();
+          const workspaces = await readJsonResponse<typeof session.workspaces>(wsRes);
           updateSession({ workspaces, activeWorkspaceId: ws.id, activeWorkspaceRole: 'owner' });
         }
       }
     } catch (err) {
       console.error('Failed to create workspace', err);
+      updateSession({ error: err instanceof Error ? err.message : 'Failed to create workspace' });
     } finally {
       updateSession({ loading: false });
     }
@@ -542,10 +547,10 @@ const SettingsView: React.FC = () => {
   const handleSwitchWorkspace = async (workspaceId: number) => {
     updateSession({ loading: true });
     try {
-      const res = await fetch(`${apiBase}/workspaces/${workspaceId}/activate`, {
+      const res = await request(`${apiBase}/workspaces/${workspaceId}/activate`, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${authToken}` }
       });
+      if (!res.ok) await throwApiErrorResponse(res, 'Failed to switch workspace');
       if (res.ok) {
         const ws = session.workspaces.find(w => w.id === workspaceId);
         updateSession({ 
@@ -557,6 +562,7 @@ const SettingsView: React.FC = () => {
       }
     } catch (err) {
       console.error('Failed to switch workspace', err);
+      updateSession({ error: err instanceof Error ? err.message : 'Failed to switch workspace' });
     } finally {
       updateSession({ loading: false });
     }
@@ -616,6 +622,37 @@ const SettingsView: React.FC = () => {
 
   return (
     <div className="space-y-5 animate-in slide-in-from-right-4 duration-300">
+      {connectionToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <SurfaceCard className="w-full max-w-xs p-4 shadow-2xl">
+            <h3 className="text-sm font-bold text-[var(--text-main)]">Delete Jira Connection</h3>
+            <p className="mt-2 text-xs leading-relaxed text-[var(--text-muted)]">
+              Delete the Jira connection for {connectionToDelete.host_url}? This cannot be undone.
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConnectionToDelete(null)}
+                className="rounded-lg border border-[var(--border-main)] px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-[var(--text-secondary)]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const id = connectionToDelete.id;
+                  setConnectionToDelete(null);
+                  jira.deleteConnection(id);
+                }}
+                className="rounded-lg bg-red-500 px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-white"
+              >
+                Delete
+              </button>
+            </div>
+          </SurfaceCard>
+        </div>
+      )}
+
       <SurfaceCard className="flex items-center justify-between gap-3 px-4 py-3.5">
         <div className="flex items-center gap-3">
           <button onClick={() => updateSession({ view: 'main' })} className="flex h-11 w-11 items-center justify-center rounded-full bg-[var(--surface-soft)] border border-[var(--card-border)] text-[var(--text-muted)] hover:text-[var(--primary-blue)] hover:border-[var(--primary-blue)] transition-all">
@@ -990,11 +1027,7 @@ const SettingsView: React.FC = () => {
                         <FolderOpen size={14} />
                       </button>
                       <button 
-                        onClick={() => {
-                          if (window.confirm(`Delete Jira connection for ${conn.host_url}?`)) {
-                            jira.deleteConnection(conn.id);
-                          }
-                        }}
+                        onClick={() => setConnectionToDelete(conn)}
                         className="p-1.5 hover:bg-red-500/10 text-red-500 rounded-lg transition-all"
                         title="Delete connection"
                       >

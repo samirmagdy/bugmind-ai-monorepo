@@ -3,6 +3,7 @@ import { useBugMind } from '../../hooks/useBugMind';
 import { Activity, BarChart3, Link2, Shield, Layout, Plus, Trash2, Loader2 } from 'lucide-react';
 import { ActionButton, SurfaceCard } from '../common/DesignSystem';
 import { JiraConnection, Workspace } from '../../types';
+import { apiRequest, getErrorMessage, readJsonResponse, throwApiErrorResponse } from '../../services/api';
 
 interface WorkspaceAuditLog {
   id: number;
@@ -21,7 +22,7 @@ interface WorkspaceUsage {
 }
 
 export const WorkspaceDashboardView: React.FC = () => {
-  const { session, updateSession, auth: { apiBase, authToken } } = useBugMind();
+  const { session, updateSession, auth: { apiBase, authToken, refreshSession } } = useBugMind();
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'members' | 'connections' | 'templates' | 'audit'>('members');
   const [inviteEmail, setInviteEmail] = useState('');
@@ -33,16 +34,23 @@ export const WorkspaceDashboardView: React.FC = () => {
   const [templateName, setTemplateName] = useState('');
   const [templateType, setTemplateType] = useState<'bug' | 'test' | 'preset' | 'style'>('test');
   const [templateBody, setTemplateBody] = useState('');
+  const [notice, setNotice] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
+  const [confirmAction, setConfirmAction] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
   const activeRole = session.activeWorkspaceRole || workspace?.role || null;
   const canManageMembers = activeRole === 'owner' || activeRole === 'admin';
   const canManageTemplates = canManageMembers || activeRole === 'qa_lead';
 
-  const formatApiError = (value: unknown, fallback: string): string => {
-    if (!value) return fallback;
-    if (typeof value === 'string') return value;
-    if (typeof value === 'object' && 'message' in value && typeof value.message === 'string') return value.message;
-    if (typeof value === 'object' && 'detail' in value) return formatApiError(value.detail, fallback);
-    return fallback;
+  const request = useCallback((url: string, options: RequestInit = {}) => {
+    return apiRequest(url, {
+      ...options,
+      token: authToken,
+      onUnauthorized: refreshSession,
+    });
+  }, [authToken, refreshSession]);
+
+  const showError = (err: unknown, fallback: string) => {
+    const message = getErrorMessage(err);
+    setNotice({ type: 'error', message: message === 'Unknown error occurred' ? fallback : message });
   };
 
   const fetchWorkspace = useCallback(async () => {
@@ -51,19 +59,16 @@ export const WorkspaceDashboardView: React.FC = () => {
         return;
     }
     try {
-      const res = await fetch(`${apiBase}/workspaces/${session.activeWorkspaceId}`, {
-        headers: { 'Authorization': `Bearer ${authToken}` }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setWorkspace(data);
-      }
+      const res = await request(`${apiBase}/workspaces/${session.activeWorkspaceId}`);
+      if (!res.ok) await throwApiErrorResponse(res, 'Failed to fetch workspace');
+      setWorkspace(await readJsonResponse<Workspace>(res));
     } catch (err) {
       console.error('Failed to fetch workspace', err);
+      showError(err, 'Failed to fetch workspace');
     } finally {
       setLoading(false);
     }
-  }, [session.activeWorkspaceId, apiBase, authToken]);
+  }, [session.activeWorkspaceId, apiBase, request]);
 
   useEffect(() => {
     fetchWorkspace();
@@ -73,23 +78,18 @@ export const WorkspaceDashboardView: React.FC = () => {
     if (!session.activeWorkspaceId) return;
     try {
       const [connectionsRes, auditRes, usageRes] = await Promise.all([
-        fetch(`${apiBase}/workspaces/${session.activeWorkspaceId}/connections`, {
-          headers: { 'Authorization': `Bearer ${authToken}` }
-        }),
-        fetch(`${apiBase}/workspaces/${session.activeWorkspaceId}/audit-logs`, {
-          headers: { 'Authorization': `Bearer ${authToken}` }
-        }),
-        fetch(`${apiBase}/workspaces/${session.activeWorkspaceId}/usage`, {
-          headers: { 'Authorization': `Bearer ${authToken}` }
-        }),
+        request(`${apiBase}/workspaces/${session.activeWorkspaceId}/connections`),
+        request(`${apiBase}/workspaces/${session.activeWorkspaceId}/audit-logs`),
+        request(`${apiBase}/workspaces/${session.activeWorkspaceId}/usage`),
       ]);
-      if (connectionsRes.ok) setSharedConnections(await connectionsRes.json());
-      if (auditRes.ok) setAuditLogs(await auditRes.json());
-      if (usageRes.ok) setUsage(await usageRes.json());
+      if (connectionsRes.ok) setSharedConnections(await readJsonResponse<JiraConnection[]>(connectionsRes));
+      if (auditRes.ok) setAuditLogs(await readJsonResponse<WorkspaceAuditLog[]>(auditRes));
+      if (usageRes.ok) setUsage(await readJsonResponse<WorkspaceUsage>(usageRes));
     } catch (err) {
       console.error('Failed to fetch workspace admin data', err);
+      showError(err, 'Failed to fetch workspace admin data');
     }
-  }, [apiBase, authToken, session.activeWorkspaceId]);
+  }, [apiBase, request, session.activeWorkspaceId]);
 
   useEffect(() => {
     if (activeTab === 'connections' || activeTab === 'audit') {
@@ -100,60 +100,53 @@ export const WorkspaceDashboardView: React.FC = () => {
   const handleInvite = async () => {
     if (!inviteEmail) return;
     try {
-      const res = await fetch(`${apiBase}/workspaces/${session.activeWorkspaceId}/members?email=${encodeURIComponent(inviteEmail)}&role=${inviteRole}`, {
+      const res = await request(`${apiBase}/workspaces/${session.activeWorkspaceId}/members?email=${encodeURIComponent(inviteEmail)}&role=${inviteRole}`, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${authToken}` }
       });
       if (res.ok) {
         setInviteEmail('');
+        setNotice({ type: 'success', message: 'Member invited.' });
         fetchWorkspace();
       } else {
-        const data = await res.json();
-        alert(formatApiError(data, 'Failed to invite user'));
+        await throwApiErrorResponse(res, 'Failed to invite user');
       }
-    } catch {
-      alert('Error inviting user');
+    } catch (err) {
+      showError(err, 'Error inviting user');
     }
   };
 
   const removeMember = async (userId: number) => {
-    if (!confirm('Are you sure you want to remove this member?')) return;
     try {
-      const res = await fetch(`${apiBase}/workspaces/${session.activeWorkspaceId}/members/${userId}`, {
+      const res = await request(`${apiBase}/workspaces/${session.activeWorkspaceId}/members/${userId}`, {
         method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${authToken}` }
       });
+      if (!res.ok) await throwApiErrorResponse(res, 'Failed to remove member');
       if (res.ok) fetchWorkspace();
     } catch (err) {
       console.error('Failed to remove member', err);
+      showError(err, 'Failed to remove member');
     }
   };
 
   const changeRole = async (userId: number, newRole: string) => {
     try {
-      const res = await fetch(`${apiBase}/workspaces/${session.activeWorkspaceId}/members/${userId}`, {
+      const res = await request(`${apiBase}/workspaces/${session.activeWorkspaceId}/members/${userId}`, {
         method: 'PUT',
-        headers: { 
-          'Authorization': `Bearer ${authToken}`,
-          'Content-Type': 'application/json'
-        },
         body: JSON.stringify({ role: newRole })
       });
+      if (!res.ok) await throwApiErrorResponse(res, 'Failed to change member role');
       if (res.ok) fetchWorkspace();
     } catch (err) {
       console.error('Failed to change role', err);
+      showError(err, 'Failed to change member role');
     }
   };
 
   const createTemplate = async () => {
     if (!templateName.trim()) return;
     try {
-      const res = await fetch(`${apiBase}/workspaces/${session.activeWorkspaceId}/templates`, {
+      const res = await request(`${apiBase}/workspaces/${session.activeWorkspaceId}/templates`, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${authToken}`,
-          'Content-Type': 'application/json'
-        },
         body: JSON.stringify({
           name: templateName.trim(),
           template_type: templateType,
@@ -163,44 +156,50 @@ export const WorkspaceDashboardView: React.FC = () => {
       if (res.ok) {
         setTemplateName('');
         setTemplateBody('');
+        setNotice({ type: 'success', message: 'Template saved.' });
         fetchWorkspace();
       } else {
-        const data = await res.json();
-        alert(formatApiError(data, 'Failed to create template'));
+        await throwApiErrorResponse(res, 'Failed to create template');
       }
-    } catch {
-      alert('Error creating template');
+    } catch (err) {
+      showError(err, 'Error creating template');
     }
   };
 
   const deleteTemplate = async (templateId: number) => {
-    if (!confirm('Delete this workspace template?')) return;
-    const res = await fetch(`${apiBase}/workspaces/${session.activeWorkspaceId}/templates/${templateId}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${authToken}` }
-    });
-    if (res.ok) fetchWorkspace();
+    try {
+      const res = await request(`${apiBase}/workspaces/${session.activeWorkspaceId}/templates/${templateId}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) await throwApiErrorResponse(res, 'Failed to delete template');
+      if (res.ok) fetchWorkspace();
+    } catch (err) {
+      showError(err, 'Failed to delete template');
+    }
   };
 
   const shareConnection = async (connectionId: number) => {
-    const res = await fetch(`${apiBase}/workspaces/${session.activeWorkspaceId}/connections/${connectionId}/share`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${authToken}` }
-    });
-    if (res.ok) {
-      fetchWorkspaceAdminData();
-    } else {
-      const data = await res.json();
-      alert(formatApiError(data, 'Failed to share connection'));
+    try {
+      const res = await request(`${apiBase}/workspaces/${session.activeWorkspaceId}/connections/${connectionId}/share`, {
+        method: 'POST',
+      });
+      if (!res.ok) await throwApiErrorResponse(res, 'Failed to share connection');
+      if (res.ok) fetchWorkspaceAdminData();
+    } catch (err) {
+      showError(err, 'Failed to share connection');
     }
   };
 
   const unshareConnection = async (connectionId: number) => {
-    const res = await fetch(`${apiBase}/workspaces/${session.activeWorkspaceId}/connections/${connectionId}/share`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${authToken}` }
-    });
-    if (res.ok) fetchWorkspaceAdminData();
+    try {
+      const res = await request(`${apiBase}/workspaces/${session.activeWorkspaceId}/connections/${connectionId}/share`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) await throwApiErrorResponse(res, 'Failed to unshare connection');
+      if (res.ok) fetchWorkspaceAdminData();
+    } catch (err) {
+      showError(err, 'Failed to unshare connection');
+    }
   };
 
   if (loading && !workspace) {
@@ -236,6 +235,16 @@ export const WorkspaceDashboardView: React.FC = () => {
           Back
         </button>
       </div>
+
+      {notice && (
+        <div className={`rounded-xl border px-3 py-2 text-[11px] font-medium ${
+          notice.type === 'error'
+            ? 'border-[var(--error)]/20 bg-[var(--error)]/10 text-[var(--error)]'
+            : 'border-[var(--success)]/20 bg-[var(--success)]/10 text-[var(--success)]'
+        }`}>
+          {notice.message}
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-4 border-b border-[var(--border-soft)]">
@@ -336,7 +345,11 @@ export const WorkspaceDashboardView: React.FC = () => {
                         <option value="admin">Admin</option>
                       </select>
                       <button 
-                        onClick={() => removeMember(member.user_id)}
+                        onClick={() => setConfirmAction({
+                          title: 'Remove member',
+                          message: `Remove ${member.email || 'this member'} from the workspace?`,
+                          onConfirm: () => removeMember(member.user_id),
+                        })}
                         className="p-1.5 hover:bg-[var(--error)]/10 rounded text-[var(--error)]"
                       >
                         <Trash2 size={12} />
@@ -425,7 +438,15 @@ export const WorkspaceDashboardView: React.FC = () => {
                     <div className="mt-1 line-clamp-2 text-[10px] text-[var(--text-secondary)]">{String(template.content?.body || '')}</div>
                   </div>
                   {canManageTemplates && (
-                    <button onClick={() => deleteTemplate(template.id)} className="p-1.5 hover:bg-[var(--error)]/10 rounded text-[var(--error)]" aria-label="Delete template">
+                    <button
+                      onClick={() => setConfirmAction({
+                        title: 'Delete template',
+                        message: `Delete "${template.name}"? This cannot be undone.`,
+                        onConfirm: () => deleteTemplate(template.id),
+                      })}
+                      className="p-1.5 hover:bg-[var(--error)]/10 rounded text-[var(--error)]"
+                      aria-label="Delete template"
+                    >
                       <Trash2 size={12} />
                     </button>
                   )}
@@ -474,6 +495,35 @@ export const WorkspaceDashboardView: React.FC = () => {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {confirmAction && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <SurfaceCard className="w-full max-w-xs p-4 shadow-2xl">
+            <h3 className="text-sm font-bold text-[var(--text-main)]">{confirmAction.title}</h3>
+            <p className="mt-2 text-xs leading-relaxed text-[var(--text-muted)]">{confirmAction.message}</p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmAction(null)}
+                className="rounded-lg border border-[var(--border-main)] px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-[var(--text-secondary)]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const action = confirmAction.onConfirm;
+                  setConfirmAction(null);
+                  action();
+                }}
+                className="rounded-lg bg-[var(--error)] px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-white"
+              >
+                Confirm
+              </button>
+            </div>
+          </SurfaceCard>
         </div>
       )}
     </div>

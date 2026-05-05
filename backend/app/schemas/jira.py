@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional, Dict, Any, List
 from app.models.jira import JiraAuthType
 
@@ -31,8 +31,7 @@ class JiraConnectionResponse(JiraConnectionBase):
     is_shared: bool = False
     has_xray_cloud_credentials: bool = False
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class JiraBootstrapContextRequest(BaseModel):

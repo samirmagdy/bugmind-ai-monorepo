@@ -1,6 +1,6 @@
 from typing import Any, Dict, List, Optional
 from datetime import datetime
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, ConfigDict
 from app.models.workspace import WorkspaceRole, WorkspaceTemplateType
 
 # Workspace Member Schemas
@@ -21,8 +21,7 @@ class WorkspaceMemberResponse(WorkspaceMemberBase):
     updated_at: Optional[datetime] = None
     email: Optional[str] = None # Helper for UI
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # Workspace Template Schemas
 class WorkspaceTemplateBase(BaseModel):
@@ -43,8 +42,7 @@ class WorkspaceTemplateResponse(WorkspaceTemplateBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # Workspace Schemas
 class WorkspaceBase(BaseModel):
@@ -63,8 +61,7 @@ class WorkspaceResponse(WorkspaceBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class WorkspaceDetailResponse(WorkspaceResponse):
     members: List[WorkspaceMemberResponse]
@@ -78,8 +75,7 @@ class WorkspaceAuditLogResponse(BaseModel):
     metadata: Dict[str, Any] = {}
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class WorkspaceUsageResponse(BaseModel):

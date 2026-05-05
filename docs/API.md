@@ -111,14 +111,18 @@ Verifies Jira integration service status.
 
 ### `GET /metrics`
 
-Placeholder endpoint.
+Returns lightweight service diagnostics for monitoring.
 
 Response:
 
 ```json
 {
   "status": "ok",
-  "message": "Metrics placeholder"
+  "service": "BugMind Backend",
+  "version": "1.2.0",
+  "environment": "development",
+  "uptime_seconds": 42.123,
+  "trace_id": "abc-123"
 }
 ```
 

@@ -2,6 +2,7 @@ import asyncio
 import uuid
 import logging
 from datetime import datetime
+from typing import Optional
 from sqlalchemy.orm import Session
 from app.models.job import Job
 
@@ -33,10 +34,18 @@ async def process_job(db: Session, job_id: str, processor_func, *args, **kwargs)
             job.completed_at = datetime.utcnow()
             db.commit()
 
-def create_job(db: Session, user_id: int, job_type: str, target_key: str, project_key: str) -> Job:
+def create_job(
+    db: Session,
+    user_id: int,
+    job_type: str,
+    target_key: str,
+    project_key: str,
+    workspace_id: Optional[int] = None,
+) -> Job:
     job = Job(
         id=str(uuid.uuid4()),
         user_id=user_id,
+        workspace_id=workspace_id,
         job_type=job_type,
         target_key=target_key,
         project_key=project_key,

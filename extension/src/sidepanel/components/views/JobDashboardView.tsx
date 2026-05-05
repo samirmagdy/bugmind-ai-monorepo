@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { useBugMind } from '../../hooks/useBugMind';
 import { Activity, Clock, CheckCircle2, AlertTriangle, Loader2, X } from 'lucide-react';
 import { ActionButton, SurfaceCard } from '../common/DesignSystem';
+import { apiRequest, readJsonResponse, throwApiErrorResponse } from '../../services/api';
 
 export interface Job {
   id: string;
@@ -16,17 +17,19 @@ export interface Job {
 }
 
 export const JobDashboardView: React.FC = () => {
-  const { updateSession, auth: { apiBase, authToken } } = useBugMind();
+  const { updateSession, auth: { apiBase, authToken, refreshSession } } = useBugMind();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetchJobs = useCallback(async () => {
     try {
-      const res = await fetch(`${apiBase}/jobs`, {
-        headers: { 'Authorization': `Bearer ${authToken}` }
+      const res = await apiRequest(`${apiBase}/jobs`, {
+        token: authToken,
+        onUnauthorized: refreshSession,
       });
+      if (!res.ok) await throwApiErrorResponse(res, 'Failed to fetch background jobs');
       if (res.ok) {
-        const data = await res.json();
+        const data = await readJsonResponse<Job[]>(res);
         setJobs(data);
       }
     } catch (err) {
@@ -34,7 +37,7 @@ export const JobDashboardView: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [apiBase, authToken]);
+  }, [apiBase, authToken, refreshSession]);
 
   useEffect(() => {
     fetchJobs();
@@ -43,10 +46,12 @@ export const JobDashboardView: React.FC = () => {
   }, [fetchJobs]);
 
   const cancelJob = async (jobId: string) => {
-    await fetch(`${apiBase}/jobs/${jobId}/cancel`, {
+    const res = await apiRequest(`${apiBase}/jobs/${jobId}/cancel`, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${authToken}` }
+      token: authToken,
+      onUnauthorized: refreshSession,
     });
+    if (!res.ok) await throwApiErrorResponse(res, 'Failed to cancel job');
     fetchJobs();
   };
 

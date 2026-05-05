@@ -85,7 +85,7 @@ def get_workspace(
     # Build response manually to include members with emails
     members = []
     for m in workspace.members:
-        member_resp = WorkspaceMemberResponse.from_orm(m)
+        member_resp = WorkspaceMemberResponse.model_validate(m)
         member_resp.email = m.user.email
         members.append(member_resp)
         
@@ -144,7 +144,7 @@ def add_workspace_member(
     db.commit()
     db.refresh(member)
     
-    resp = WorkspaceMemberResponse.from_orm(member)
+    resp = WorkspaceMemberResponse.model_validate(member)
     resp.email = user.email
     return resp
 
@@ -200,7 +200,7 @@ def update_member_role(
     db.commit()
     db.refresh(member)
     
-    resp = WorkspaceMemberResponse.from_orm(member)
+    resp = WorkspaceMemberResponse.model_validate(member)
     resp.email = member.user.email
     return resp
 

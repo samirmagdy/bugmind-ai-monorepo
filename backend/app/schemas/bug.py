@@ -35,6 +35,8 @@ DEFAULT_TEST_CATEGORIES = ["Positive", "Negative", "Boundary", "Regression"]
 
 
 class TestCaseGenerationRequest(BaseModel):
+    __test__ = False
+
     selected_text: Optional[str] = None
     issue_context: Optional[IssueContext] = None
     jira_connection_id: int
@@ -182,6 +184,8 @@ class SubmitBugsRequest(BaseModel):
     bugs: List[BugDraft]
 
 class TestCase(BaseModel):
+    __test__ = False
+
     title: str
     objective: Optional[str] = None
     steps: List[str]

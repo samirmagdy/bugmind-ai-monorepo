@@ -19,4 +19,8 @@ class User(Base):
     encrypted_ai_api_key = Column(String, nullable=True)
 
     # Workspace
-    default_workspace_id = Column(Integer, ForeignKey("workspaces.id", ondelete="SET NULL"), nullable=True)
+    default_workspace_id = Column(
+        Integer,
+        ForeignKey("workspaces.id", ondelete="SET NULL", use_alter=True, name="fk_users_default_workspace_id"),
+        nullable=True,
+    )
