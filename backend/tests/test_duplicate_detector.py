@@ -22,6 +22,7 @@ from app.services.jira.duplicate_detector import (
     score_duplicate,
     build_search_queries,
     find_duplicates,
+    resolve_duplicate_scope_work_items,
     DuplicateCandidate,
     DuplicateMatch,
     CONFIDENCE_HIGH,
@@ -270,6 +271,16 @@ class TestBuildSearchQueries:
         queries = build_search_queries("PROJ", candidate, story_key="PROJ-42")
         assert any("linkedIssues" in q for q in queries)
 
+    def test_with_related_work_item_keys(self):
+        candidate = DuplicateCandidate(summary="Test bug")
+        queries = build_search_queries(
+            "PROJ",
+            candidate,
+            story_key="PROJ-42",
+            related_work_item_keys=["PROJ-1", "PROJ-43"],
+        )
+        assert any("linkedIssues" in q and "PROJ-1" in q and "PROJ-43" in q for q in queries)
+
     def test_with_configured_issue_type_and_project_fallback(self):
         candidate = DuplicateCandidate(summary="Login failure")
         queries = build_search_queries(
@@ -295,6 +306,49 @@ class TestBuildSearchQueries:
         queries = build_search_queries("PROJ", candidate)
         # Should still have the recent bugs query
         assert len(queries) >= 1
+
+
+class FakeDuplicateScopeAdapter:
+    def __init__(self):
+        self.search_queries = []
+
+    def fetch_issue(self, issue_key):
+        issues = {
+            "PROJ-11": {
+                "key": "PROJ-11",
+                "fields": {
+                    "issuetype": {"name": "Task"},
+                    "parent": {"key": "PROJ-10"},
+                },
+            },
+            "PROJ-10": {
+                "key": "PROJ-10",
+                "fields": {
+                    "issuetype": {"name": "Story"},
+                    "parent": {"key": "PROJ-1"},
+                },
+            },
+        }
+        return issues[issue_key]
+
+    def search_issues(self, jql, fields=None, max_results=100):
+        self.search_queries.append(jql)
+        if "PROJ-10" in jql:
+            return [{"key": "PROJ-12", "fields": {}}]
+        if "PROJ-1" in jql:
+            return [{"key": "PROJ-13", "fields": {}}]
+        return []
+
+
+class TestDuplicateScope:
+    def test_resolves_current_parent_epic_and_sibling_work_items(self):
+        adapter = FakeDuplicateScopeAdapter()
+        keys = resolve_duplicate_scope_work_items(adapter, "PROJ", "PROJ-11")
+        assert keys[:3] == ["PROJ-11", "PROJ-10", "PROJ-1"]
+        assert "PROJ-12" in keys
+        assert "PROJ-13" in keys
+        assert any("parent" in query and "PROJ-10" in query for query in adapter.search_queries)
+        assert any('"Epic Link"' in query and "PROJ-1" in query for query in adapter.search_queries)
 
 
 class TestConfidenceThresholds:

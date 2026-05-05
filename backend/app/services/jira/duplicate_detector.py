@@ -53,6 +53,8 @@ _PATH_PATTERN = re.compile(r"(?:^|[\s\"'])(\/(?:api|v\d|rest|graphql)[\w/\-.]*)"
 CONFIDENCE_HIGH = 0.80
 CONFIDENCE_MEDIUM = 0.55
 CONFIDENCE_LOW = 0.35
+MAX_SCOPE_WORK_ITEMS = 30
+LINKED_ISSUE_CHUNK_SIZE = 8
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -312,12 +314,115 @@ def _extract_keywords(text: str, max_terms: int = 6) -> List[str]:
     return sorted_tokens[:max_terms]
 
 
+def _issue_key(value: Any) -> str:
+    if isinstance(value, dict):
+        raw_key = value.get("key")
+        return str(raw_key).strip().upper() if raw_key else ""
+    return ""
+
+
+def _issue_type_name(issue: Dict[str, Any]) -> str:
+    fields = issue.get("fields") or {}
+    issue_type = fields.get("issuetype") or {}
+    if isinstance(issue_type, dict):
+        return str(issue_type.get("name") or "").strip().lower()
+    return ""
+
+
+def _parent_key(issue: Dict[str, Any]) -> str:
+    fields = issue.get("fields") or {}
+    return _issue_key(fields.get("parent"))
+
+
+def _append_unique_key(keys: List[str], key: str) -> None:
+    normalized = key.strip().upper()
+    if normalized and normalized not in keys:
+        keys.append(normalized)
+
+
+def _linked_issue_clauses(keys: List[str]) -> List[str]:
+    clauses: List[str] = []
+    for idx in range(0, len(keys), LINKED_ISSUE_CHUNK_SIZE):
+        chunk = keys[idx:idx + LINKED_ISSUE_CHUNK_SIZE]
+        if chunk:
+            clauses.append(" OR ".join(f'issue in linkedIssues({_quote_jql(key)})' for key in chunk))
+    return clauses
+
+
+def resolve_duplicate_scope_work_items(adapter: Any, project_key: str, story_key: Optional[str]) -> List[str]:
+    """
+    Resolve work items whose linked bugs should be considered duplicates.
+
+    Scope includes:
+    - the current issue
+    - its parent user story/epic when Jira exposes one
+    - the parent of that parent when present
+    - sibling/child work items under those parent/epic roots
+    """
+    if not story_key:
+        return []
+
+    scope_keys: List[str] = []
+    root_keys: List[str] = []
+    current_key = story_key.strip().upper()
+    _append_unique_key(scope_keys, current_key)
+
+    try:
+        current_issue = adapter.fetch_issue(current_key)
+    except Exception:
+        return scope_keys
+
+    if _issue_type_name(current_issue) == "epic":
+        _append_unique_key(root_keys, current_key)
+
+    current_parent_key = _parent_key(current_issue)
+    if current_parent_key:
+        _append_unique_key(scope_keys, current_parent_key)
+        _append_unique_key(root_keys, current_parent_key)
+        try:
+            parent_issue = adapter.fetch_issue(current_parent_key)
+            parent_parent_key = _parent_key(parent_issue)
+            if parent_parent_key:
+                _append_unique_key(scope_keys, parent_parent_key)
+                _append_unique_key(root_keys, parent_parent_key)
+            if _issue_type_name(parent_issue) == "epic":
+                _append_unique_key(root_keys, current_parent_key)
+        except Exception:
+            pass
+
+    for root_key in root_keys:
+        root_queries = [
+            f'project = {_quote_jql(project_key)} AND parent = {_quote_jql(root_key)} ORDER BY created DESC',
+            f'project = {_quote_jql(project_key)} AND "Epic Link" = {_quote_jql(root_key)} ORDER BY created DESC',
+            f'project = {_quote_jql(project_key)} AND issue in linkedIssues({_quote_jql(root_key)}) ORDER BY created DESC',
+        ]
+        for jql in root_queries:
+            if len(scope_keys) >= MAX_SCOPE_WORK_ITEMS:
+                return scope_keys[:MAX_SCOPE_WORK_ITEMS]
+            try:
+                issues = adapter.search_issues(
+                    jql,
+                    fields=["summary", "issuetype", "parent"],
+                    max_results=MAX_SCOPE_WORK_ITEMS,
+                )
+            except Exception:
+                continue
+
+            for issue in issues:
+                _append_unique_key(scope_keys, str(issue.get("key") or ""))
+                if len(scope_keys) >= MAX_SCOPE_WORK_ITEMS:
+                    return scope_keys[:MAX_SCOPE_WORK_ITEMS]
+
+    return scope_keys[:MAX_SCOPE_WORK_ITEMS]
+
+
 def build_search_queries(
     project_key: str,
     candidate: DuplicateCandidate,
     story_key: Optional[str] = None,
     issue_type_id: Optional[str] = None,
     issue_type_name: Optional[str] = None,
+    related_work_item_keys: Optional[List[str]] = None,
 ) -> List[str]:
     """
     Build a list of JQL queries to find potential duplicates.
@@ -353,11 +458,17 @@ def build_search_queries(
                 f'{base_filter} AND text ~ {_quote_jql(sig)} ORDER BY created DESC'
             )
 
-    # 3. Issues linked to same story/epic
+    # 3. Bugs linked to the current issue, parent/epic, or sibling work items
+    linked_scope_keys: List[str] = []
     if story_key:
+        _append_unique_key(linked_scope_keys, story_key)
+    for key in related_work_item_keys or []:
+        _append_unique_key(linked_scope_keys, key)
+
+    for linked_clause in _linked_issue_clauses(linked_scope_keys):
         for base_filter in base_filters:
             queries.append(
-                f'{base_filter} AND issue in linkedIssues({_quote_jql(story_key)}) ORDER BY created DESC'
+                f'{base_filter} AND ({linked_clause}) ORDER BY created DESC'
             )
 
     # 4. Recently created bugs in same project (last 30 days)
@@ -393,7 +504,15 @@ def find_duplicates(
         - check_failed: True if all Jira queries failed
         - failure_reason: human-readable reason if check_failed
     """
-    queries = build_search_queries(project_key, candidate, story_key, issue_type_id, issue_type_name)
+    related_work_item_keys = resolve_duplicate_scope_work_items(adapter, project_key, story_key)
+    queries = build_search_queries(
+        project_key,
+        candidate,
+        story_key,
+        issue_type_id,
+        issue_type_name,
+        related_work_item_keys,
+    )
     if not queries:
         return [], False, ""
 
