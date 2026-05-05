@@ -12,10 +12,11 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response
 from sqlalchemy import text, inspect
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.core.api_errors import http_exception_handler, validation_exception_handler
+from app.core.api_errors import http_exception_handler, validation_exception_handler, build_error_response
 from app.core.config import settings
 from app.core.database import engine
 from app.core.logging import configure_logging
+from app.core.context import set_trace_id, get_trace_id
 
 configure_logging()
 logger = logging.getLogger("bugmind.http")
@@ -50,17 +51,19 @@ app.add_exception_handler(RequestValidationError, validation_exception_handler)
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     tb = traceback.format_exc()
-    logger.error("INTERNAL SERVER ERROR (UNCAUGHT EXCEPTION): %s\n%s", str(exc), tb)
+    trace_id = get_trace_id() or str(uuid4())
+    logger.error("INTERNAL SERVER ERROR (UNCAUGHT EXCEPTION): %s\n%s [trace_id=%s]", str(exc), tb, trace_id)
+    
+    error_body = build_error_response(500, {
+        "code": "INTERNAL_ERROR",
+        "message": str(exc) if not settings.is_production else "An unexpected error occurred",
+        "user_action": "An internal error occurred. Please contact support and provide the trace ID."
+    })
+    
     return JSONResponse(
         status_code=500,
-        content={
-            "detail": "Internal Server Error",
-            "error": {
-                "code": "INTERNAL_SERVER_ERROR",
-                "message": str(exc) if not settings.is_production else "An unexpected error occurred",
-                "details": []
-            }
-        }
+        content=error_body.model_dump(),
+        headers={"X-Request-ID": trace_id}
     )
 
 # Standard CORS behavior for Chrome Extension
@@ -88,7 +91,8 @@ async def limit_request_size(request: Request, call_next):
 
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
-    request_id = request.headers.get("X-Request-ID") or str(uuid4())
+    request_id = request.headers.get("X-Request-ID") or request.headers.get("X-Correlation-ID") or str(uuid4())
+    set_trace_id(request_id)
     
     # Strict Origin Validation in Production
     if settings.is_production and request.method != "GET":
@@ -98,19 +102,30 @@ async def add_security_headers(request: Request, call_next):
             allowed_origins = set(settings.extension_origins_list + settings.cors_origins_list)
             if origin not in allowed_origins:
                 logger.warning("security_alert unauthorized_origin_attempt origin=%s request_id=%s", origin, request_id)
+                error_body = build_error_response(403, {
+                    "code": "EXTENSION_ORIGIN_NOT_ALLOWED",
+                    "message": f"Unauthorized request origin: {origin}",
+                    "user_action": "Add the current chrome-extension origin to the EXTENSION_ORIGINS server configuration."
+                })
                 return JSONResponse(
                     status_code=403,
-                    content={
-                        "detail": (
-                            "Unauthorized request origin. "
-                            "This BugMind extension origin is not allowed by the backend configuration. "
-                            "Add the current chrome-extension://<extension-id> origin to EXTENSION_ORIGINS."
-                        )
-                    }
+                    content=error_body.model_dump(),
+                    headers={"X-Request-ID": request_id}
                 )
 
     started_at = time.perf_counter()
-    response: Response = await call_next(request)
+    try:
+        response: Response = await call_next(request)
+    except Exception as e:
+        # Fallback for errors in middleware or before exception handlers
+        logger.exception("Exception in middleware chain: %s", str(e))
+        error_body = build_error_response(500, str(e))
+        return JSONResponse(
+            status_code=500,
+            content=error_body.model_dump(),
+            headers={"X-Request-ID": request_id}
+        )
+
     duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
     logger.info(
         "request_complete request_id=%s method=%s path=%s status=%s duration_ms=%s client_ip=%s",
@@ -191,15 +206,42 @@ def root_redirect():
     return RedirectResponse(url="/docs" if settings.docs_enabled else "/health")
 
 @app.get("/health", tags=["System"])
-@app.get("/health ", tags=["System"], include_in_schema=False)
 def health_check():
+    return {
+        "status": "ok", 
+        "version": settings.VERSION, 
+        "environment": settings.ENVIRONMENT,
+        "trace_id": get_trace_id()
+    }
+
+@app.get("/health/db", tags=["System"])
+def health_db():
     try:
         with engine.connect() as connection:
             connection.execute(text("SELECT 1"))
-    except SQLAlchemyError:
-        raise HTTPException(status_code=503, detail="Database health check failed")
+        return {"status": "ok", "service": "database", "trace_id": get_trace_id()}
+    except Exception as e:
+        logger.error("DB Health Check Failed: %s", str(e))
+        raise HTTPException(status_code=503, detail="Database connection failed")
 
-    return {"status": "ok", "version": settings.VERSION}
+@app.get("/health/ai", tags=["System"])
+async def health_ai():
+    if not settings.OPENROUTER_API_KEY:
+        return {"status": "degraded", "service": "ai", "message": "API key missing", "trace_id": get_trace_id()}
+    
+    # We don't want to call the AI for every health check, but we can verify settings
+    return {
+        "status": "ok", 
+        "service": "ai", 
+        "provider": "openrouter", 
+        "model": settings.OPENROUTER_MODEL,
+        "trace_id": get_trace_id()
+    }
+
+@app.get("/health/jira", tags=["System"])
+def health_jira():
+    # Jira health is usually per-user connection, so we just report if the service logic is ready
+    return {"status": "ok", "service": "jira_integration", "trace_id": get_trace_id()}
 
 @app.get("/metrics", tags=["System"])
 def metrics():

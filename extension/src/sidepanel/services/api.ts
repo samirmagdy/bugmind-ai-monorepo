@@ -7,6 +7,12 @@ export interface ApiRequestOptions extends RequestInit {
 }
 
 export interface ApiErrorPayload {
+  code?: string;
+  message?: string;
+  user_action?: string;
+  trace_id?: string;
+  details?: unknown;
+  // Legacy support
   detail?: unknown;
   error?: {
     code?: unknown;
@@ -18,34 +24,38 @@ export interface ApiErrorPayload {
 export class ApiError extends Error {
   status: number;
   code?: string;
-  details?: unknown[];
+  userAction?: string;
+  traceId?: string;
+  details?: unknown;
   payload?: ApiErrorPayload;
 
-  constructor(message: string, status: number, code?: string, details?: unknown[], payload?: ApiErrorPayload) {
+  constructor(message: string, status: number, code?: string, userAction?: string, traceId?: string, details?: unknown, payload?: ApiErrorPayload) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.code = code;
+    this.userAction = userAction;
+    this.traceId = traceId;
     this.details = details;
     this.payload = payload;
   }
 }
 
-function extractApiErrorParts(payload: ApiErrorPayload, status: number): { message: string; code?: string; details?: unknown[] } {
+function extractApiErrorParts(payload: ApiErrorPayload, status: number): { message: string; code?: string; userAction?: string; traceId?: string; details?: unknown } {
   const error = payload?.error;
+  
   const message =
+    payload?.message ||
     (typeof error?.message === 'string' && error.message) ||
     (typeof payload?.detail === 'string' && payload.detail) ||
     `Request failed with status ${status}`;
 
-  const code = typeof error?.code === 'string' ? error.code : undefined;
-  const details = Array.isArray(error?.details)
-    ? error?.details
-    : error?.details !== undefined
-      ? [error.details]
-      : undefined;
+  const code = payload?.code || (typeof error?.code === 'string' ? error.code : undefined);
+  const userAction = payload?.user_action;
+  const traceId = payload?.trace_id;
+  const details = payload?.details || error?.details;
 
-  return { message, code, details };
+  return { message, code, userAction, traceId, details };
 }
 
 export const getErrorMessage = (error: unknown): string => {
@@ -81,14 +91,14 @@ export const throwApiErrorResponse = async (res: Response, fallbackMessage?: str
   if (bodyText) {
     try {
       const payload = JSON.parse(bodyText) as ApiErrorPayload;
-      const { message, code, details } = extractApiErrorParts(payload, res.status);
-      throw new ApiError(message, res.status, code, details, payload);
+      const { message, code, userAction, traceId, details } = extractApiErrorParts(payload, res.status);
+      throw new ApiError(message, res.status, code, userAction, traceId, details, payload);
     } catch (err) {
       if (err instanceof ApiError) {
         throw err;
       }
 
-      throw new ApiError(bodyText, res.status, undefined, undefined, { detail: bodyText });
+      throw new ApiError(bodyText, res.status, undefined, undefined, undefined, undefined, { detail: bodyText });
     }
   }
 
@@ -105,7 +115,7 @@ export const readJsonResponse = async <T>(res: Response): Promise<T> => {
   try {
     return JSON.parse(bodyText) as T;
   } catch {
-    throw new ApiError(bodyText, res.status || 500, undefined, undefined, { detail: bodyText });
+    throw new ApiError(bodyText, res.status || 500, undefined, undefined, undefined, undefined, { detail: bodyText });
   }
 };
 

@@ -39,18 +39,29 @@ Notes:
 
 ### Error format
 
-Failures now return a structured error envelope while preserving the legacy top-level `detail` field for compatibility with the current extension code.
+Failures return a structured error envelope with trace IDs and suggested user actions.
 
 ```json
 {
-  "detail": "Missing required Jira fields",
-  "error": {
-    "code": "JIRA_VALIDATION_FAILED",
-    "message": "Missing required Jira fields",
-    "details": ["Testing Stage", "The Environment"]
-  }
+  "code": "JIRA_AUTH_FAILED",
+  "message": "Invalid credentials",
+  "user_action": "Check your Jira API token and username in Settings.",
+  "trace_id": "550e8400-e29b-41d4-a716-446655440000",
+  "details": {
+    "raw_error": "401 Unauthorized"
+  },
+  "detail": "Invalid credentials"
 }
 ```
+
+Notes:
+
+- `code`: Machine-readable error identifier.
+- `message`: Human-friendly error description.
+- `user_action`: Specific instructions for the user to resolve the issue.
+- `trace_id`: Unique request ID for server-side log correlation.
+- `details`: Additional technical context (e.g., validation errors).
+- `detail`: Preserved for backward compatibility with legacy clients.
 
 Notes:
 
@@ -83,17 +94,26 @@ Server and Cloud differ in a few payload details:
 ## System Endpoints
 
 ### `GET /health`
-
-Health check.
+Returns system status, version, and trace ID.
 
 Response:
-
 ```json
 {
   "status": "ok",
-  "version": "1.0.0"
+  "version": "1.0.0",
+  "environment": "production",
+  "trace_id": "..."
 }
 ```
+
+### `GET /health/db`
+Verifies database connectivity.
+
+### `GET /health/ai`
+Verifies AI provider configuration status.
+
+### `GET /health/jira`
+Verifies Jira integration service status.
 
 ### `GET /metrics`
 

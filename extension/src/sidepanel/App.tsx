@@ -139,23 +139,51 @@ export default function App() {
 
       <main className="relative z-[1] flex-1 overflow-y-auto overflow-x-hidden">
         <div className="px-2.5 pt-2.5 pb-4 space-y-3">
-          {(session.error && !['NOT_A_JIRA_PAGE', 'UNSUPPORTED_ISSUE_TYPE', 'NO_ISSUE_TYPES_FOUND', 'STALE_PAGE'].includes(session.error)) && (
-            <StatusPanel
-              icon={AlertCircle}
-              tone="danger"
-              title={translateError(session.error).title}
-              description={translateError(session.error).description}
-              action={(
-                <ActionButton
-                  onClick={() => updateSession({ error: null })}
-                  variant="secondary"
-                  className="h-8 px-3 text-xs"
-                >
-                  Dismiss
-                </ActionButton>
-              )}
-            />
-          )}
+          {(session.error && !['NOT_A_JIRA_PAGE', 'UNSUPPORTED_ISSUE_TYPE', 'NO_ISSUE_TYPES_FOUND', 'STALE_PAGE'].includes(session.error)) && (() => {
+            const translated = translateError(session.error);
+            return (
+              <StatusPanel
+                icon={AlertCircle}
+                tone="danger"
+                title={translated.title}
+                description={
+                  <div className="space-y-2">
+                    <p>{translated.description}</p>
+                    {translated.userAction && (
+                      <p className="font-bold text-[var(--text-primary)]">
+                        Action: {translated.userAction}
+                      </p>
+                    )}
+                    {translated.traceId && (
+                      <div className="flex items-center justify-between gap-2 border-t border-[var(--border-soft)] pt-2 mt-2">
+                        <span className="text-[9px] uppercase tracking-wider text-[var(--text-muted)] font-mono">
+                          Trace ID: {translated.traceId}
+                        </span>
+                        <button
+                          onClick={() => {
+                            void navigator.clipboard.writeText(translated.traceId!);
+                            // Optional: show a toast or feedback
+                          }}
+                          className="text-[9px] font-bold text-[var(--primary-blue)] uppercase hover:underline"
+                        >
+                          Copy Technical ID
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                }
+                action={(
+                  <ActionButton
+                    onClick={() => updateSession({ error: null })}
+                    variant="secondary"
+                    className="h-8 px-3 text-xs"
+                  >
+                    Dismiss
+                  </ActionButton>
+                )}
+              />
+            );
+          })()}
           
           {session.success && (
             <StatusPanel

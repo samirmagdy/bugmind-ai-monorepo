@@ -20,10 +20,31 @@ class BaseAIGenerator:
             return text
 
         sanitized = text
+        # 1. Emails
         sanitized = re.sub(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", "[REDACTED_EMAIL]", sanitized, flags=re.IGNORECASE)
-        sanitized = re.sub(r"\b(?:Bearer\s+)?[A-Za-z0-9_\-]{20,}\b", "[REDACTED_TOKEN]", sanitized, flags=re.IGNORECASE)
-        sanitized = re.sub(r"\b\d{7,}\b", "[REDACTED_NUMBER]", sanitized)
-        sanitized = re.sub(r"([?&](?:token|access_token|refresh_token|api[_-]?key|apikey|auth|authorization)=)[^&\s]+", r"\1[REDACTED_TOKEN]", sanitized, flags=re.IGNORECASE)
+        
+        # 2. JWT-like strings (MUST come before tokens)
+        sanitized = re.sub(r"\beyJ[A-Za-z0-9-_=]+\.[A-Za-z0-9-_=]+\.?[A-Za-z0-9-_.+/=]*\b", "[REDACTED_JWT]", sanitized)
+        
+        # 3. Bearer tokens and general high-entropy strings (tokens/keys)
+        sanitized = re.sub(r"\b(?:Bearer\s+)?[A-Za-z0-9_\-]{32,}\b", "[REDACTED_TOKEN]", sanitized)
+        
+        # 4. Long numeric identifiers (Credit cards, IBANs, National IDs - often 12+ digits)
+        sanitized = re.sub(r"\b\d{12,}\b", "[REDACTED_ID]", sanitized)
+        
+        # 5. Phone numbers (generic international format)
+        sanitized = re.sub(r"\b(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b", "[REDACTED_PHONE]", sanitized)
+        
+        # 6. Sensitive query parameters and auth headers
+        sanitized = re.sub(
+            r"([?&](?:token|access_token|refresh_token|api[_-]?key|apikey|auth|authorization|session[_-]?id|sid)=)[^&\s]+", 
+            r"\1[REDACTED_CREDENTIAL]", 
+            sanitized, 
+            flags=re.IGNORECASE
+        )
+        sanitized = re.sub(r"(Authorization:\s*)(?:Bearer\s+)?[^\s\n]+", r"\1[REDACTED_AUTH]", sanitized, flags=re.IGNORECASE)
+        sanitized = re.sub(r"(Cookie:\s*)[^\n]+", r"\1[REDACTED_COOKIE]", sanitized, flags=re.IGNORECASE)
+
         return sanitized
 
     def _get_message_content(self, response: Dict[str, Any]) -> str:
