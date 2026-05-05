@@ -15,7 +15,7 @@ export function translateError(error: unknown, context?: string): TranslatedErro
   const traceId = error instanceof ApiError ? error.traceId : undefined;
   const details = error instanceof ApiError ? error.details : undefined;
 
-  let result: TranslatedError = {
+  const result: TranslatedError = {
     title: status && status >= 500 ? 'Server Error' : 'Unexpected Error',
     description: message,
     userAction: userActionFromApi,
@@ -159,9 +159,10 @@ export function translateError(error: unknown, context?: string): TranslatedErro
     result.title = 'AI Credits Exhausted';
     result.description = 'Your AI credit limit has been reached. Please check your OpenRouter account settings or add credits.';
   } else if (code === 'RATE_LIMITED' || status === 429 || message.includes('429') || message.includes('Too many requests')) {
-    const retryAfterSeconds = (details as any)?.find((item: any) => item && typeof item === 'object' && 'retry_after_seconds' in (item as Record<string, unknown>)) as
-      | { retry_after_seconds?: unknown }
-      | undefined;
+    const retryAfterSeconds = (Array.isArray(details) ? details : []).find(
+      (item): item is { retry_after_seconds: number } => 
+        !!item && typeof item === 'object' && 'retry_after_seconds' in item
+    );
 
     result.title = 'Rate Limit Reached';
     result.description = typeof retryAfterSeconds?.retry_after_seconds === 'number'

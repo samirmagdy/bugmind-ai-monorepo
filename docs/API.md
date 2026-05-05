@@ -63,12 +63,6 @@ Notes:
 - `details`: Additional technical context (e.g., validation errors).
 - `detail`: Preserved for backward compatibility with legacy clients.
 
-Notes:
-
-- `detail` remains present as a plain string for backward compatibility.
-- `error.code` is the stable machine-readable field to key frontend behavior off in future work.
-- Validation errors use `error.details` for per-field details.
-
 ### Jira identity fields
 
 Many endpoints accept both:
