@@ -1031,6 +1031,30 @@ def publish_xray_test_suite(
         )
         raise
 
+@router.post("/connections/{conn_id}/xray/test-connection")
+def test_xray_cloud_connection(
+    conn_id: int,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    conn = db.query(JiraConnection).filter(
+        JiraConnection.id == conn_id,
+        JiraConnection.user_id == current_user.id
+    ).first()
+    if not conn:
+        raise HTTPException(status_code=404, detail="Connection not found")
+
+    from app.services.jira.xray_cloud import XrayCloudClient
+    client = XrayCloudClient(conn)
+    
+    try:
+        client.test_connection()
+        return {"status": "success", "message": "Successfully authenticated to Xray Cloud"}
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Phase 2: Duplicate Detection

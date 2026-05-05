@@ -70,6 +70,11 @@ export interface TestCase {
   acceptance_criteria_refs?: string[];
   labels?: string[];
   components?: string[];
+  covered_acceptance_criteria_ids?: string[];
+  scenario_type?: string;
+  risk_level?: string;
+  category?: string;
+  coverage_notes?: string;
 }
 
 export interface XrayPublishResult {
@@ -209,6 +214,8 @@ export interface TabSession {
   duplicateCheckFailed: boolean;
   duplicateCheckFailureReason: string;
   duplicateCheckLoading: boolean;
+  showXrayCloudWizard?: boolean;
+  xrayCloudWizardMode?: 'publish' | 'settings';
 }
 
 export interface JiraConnection {
@@ -219,6 +226,7 @@ export interface JiraConnection {
   is_active: boolean;
   verify_ssl?: boolean;
   icon_url?: string;
+  has_xray_cloud_credentials?: boolean;
 }
 
 export interface JiraField {

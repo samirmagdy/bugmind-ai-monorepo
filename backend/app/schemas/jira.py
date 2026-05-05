@@ -7,9 +7,11 @@ class JiraConnectionBase(BaseModel):
     host_url: str
     username: str
     verify_ssl: bool = True
+    xray_cloud_client_id: Optional[str] = None
 
 class JiraConnectionCreate(JiraConnectionBase):
     token: str
+    xray_cloud_client_secret: Optional[str] = None
 
 class JiraConnectionUpdate(BaseModel):
     auth_type: Optional[JiraAuthType] = None
@@ -18,10 +20,14 @@ class JiraConnectionUpdate(BaseModel):
     token: Optional[str] = None
     verify_ssl: Optional[bool] = None
     is_active: Optional[bool] = None
+    xray_cloud_client_id: Optional[str] = None
+    xray_cloud_client_secret: Optional[str] = None
+
 
 class JiraConnectionResponse(JiraConnectionBase):
     id: int
     is_active: bool
+    has_xray_cloud_credentials: bool = False
 
     class Config:
         from_attributes = True

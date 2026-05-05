@@ -17,6 +17,7 @@ import DebugConsole from './components/layout/DebugConsole';
 import BlockingLoader from './components/common/BlockingLoader';
 import OnboardingTour from './components/common/OnboardingTour';
 import { ActionButton, StatusPanel } from './components/common/DesignSystem';
+import { XrayCloudWizard } from './components/views/XrayCloudWizard';
 import { APP_VERSION } from './constants';
 
 export default function App() {
@@ -234,6 +235,7 @@ export default function App() {
       </footer>
 
       {debug.show && <DebugConsole />}
+      {session.showXrayCloudWizard && <XrayCloudWizard />}
       {session.loading && <BlockingLoader />}
       {auth.authToken && sessionHydrated && !session.onboardingCompleted && <OnboardingTour />}
     </div>

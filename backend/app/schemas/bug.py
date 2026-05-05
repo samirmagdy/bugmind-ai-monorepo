@@ -195,6 +195,11 @@ class TestCase(BaseModel):
     acceptance_criteria_refs: List[str] = []
     labels: List[str] = []
     components: List[str] = []
+    covered_acceptance_criteria_ids: List[str] = []
+    scenario_type: Optional[str] = None
+    risk_level: Optional[str] = None
+    category: Optional[str] = None
+    coverage_notes: Optional[str] = None
 
 class TestSuiteResponse(BaseModel):
     test_cases: List[TestCase]

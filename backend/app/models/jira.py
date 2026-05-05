@@ -18,8 +18,14 @@ class JiraConnection(Base):
     encrypted_token = Column(String, nullable=False) # AES-256 encrypted personal access token or API token
     verify_ssl = Column(Boolean, nullable=False, default=True)
     is_active = Column(Boolean, default=True)
+    xray_cloud_client_id = Column(String, nullable=True)
+    encrypted_xray_cloud_client_secret = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    @property
+    def has_xray_cloud_credentials(self) -> bool:
+        return bool(self.xray_cloud_client_id and self.encrypted_xray_cloud_client_secret)
 
 class JiraFieldMapping(Base):
     __tablename__ = "jira_field_mappings"

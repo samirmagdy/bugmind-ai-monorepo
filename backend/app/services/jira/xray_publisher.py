@@ -417,6 +417,157 @@ class XrayCloudPublisher:
         self.request = request
 
     def publish(self, conn_id: int, req: XrayTestSuitePublishRequest) -> XrayTestSuitePublishResponse:
-        # Current Cloud behavior is Jira issue publishing. Keeping it explicit prevents
-        # Server/DC Raven repository APIs from being mistaken for Xray Cloud APIs.
-        return XrayServerPublisher(self.db, self.current_user, self.request).publish(conn_id, req)
+        conn = get_owned_connection(self.db, self.current_user.id, conn_id)
+        adapter = get_adapter(conn)
+        engine = JiraMetadataEngine(adapter)
+
+        project_metadata = engine.get_project_metadata(req.xray_project_id)
+        test_issue_type_id = resolve_test_issue_type_id(project_metadata, req.test_issue_type_id, req.test_issue_type_name)
+        test_fields = engine.get_field_schema(req.xray_project_id, test_issue_type_id)
+        
+        # Xray Cloud doesn't use standard Jira custom fields for repository path, it uses GraphQL folders
+        xray_project_key = req.xray_project_key or str(project_metadata.get("project_key") or "").strip()
+        folder_path = normalize_folder_path(req.folder_path, req.story_issue_key)
+        
+        from app.services.jira.xray_cloud import XrayCloudClient
+        xray_client = XrayCloudClient(conn)
+        
+        # 1. Ensure Folder exists via GraphQL
+        folder_id: Optional[str] = None
+        if folder_path and req.xray_project_id:
+            # Simple folder creation handling
+            parent_id = "0" # Or null
+            current_path_parts: list[str] = []
+            
+            folders_response = xray_client.get_folders(req.xray_project_id)
+            for part in [segment for segment in folder_path.split("/") if segment.strip()]:
+                name = part.strip()
+                current_path_parts.append(name)
+                
+                # A naive folder finding - ideally we search recursively in folders_response
+                # Since Xray GraphQL getFolders returns a tree, we need to traverse it.
+                def find_folder(nodes: list, target_name: str) -> Optional[dict]:
+                    for node in nodes:
+                        if node.get("name", "").lower() == target_name.lower():
+                            return node
+                    return None
+
+                # For simplicity in this iteration, we create if we can't easily find it at the top
+                found = find_folder(folders_response, name)
+                if found:
+                    parent_id = found["id"]
+                    folders_response = found.get("folders", [])
+                else:
+                    parent_id = xray_client.create_folder(req.xray_project_id, name, parent_id)
+                    folders_response = [] # New folder has no children
+
+            folder_id = parent_id
+
+        available_link_types: list[str] = []
+        try:
+            available_link_types = adapter.get_issue_link_types()
+        except HTTPException:
+            available_link_types = []
+
+        link_candidates = resolve_link_type_candidates(req.link_type, available_link_types)
+        created_tests: list[XrayPublishedTest] = []
+        warnings: list[str] = []
+        link_type_used: Optional[str] = None
+
+        try:
+            for test_case in req.test_cases:
+                test_case_payload = test_case.model_dump()
+                fields = {
+                    "project": {"id": req.xray_project_id},
+                    "summary": test_case.title,
+                    "description": format_test_issue_description(req.story_issue_key, test_case_payload),
+                    "issuetype": {"id": test_issue_type_id},
+                }
+                apply_optional_xray_fields(fields, test_fields, test_case_payload)
+
+                # Create the Jira issue
+                issue_key = adapter.create_issue({"fields": fields})
+                
+                # Fetch issue ID required by GraphQL
+                issue = adapter.get_issue(issue_key)
+                issue_id = issue["id"]
+                
+                created_tests.append(XrayPublishedTest(id=issue_key, key=issue_key, self=""))
+                
+                # Add steps via GraphQL
+                steps_data = []
+                steps = [str(step).strip() for step in (test_case.get("steps") or []) if str(step).strip()]
+                expected_result = str(test_case.get("expected_result") or "").strip()
+                preconditions = str(test_case.get("preconditions") or "").strip()
+                
+                for index, step in enumerate(steps):
+                    steps_data.append({
+                        "action": step,
+                        "data": preconditions if index == 0 and preconditions else "",
+                        "result": expected_result if index == len(steps) - 1 else ""
+                    })
+                
+                if steps_data:
+                    xray_client.add_test_steps(issue_id, steps_data)
+                
+                # Add to folder via GraphQL
+                if folder_id:
+                    xray_client.add_test_to_folder(req.xray_project_id, folder_id, issue_id)
+
+                # Link to Story
+                linked = False
+                for candidate in link_candidates:
+                    try:
+                        adapter.link_issues(issue_key, candidate, req.story_issue_key)
+                        linked = True
+                        if not link_type_used:
+                            link_type_used = candidate
+                        break
+                    except HTTPException:
+                        continue
+
+                if not linked:
+                    warnings.append(f"Created {issue_key} but could not link it to {req.story_issue_key}")
+        except HTTPException as exc:
+            rollback_failed_keys: list[str] = []
+            for created_test in reversed(created_tests):
+                try:
+                    adapter.delete_issue(created_test.key)
+                except HTTPException:
+                    rollback_failed_keys.append(created_test.key)
+            detail = exc.detail
+            if rollback_failed_keys:
+                detail = {
+                    "error": "Xray test publish failed and some created tests could not be rolled back.",
+                    "jira_error": exc.detail,
+                    "rollback_failed_issue_keys": rollback_failed_keys,
+                }
+            raise HTTPException(status_code=exc.status_code, detail=detail) from exc
+
+        response = XrayTestSuitePublishResponse(
+            created_tests=created_tests,
+            folder_path=folder_path,
+            repository_path_field_id=None,
+            link_type_used=link_type_used,
+            warnings=warnings,
+        )
+        
+        idempotency_store.store_response(
+            "jira.xray_publish",
+            str(self.current_user.id),
+            self.request.headers.get("Idempotency-Key"),
+            req.model_dump(),
+            response.model_dump(),
+        )
+        log_audit(
+            "jira.xray_publish",
+            self.current_user.id,
+            db=self.db,
+            jira_connection_id=req.jira_connection_id,
+            project_id=req.xray_project_id,
+            request_path=str(self.request.url.path),
+            created_test_keys=[test.key for test in created_tests],
+            warnings=warnings,
+        )
+        return response
+

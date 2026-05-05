@@ -638,6 +638,12 @@ export const AIProvider: React.FC<{
       return;
     }
 
+    const activeConn = session.connections?.find((c) => c.id === session.jiraConnectionId);
+    if (session.xrayPublishMode === 'xray_cloud' && !activeConn?.has_xray_cloud_credentials) {
+      updateSession({ showXrayCloudWizard: true, xrayCloudWizardMode: 'publish' }, currentTabId);
+      return;
+    }
+
     publishXrayInFlightRef.current = true;
     updateSession({ loading: true, error: null, success: null }, currentTabId);
 
@@ -678,7 +684,7 @@ export const AIProvider: React.FC<{
       publishXrayInFlightRef.current = false;
       updateSession({ loading: false }, currentTabId);
     }
-  }, [apiBase, authToken, buildIdempotencyKey, currentTabId, normalizeFrontendTestCase, refreshAuthToken, session.issueData, session.jiraConnectionId, session.testCases, session.xrayFolderPath, session.xrayLinkType, session.xrayPublishSupported, session.xrayRepositoryPathFieldId, session.xrayTargetProjectId, session.xrayTargetProjectKey, session.xrayTestIssueTypeName, session.xrayUnsupportedReason, updateSession]);
+  }, [apiBase, authToken, buildIdempotencyKey, currentTabId, normalizeFrontendTestCase, refreshAuthToken, session.connections, session.issueData, session.jiraConnectionId, session.testCases, session.xrayFolderPath, session.xrayLinkType, session.xrayPublishMode, session.xrayPublishSupported, session.xrayRepositoryPathFieldId, session.xrayTargetProjectId, session.xrayTargetProjectKey, session.xrayTestIssueTypeName, session.xrayUnsupportedReason, updateSession]);
 
   const handleManualGenerate = useCallback(async () => {
     if (manualGenerateInFlightRef.current) return;

@@ -36,6 +36,8 @@ def create_user_connection(db: Session, current_user: User, conn_in: JiraConnect
         encrypted_token=encrypted,
         verify_ssl=conn_in.verify_ssl,
         is_active=True,
+        xray_cloud_client_id=conn_in.xray_cloud_client_id,
+        encrypted_xray_cloud_client_secret=security.encrypt_credential(conn_in.xray_cloud_client_secret) if conn_in.xray_cloud_client_secret else None,
     )
     db.add(conn)
     db.commit()
@@ -66,6 +68,13 @@ def update_user_connection(db: Session, current_user: User, conn_id: int, conn_i
         if token_val and token_val.strip():
             update_data["encrypted_token"] = security.encrypt_credential(token_val)
             effective_token = token_val.strip()
+    
+    if "xray_cloud_client_secret" in update_data:
+        xray_secret = update_data.pop("xray_cloud_client_secret")
+        if xray_secret and xray_secret.strip():
+            update_data["encrypted_xray_cloud_client_secret"] = security.encrypt_credential(xray_secret)
+        elif xray_secret == "":
+            update_data["encrypted_xray_cloud_client_secret"] = None
 
     should_verify = any(key in update_data for key in ("auth_type", "host_url", "username", "verify_ssl", "encrypted_token"))
     if should_verify:
