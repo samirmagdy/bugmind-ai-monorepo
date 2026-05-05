@@ -214,6 +214,14 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
         logDebug('AUTH-BOOT-OK', `Resolved landing view ${data.view.toUpperCase()} without Jira bootstrap payload.`);
       }
 
+      // Phase 5: Workspaces
+      updateSession({
+        workspaces: data.workspaces || [],
+        activeWorkspaceId: data.active_workspace_id || null,
+        activeWorkspaceRole: data.workspaces?.find(w => w.id === data.active_workspace_id)?.role || null
+      });
+
+
     return data.view;
   }, [auth.apiBase, currentTabId, fetchCurrentContext, jira, logDebug, session.selectedIssueType?.id, updateSession, withTimeout]);
 

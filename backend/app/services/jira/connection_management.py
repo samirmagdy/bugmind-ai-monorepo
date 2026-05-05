@@ -10,10 +10,23 @@ from app.schemas.jira import JiraConnectionCreate, JiraConnectionUpdate
 from app.services.jira.connection_service import verify_connection_credentials
 
 
+from sqlalchemy import or_, and_
+from app.models.workspace import WorkspaceMember
+
 def list_user_connections(db: Session, current_user: User) -> list[JiraConnection]:
-    return db.query(JiraConnection).filter(
-        JiraConnection.user_id == current_user.id,
-    ).order_by(JiraConnection.is_active.desc(), JiraConnection.id.asc()).all()
+    # Fetch personal connections
+    # OR connections shared in workspaces where user is a member
+    return db.query(JiraConnection).outerjoin(
+        WorkspaceMember, JiraConnection.workspace_id == WorkspaceMember.workspace_id
+    ).filter(
+        or_(
+            JiraConnection.user_id == current_user.id,
+            and_(
+                JiraConnection.is_shared == True,
+                WorkspaceMember.user_id == current_user.id
+            )
+        )
+    ).order_by(JiraConnection.is_active.desc(), JiraConnection.id.asc()).distinct().all()
 
 
 def create_user_connection(db: Session, current_user: User, conn_in: JiraConnectionCreate) -> JiraConnection:

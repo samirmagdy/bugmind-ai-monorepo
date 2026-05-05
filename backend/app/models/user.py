@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey
 from sqlalchemy.sql import func
 from app.core.database import Base
 
@@ -17,3 +17,6 @@ class User(Base):
     # AI Settings
     custom_ai_model = Column(String, nullable=True)
     encrypted_ai_api_key = Column(String, nullable=True)
+
+    # Workspace
+    default_workspace_id = Column(Integer, ForeignKey("workspaces.id", ondelete="SET NULL"), nullable=True)

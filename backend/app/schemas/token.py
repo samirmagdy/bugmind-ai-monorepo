@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr
-from typing import Optional, Literal
+from typing import Optional, Literal, List
 
 from app.schemas.jira import JiraBootstrapContextResponse
 
@@ -53,8 +53,18 @@ class AuthBootstrapError(BaseModel):
     message: str
 
 
+
+class WorkspaceBasicResponse(BaseModel):
+    id: int
+    name: str
+    owner_id: int
+    role: str
+
 class AuthBootstrapResponse(BaseModel):
     view: Literal["main", "setup"]
     has_connections: bool
     bootstrap_context: Optional[JiraBootstrapContextResponse] = None
     bootstrap_error: Optional[AuthBootstrapError] = None
+    workspaces: Optional[List[WorkspaceBasicResponse]] = None
+    active_workspace_id: Optional[int] = None
+

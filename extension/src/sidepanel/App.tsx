@@ -14,6 +14,7 @@ import SuccessView from './components/views/SuccessView';
 import SettingsView from './components/views/SettingsView';
 import PreviewView from './components/views/PreviewView';
 import { JobDashboardView } from './components/views/JobDashboardView';
+import { WorkspaceDashboardView } from './components/views/WorkspaceDashboardView';
 import DebugConsole from './components/layout/DebugConsole';
 import BlockingLoader from './components/common/BlockingLoader';
 import OnboardingTour from './components/common/OnboardingTour';
@@ -212,6 +213,7 @@ export default function App() {
           {activeView === 'settings' && <SettingsView />}
           {activeView === 'preview' && <PreviewView />}
           {activeView === 'jobs' && <JobDashboardView />}
+          {activeView === 'workspace' && <WorkspaceDashboardView />}
         </div>
       </main>
 

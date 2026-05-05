@@ -20,6 +20,8 @@ class JiraConnection(Base):
     is_active = Column(Boolean, default=True)
     xray_cloud_client_id = Column(String, nullable=True)
     encrypted_xray_cloud_client_secret = Column(String, nullable=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True, index=True)
+    is_shared = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -32,6 +34,7 @@ class JiraFieldMapping(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
+    workspace_id = Column(Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True, index=True)
     project_key = Column(String, nullable=False)
     project_id = Column(String, nullable=True)
     issue_type_id = Column(String, nullable=False)

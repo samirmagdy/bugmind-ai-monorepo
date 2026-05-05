@@ -42,8 +42,9 @@ function toneClasses(tone: Tone): { text: string; chip: string } {
 export const SurfaceCard: React.FC<{
   children: React.ReactNode;
   className?: string;
-}> = ({ children, className }) => (
-  <div className={cx('workflow-card', className)}>
+  onClick?: React.MouseEventHandler<HTMLDivElement>;
+}> = ({ children, className, onClick }) => (
+  <div className={cx('workflow-card', className)} onClick={onClick}>
     {children}
   </div>
 );

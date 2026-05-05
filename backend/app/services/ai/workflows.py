@@ -82,6 +82,8 @@ def get_usage_summary(db: Session, current_user: User) -> dict:
     }
 
 
+from app.models.workspace import WorkspaceMember
+
 def _get_field_mapping_record(
     db: Session,
     user_id: int,
@@ -89,6 +91,7 @@ def _get_field_mapping_record(
     project_id: Optional[str],
     issue_type_id: str,
 ) -> Optional[JiraFieldMapping]:
+    # 1. Try personal mapping
     query = db.query(JiraFieldMapping).filter(
         JiraFieldMapping.project_key == project_key,
         JiraFieldMapping.issue_type_id == issue_type_id,
@@ -98,6 +101,24 @@ def _get_field_mapping_record(
         query = query.filter(JiraFieldMapping.project_id.is_(None))
     else:
         query = query.filter(JiraFieldMapping.project_id == project_id)
+    
+    personal_mapping = query.first()
+    if personal_mapping:
+        return personal_mapping
+
+    # 2. Try shared workspace mapping
+    query = db.query(JiraFieldMapping).join(
+        WorkspaceMember, JiraFieldMapping.workspace_id == WorkspaceMember.workspace_id
+    ).filter(
+        JiraFieldMapping.project_key == project_key,
+        JiraFieldMapping.issue_type_id == issue_type_id,
+        WorkspaceMember.user_id == user_id,
+    )
+    if project_id is None:
+        query = query.filter(JiraFieldMapping.project_id.is_(None))
+    else:
+        query = query.filter(JiraFieldMapping.project_id == project_id)
+        
     return query.first()
 
 

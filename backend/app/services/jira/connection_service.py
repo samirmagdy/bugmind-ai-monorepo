@@ -64,11 +64,25 @@ def verify_connection_credentials(
     adapter.get_current_user()
 
 
+from app.models.workspace import WorkspaceMember
+
 def get_owned_connection(db: Session, user_id: int, connection_id: int) -> JiraConnection:
+    # Check personal connection
     conn = db.query(JiraConnection).filter(
         JiraConnection.id == connection_id,
         JiraConnection.user_id == user_id,
     ).first()
+    
+    if not conn:
+        # Check if it's a shared connection in a workspace the user belongs to
+        conn = db.query(JiraConnection).join(
+            WorkspaceMember, JiraConnection.workspace_id == WorkspaceMember.workspace_id
+        ).filter(
+            JiraConnection.id == connection_id,
+            JiraConnection.is_shared == True,
+            WorkspaceMember.user_id == user_id
+        ).first()
+        
     if not conn:
         raise HTTPException(status_code=404, detail="Jira connection not found")
     return conn

@@ -210,10 +210,19 @@ export interface AuthTokenResponsePayload {
   detail?: string;
 }
 
+export interface WorkspaceResponsePayload {
+  id: number;
+  name: string;
+  owner_id: number;
+  role: string;
+}
+
 export interface AuthBootstrapResponsePayload {
   view: 'main' | 'setup';
   has_connections: boolean;
   bootstrap_context: JiraBootstrapContext | null;
+  workspaces?: WorkspaceResponsePayload[];
+  active_workspace_id?: number | null;
   bootstrap_error?: {
     code: string;
     message: string;

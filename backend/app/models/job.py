@@ -8,11 +8,11 @@ class Job(Base):
     __tablename__ = "jobs"
 
     id = Column(String, primary_key=True, index=True)
-    job_type = Column(String, nullable=False, index=True)
-    status = Column(String, nullable=False, index=True, default="queued")
+    job_type = Column(String, nullable=False, index=True)  # e.g. "epic_test_generation", "brd_coverage"
+    status = Column(String, nullable=False, default="queued", index=True) 
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    
-    target_key = Column(String, nullable=False, index=True) # issue_key or epic_key
+    workspace_id = Column(Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True, index=True)
+    target_key = Column(String, nullable=False, index=True) # e.g. "PROJ-123" (epic or brd key)
     project_key = Column(String, nullable=False, index=True)
     
     progress_percentage = Column(Float, default=0.0)

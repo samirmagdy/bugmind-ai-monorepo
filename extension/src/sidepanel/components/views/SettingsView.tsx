@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { X, ChevronDown, Loader2, AlertCircle, RefreshCw, Pencil, FolderOpen, Save, User, Search, Plus, Zap, Check, Moon, Sun } from 'lucide-react';
+import { X, ChevronDown, Loader2, AlertCircle, RefreshCw, Pencil, FolderOpen, Save, User, Search, Plus, Zap, Check, Moon, Sun, Users, Layout, Shield, ChevronRight } from 'lucide-react';
 import { useBugMind } from '../../hooks/useBugMind';
 import { IssueType, JiraField, JiraProject, JiraUser } from '../../types';
 import { ActionButton, StatusBadge, StatusPanel, SurfaceCard } from '../common/DesignSystem';
@@ -464,13 +464,15 @@ const SettingsView: React.FC = () => {
     session, updateSession, handleSaveSettings, saveFieldSettings,
     ai: { customKey, setCustomKey, hasCustomKeySaved, clearCustomKeyRequested, setClearCustomKeyRequested, customModel, setCustomModel, searchUsers },
     jira, refreshIssue, currentTabId,
-    auth: { apiBase, setApiBase },
+    auth: { apiBase, setApiBase, authToken },
     debug: { log }
   } = useBugMind();
   const [editingConnectionId, setEditingConnectionId] = useState<number | null>(null);
   const [connectionDrafts, setConnectionDrafts] = useState<Record<number, { auth_type: string; host_url: string; username: string; token: string; verify_ssl: boolean }>>({});
   const [projectsByConnection, setProjectsByConnection] = useState<Record<number, JiraProject[]>>({});
   const [showAddConnection, setShowAddConnection] = useState(false);
+  const [showCreateWorkspace, setShowCreateWorkspace] = useState(false);
+  const [newWorkspaceName, setNewWorkspaceName] = useState('');
   const [newConnection, setNewConnection] = useState({
     auth_type: 'cloud',
     host_url: session.instanceUrl || '',
@@ -504,6 +506,61 @@ const SettingsView: React.FC = () => {
       refreshIssue(true);
     }
   }, [session.settingsTab, session.issueTypes.length, session.issueTypesFetched, session.error, session.instanceUrl, session.loading, refreshIssue, log]);
+
+  const handleCreateWorkspace = async () => {
+    if (!newWorkspaceName.trim()) return;
+    updateSession({ loading: true });
+    try {
+      const res = await fetch(`${apiBase}/workspaces/`, {
+        method: 'POST',
+        headers: { 
+          'Authorization': `Bearer ${authToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ name: newWorkspaceName })
+      });
+      if (res.ok) {
+        const ws = await res.json();
+        setNewWorkspaceName('');
+        setShowCreateWorkspace(false);
+        // Refresh workspaces list in session
+        const wsRes = await fetch(`${apiBase}/workspaces/`, {
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        if (wsRes.ok) {
+          const workspaces = await wsRes.json();
+          updateSession({ workspaces, activeWorkspaceId: ws.id, activeWorkspaceRole: 'owner' });
+        }
+      }
+    } catch (err) {
+      console.error('Failed to create workspace', err);
+    } finally {
+      updateSession({ loading: false });
+    }
+  };
+
+  const handleSwitchWorkspace = async (workspaceId: number) => {
+    updateSession({ loading: true });
+    try {
+      const res = await fetch(`${apiBase}/workspaces/${workspaceId}/activate`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${authToken}` }
+      });
+      if (res.ok) {
+        const ws = session.workspaces.find(w => w.id === workspaceId);
+        updateSession({ 
+          activeWorkspaceId: workspaceId,
+          activeWorkspaceRole: ws?.role || 'viewer' 
+        });
+        // Force reload jira context for new workspace
+        refreshIssue(true);
+      }
+    } catch (err) {
+      console.error('Failed to switch workspace', err);
+    } finally {
+      updateSession({ loading: false });
+    }
+  };
 
   useEffect(() => {
     if (session.settingsTab !== 'connections') return;
@@ -574,26 +631,33 @@ const SettingsView: React.FC = () => {
         </div>
       </SurfaceCard>
 
-      <div className="grid grid-cols-3 gap-1.5 rounded-[1.4rem] border border-[var(--card-border)] bg-[var(--surface-soft)] p-1.5">
+      <div className="grid grid-cols-4 gap-1.5 rounded-[1.4rem] border border-[var(--card-border)] bg-[var(--surface-soft)] p-1.5">
         <button 
           onClick={() => updateSession({ settingsTab: 'ai' })}
           className={`py-2.5 text-[10px] font-bold rounded-[1rem] transition-all tracking-[0.14em] uppercase ${session.settingsTab === 'ai' ? 'bg-[var(--bg-elevated)] text-[var(--primary-blue)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
         >
-          AI Engine
+          AI
         </button>
         <button 
           onClick={() => updateSession({ settingsTab: 'jira' })}
           className={`py-2.5 text-[10px] font-bold rounded-[1rem] transition-all tracking-[0.14em] uppercase ${session.settingsTab === 'jira' ? 'bg-[var(--bg-elevated)] text-[var(--primary-blue)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
         >
-          Field Map
+          Map
         </button>
         <button 
           onClick={() => updateSession({ settingsTab: 'connections' })}
           className={`py-2.5 text-[10px] font-bold rounded-[1rem] transition-all tracking-[0.14em] uppercase ${session.settingsTab === 'connections' ? 'bg-[var(--bg-elevated)] text-[var(--primary-blue)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
         >
-          Connections
+          Conns
+        </button>
+        <button 
+          onClick={() => updateSession({ settingsTab: 'workspaces' })}
+          className={`py-2.5 text-[10px] font-bold rounded-[1rem] transition-all tracking-[0.14em] uppercase ${session.settingsTab === 'workspaces' ? 'bg-[var(--bg-elevated)] text-[var(--primary-blue)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
+        >
+          Teams
         </button>
       </div>
+
 
       <SurfaceCard className="space-y-3 px-4 py-3.5">
         <div className="space-y-1">
@@ -1047,6 +1111,100 @@ const SettingsView: React.FC = () => {
             )}
           </div>
         </div>
+      ) : session.settingsTab === 'workspaces' ? (
+        <div className="space-y-4 animate-in slide-in-from-bottom-4 duration-500">
+           <SurfaceCard className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Users size={14} className="text-[var(--primary-blue)]" />
+                <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--text-muted)]">Your Teams</span>
+              </div>
+              <button 
+                onClick={() => setShowCreateWorkspace(true)}
+                className="text-[10px] font-bold text-[var(--primary-blue)] uppercase flex items-center gap-1 hover:underline"
+              >
+                <Plus size={12} /> New Team
+              </button>
+            </div>
+
+            {session.workspaces.length === 0 ? (
+              <div className="text-center py-8 px-4 border border-dashed border-[var(--border-main)] rounded-2xl bg-[var(--surface-soft)]/30">
+                <Layout size={24} className="mx-auto mb-3 text-[var(--text-muted)] opacity-20" />
+                <p className="text-[11px] text-[var(--text-muted)] leading-relaxed font-medium">
+                  You are currently using BugMind solo.<br/>Create a team workspace to collaborate.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {session.workspaces.map(ws => (
+                  <SurfaceCard 
+                    key={ws.id} 
+                    className={`p-3 cursor-pointer transition-all border ${session.activeWorkspaceId === ws.id ? 'border-[var(--primary-blue)]/30 bg-[var(--surface-accent-soft)]' : 'border-[var(--border-soft)] hover:border-[var(--text-muted)]'}`}
+                    onClick={() => handleSwitchWorkspace(ws.id)}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-9 h-9 rounded-[1rem] flex items-center justify-center font-bold text-xs ${session.activeWorkspaceId === ws.id ? 'bg-[var(--primary-blue)] text-white shadow-[0_4px_12px_rgba(59,130,246,0.3)]' : 'bg-[var(--surface-soft)] text-[var(--text-muted)] border border-[var(--border-soft)]'}`}>
+                          {ws.name[0].toUpperCase()}
+                        </div>
+                        <div>
+                          <div className="text-xs font-bold text-[var(--text-primary)]">{ws.name}</div>
+                          <div className="text-[10px] text-[var(--text-muted)] font-bold uppercase tracking-wider opacity-60">Role: {ws.role || 'Member'}</div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {session.activeWorkspaceId === ws.id && <Check size={14} className="text-[var(--primary-blue)]" />}
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            updateSession({ view: 'workspace', activeWorkspaceId: ws.id, activeWorkspaceRole: ws.role || 'viewer' });
+                          }}
+                          className="p-2 hover:bg-[var(--surface-soft)] rounded-xl transition-all text-[var(--text-muted)] hover:text-[var(--primary-blue)] hover:shadow-sm"
+                        >
+                          <ChevronRight size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  </SurfaceCard>
+                ))}
+              </div>
+            )}
+          </SurfaceCard>
+
+          {showCreateWorkspace && (
+            <SurfaceCard className="animate-in zoom-in-95 duration-200 border-[var(--primary-blue)]/20 shadow-[0_10px_30px_rgba(59,130,246,0.1)]">
+               <div className="space-y-5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                       <Plus size={14} className="text-[var(--primary-blue)]" />
+                       <h3 className="text-[11px] font-black uppercase text-[var(--text-primary)] tracking-wider">Create Team Workspace</h3>
+                    </div>
+                    <button onClick={() => setShowCreateWorkspace(false)} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]"><X size={14} /></button>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-[var(--text-muted)] uppercase ml-1 tracking-widest">Workspace Name</label>
+                    <input 
+                      type="text" 
+                      value={newWorkspaceName}
+                      onChange={(e) => setNewWorkspaceName(e.target.value)}
+                      className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-2xl px-4 py-3 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)]/30 focus:ring-4 focus:ring-[var(--primary-blue)]/5 transition-all"
+                      placeholder="e.g. Acme QA Team"
+                      autoFocus
+                    />
+                  </div>
+                  <ActionButton 
+                    variant="primary" 
+                    className="w-full h-11" 
+                    onClick={handleCreateWorkspace} 
+                    disabled={!newWorkspaceName.trim() || session.loading}
+                  >
+                    {session.loading ? <Loader2 size={16} className="animate-spin" /> : <Shield size={14} className="mr-2" />}
+                    Create Workspace
+                  </ActionButton>
+               </div>
+            </SurfaceCard>
+          )}
+        </div>
       ) : (
         <div className="space-y-5 animate-in fade-in slide-in-from-bottom-4 duration-500">
           <SurfaceCard className="space-y-4">
@@ -1399,7 +1557,6 @@ const SettingsView: React.FC = () => {
             )}
         </div>
       )}
-
     </div>
   );
 };

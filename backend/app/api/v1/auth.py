@@ -310,6 +310,8 @@ def reset_password(request: ResetPasswordRequest, http_request: Request, db: Ses
     return ForgotPasswordResponse(message="Password updated successfully. Please sign in again.")
 
 
+from app.models.workspace import Workspace, WorkspaceMember
+
 @router.post("/bootstrap", response_model=AuthBootstrapResponse)
 def bootstrap_authenticated_session(
     request: AuthBootstrapRequest,
@@ -317,12 +319,46 @@ def bootstrap_authenticated_session(
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
+    # Fetch workspaces
+    user_workspaces = db.query(Workspace).join(WorkspaceMember).filter(
+        WorkspaceMember.user_id == current_user.id
+    ).all()
+    
+    workspace_list = []
+    for ws in user_workspaces:
+        # Find role
+        member = db.query(WorkspaceMember).filter(
+            WorkspaceMember.workspace_id == ws.id,
+            WorkspaceMember.user_id == current_user.id
+        ).first()
+        
+        workspace_list.append({
+            "id": ws.id,
+            "name": ws.name,
+            "owner_id": ws.owner_id,
+            "role": member.role.value if member else "viewer"
+        })
+
     has_connections = db.query(JiraConnection).filter(
         JiraConnection.user_id == current_user.id
     ).count() > 0
 
     if not has_connections:
-        return AuthBootstrapResponse(view="setup", has_connections=False, bootstrap_context=None, bootstrap_error=None)
+        # Check shared connections
+        has_connections = db.query(JiraConnection).join(WorkspaceMember, JiraConnection.workspace_id == WorkspaceMember.workspace_id).filter(
+            WorkspaceMember.user_id == current_user.id,
+            JiraConnection.is_shared == True
+        ).count() > 0
+
+    if not has_connections:
+        return AuthBootstrapResponse(
+            view="setup", 
+            has_connections=False, 
+            bootstrap_context=None, 
+            bootstrap_error=None,
+            workspaces=workspace_list,
+            active_workspace_id=current_user.default_workspace_id
+        )
 
     bootstrap_context = None
     bootstrap_error = None
@@ -353,4 +389,6 @@ def bootstrap_authenticated_session(
         has_connections=True,
         bootstrap_context=bootstrap_context,
         bootstrap_error=bootstrap_error,
+        workspaces=workspace_list,
+        active_workspace_id=current_user.default_workspace_id
     )

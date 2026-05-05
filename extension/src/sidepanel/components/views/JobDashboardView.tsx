@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useBugMind } from '../../hooks/useBugMind';
 import { Activity, Clock, CheckCircle2, AlertTriangle, Loader2, X } from 'lucide-react';
 import { ActionButton, SurfaceCard } from '../common/DesignSystem';
@@ -12,7 +12,7 @@ export interface Job {
   current_step: string | null;
   created_at: string;
   error_message: string | null;
-  result_payload: any;
+  result_payload: Record<string, unknown> | null;
 }
 
 export const JobDashboardView: React.FC = () => {
@@ -20,7 +20,7 @@ export const JobDashboardView: React.FC = () => {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const fetchJobs = async () => {
+  const fetchJobs = useCallback(async () => {
     try {
       const res = await fetch(`${apiBase}/jobs`, {
         headers: { 'Authorization': `Bearer ${authToken}` }
@@ -34,13 +34,13 @@ export const JobDashboardView: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [apiBase, authToken]);
 
   useEffect(() => {
     fetchJobs();
     const interval = setInterval(fetchJobs, 3000);
     return () => clearInterval(interval);
-  }, [apiBase, authToken]);
+  }, [fetchJobs]);
 
   const cancelJob = async (jobId: string) => {
     await fetch(`${apiBase}/jobs/${jobId}/cancel`, {

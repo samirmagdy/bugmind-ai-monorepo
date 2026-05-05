@@ -179,7 +179,7 @@ export interface TabSession {
   visibleFields: string[];
   aiMapping: Record<string, string>;
   fieldDefaults: Record<string, unknown>;
-  settingsTab: 'ai' | 'jira' | 'connections';
+  settingsTab: 'ai' | 'jira' | 'connections' | 'workspaces';
   createdIssues: CreatedIssue[];
   theme: 'light' | 'dark';
   themeSource: 'auto' | 'manual';
@@ -216,6 +216,9 @@ export interface TabSession {
   duplicateCheckLoading: boolean;
   showXrayCloudWizard?: boolean;
   xrayCloudWizardMode?: 'publish' | 'settings';
+  workspaces: Workspace[];
+  activeWorkspaceId: number | null;
+  activeWorkspaceRole: string | null;
 }
 
 export interface JiraConnection {
@@ -227,6 +230,23 @@ export interface JiraConnection {
   verify_ssl?: boolean;
   icon_url?: string;
   has_xray_cloud_credentials?: boolean;
+  workspace_id?: number | null;
+  is_shared?: boolean;
+}
+
+export interface WorkspaceMember {
+  id: number;
+  user_id: number;
+  role: 'owner' | 'admin' | 'qa_lead' | 'qa_engineer' | 'viewer';
+  email?: string;
+}
+
+export interface Workspace {
+  id: number;
+  name: string;
+  owner_id: number;
+  members?: WorkspaceMember[];
+  role?: string;
 }
 
 export interface JiraField {
@@ -321,7 +341,7 @@ export interface BulkProgressPayload {
   percent: number;
 }
 
-export type View = 'auth' | 'setup' | 'main' | 'success' | 'settings' | 'preview' | 'jobs';
+export type View = 'auth' | 'setup' | 'main' | 'success' | 'settings' | 'preview' | 'jobs' | 'workspace';
 export type MainWorkflow = 'home' | 'manual' | 'analysis' | 'tests' | 'bulk';
 
 // Phase 1: Test categories — must be before INITIAL_SESSION
@@ -393,6 +413,9 @@ export const INITIAL_SESSION: TabSession = {
   duplicateCheckFailed: false,
   duplicateCheckFailureReason: '',
   duplicateCheckLoading: false,
+  workspaces: [],
+  activeWorkspaceId: null,
+  activeWorkspaceRole: null,
 };
 
 
