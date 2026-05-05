@@ -18,21 +18,43 @@ os.environ.setdefault("SECRET_KEY", "test-secret-key-for-workspaces")
 os.environ.setdefault("ENCRYPTION_KEY", Fernet.generate_key().decode())
 os.environ.setdefault("RATE_LIMITS_ENABLED", "false")
 
-from app.core.database import Base, SessionLocal, engine
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from app.api import deps
+from app.core.database import Base
 from app.main import app
 from app.models.user import User
 from app.models.workspace import Workspace, WorkspaceMember, WorkspaceRole
 from app.core.security import create_access_token, get_password_hash
 
+engine = create_engine(
+    "sqlite:///:memory:",
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
+)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+def override_get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
 class WorkspaceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         Base.metadata.create_all(bind=engine)
+        app.dependency_overrides[deps.get_db] = override_get_db
         cls.client = TestClient(app)
 
     @classmethod
     def tearDownClass(cls):
         cls.client.close()
+        app.dependency_overrides.pop(deps.get_db, None)
         Base.metadata.drop_all(bind=engine)
         try:
             os.unlink(DB_FILE.name)

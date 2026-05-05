@@ -25,3 +25,7 @@ class EpicJobCreateRequest(BaseModel):
     jira_connection_id: int
     epic_key: str
     issue_type_id: str
+    project_key: Optional[str] = None
+    project_id: Optional[str] = None
+    issue_type_name: Optional[str] = None
+    brd_text: Optional[str] = None

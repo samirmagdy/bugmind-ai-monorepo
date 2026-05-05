@@ -144,7 +144,7 @@ async def test_epic_processor_flow(mock_generator_class, mock_fetch, mock_get_ow
         # Verify context is truncated
         assert len(kwargs.get("context_text")) <= 20050
         return {"test_cases": [{"title": "Test 1"}], "coverage_score": 100.0}
-    mock_ai.generate = mock_generate
+    mock_ai.generate_test_cases = mock_generate
     
     await epic_test_generation_processor(job.id, db, test_user, 1, "PROJ-123", "10001")
     

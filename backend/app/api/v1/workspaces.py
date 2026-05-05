@@ -1,12 +1,23 @@
-from typing import List
+from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.api import deps
+from app.core.audit import log_audit
+from app.models.audit import AuditLog
+from app.models.jira import JiraConnection
+from app.models.job import Job
 from app.models.user import User
-from app.models.workspace import Workspace, WorkspaceMember, WorkspaceRole
+from app.models.workspace import Workspace, WorkspaceMember, WorkspaceRole, WorkspaceTemplate
+from app.schemas.jira import JiraConnectionResponse
 from app.schemas.workspace import (
     WorkspaceCreate, WorkspaceResponse, WorkspaceDetailResponse,
-    WorkspaceMemberResponse, WorkspaceMemberUpdate
+    WorkspaceAuditLogResponse,
+    WorkspaceMemberResponse,
+    WorkspaceMemberUpdate,
+    WorkspaceTemplateCreate,
+    WorkspaceTemplateResponse,
+    WorkspaceTemplateUpdate,
+    WorkspaceUsageResponse,
 )
 from app.core.rbac import Action, check_permission
 
@@ -39,17 +50,24 @@ def create_workspace(
         
     db.commit()
     db.refresh(workspace)
-    return workspace
+    response = WorkspaceResponse.model_validate(workspace)
+    response.role = WorkspaceRole.OWNER
+    return response
 
 @router.get("/", response_model=List[WorkspaceResponse])
 def list_workspaces(
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
-    workspaces = db.query(Workspace).join(WorkspaceMember).filter(
+    memberships = db.query(WorkspaceMember).join(Workspace).filter(
         WorkspaceMember.user_id == current_user.id
     ).all()
-    return workspaces
+    responses = []
+    for membership in memberships:
+        response = WorkspaceResponse.model_validate(membership.workspace)
+        response.role = membership.role
+        responses.append(response)
+    return responses
 
 @router.get("/{workspace_id}", response_model=WorkspaceDetailResponse)
 def get_workspace(
@@ -78,11 +96,20 @@ def get_workspace(
         "id": workspace.id,
         "name": workspace.name,
         "owner_id": workspace.owner_id,
+        "role": get_workspace_role(db, current_user.id, workspace_id),
         "created_at": workspace.created_at,
         "updated_at": workspace.updated_at,
         "members": members,
         "templates": templates
     }
+
+
+def get_workspace_role(db: Session, user_id: int, workspace_id: int) -> Optional[WorkspaceRole]:
+    member = db.query(WorkspaceMember).filter(
+        WorkspaceMember.workspace_id == workspace_id,
+        WorkspaceMember.user_id == user_id,
+    ).first()
+    return member.role if member else None
 
 @router.post("/{workspace_id}/members", response_model=WorkspaceMemberResponse)
 def add_workspace_member(
@@ -190,3 +217,188 @@ def set_active_workspace(
     db.add(current_user)
     db.commit()
     return {"status": "success"}
+
+
+@router.get("/{workspace_id}/templates", response_model=List[WorkspaceTemplateResponse])
+def list_workspace_templates(
+    workspace_id: int,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    if not check_permission(db, current_user.id, workspace_id, Action.WORKSPACE_READ):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    return db.query(WorkspaceTemplate).filter(WorkspaceTemplate.workspace_id == workspace_id).order_by(WorkspaceTemplate.id.asc()).all()
+
+
+@router.post("/{workspace_id}/templates", response_model=WorkspaceTemplateResponse)
+def create_workspace_template(
+    workspace_id: int,
+    template_in: WorkspaceTemplateCreate,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    if not check_permission(db, current_user.id, workspace_id, Action.TEMPLATES_MANAGE):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    template = WorkspaceTemplate(
+        workspace_id=workspace_id,
+        name=template_in.name,
+        template_type=template_in.template_type,
+        content=template_in.content,
+    )
+    db.add(template)
+    db.commit()
+    db.refresh(template)
+    log_audit("workspace.template_create", current_user.id, workspace_id=workspace_id, db=db, template_id=template.id)
+    return template
+
+
+@router.put("/{workspace_id}/templates/{template_id}", response_model=WorkspaceTemplateResponse)
+def update_workspace_template(
+    workspace_id: int,
+    template_id: int,
+    template_in: WorkspaceTemplateUpdate,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    if not check_permission(db, current_user.id, workspace_id, Action.TEMPLATES_MANAGE):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    template = db.query(WorkspaceTemplate).filter(
+        WorkspaceTemplate.workspace_id == workspace_id,
+        WorkspaceTemplate.id == template_id,
+    ).first()
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+    update_data = template_in.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(template, field, value)
+    db.add(template)
+    db.commit()
+    db.refresh(template)
+    log_audit("workspace.template_update", current_user.id, workspace_id=workspace_id, db=db, template_id=template.id)
+    return template
+
+
+@router.delete("/{workspace_id}/templates/{template_id}", status_code=204)
+def delete_workspace_template(
+    workspace_id: int,
+    template_id: int,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    if not check_permission(db, current_user.id, workspace_id, Action.TEMPLATES_MANAGE):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    template = db.query(WorkspaceTemplate).filter(
+        WorkspaceTemplate.workspace_id == workspace_id,
+        WorkspaceTemplate.id == template_id,
+    ).first()
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+    db.delete(template)
+    db.commit()
+    log_audit("workspace.template_delete", current_user.id, workspace_id=workspace_id, db=db, template_id=template_id)
+    return None
+
+
+@router.get("/{workspace_id}/connections", response_model=List[JiraConnectionResponse])
+def list_workspace_connections(
+    workspace_id: int,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    if not check_permission(db, current_user.id, workspace_id, Action.WORKSPACE_READ):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    return db.query(JiraConnection).filter(
+        JiraConnection.workspace_id == workspace_id,
+        JiraConnection.is_shared == True,
+    ).order_by(JiraConnection.id.asc()).all()
+
+
+@router.post("/{workspace_id}/connections/{conn_id}/share", response_model=JiraConnectionResponse)
+def share_connection_with_workspace(
+    workspace_id: int,
+    conn_id: int,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    if not check_permission(db, current_user.id, workspace_id, Action.CONNECTIONS_MANAGE):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    conn = db.query(JiraConnection).filter(
+        JiraConnection.id == conn_id,
+        JiraConnection.user_id == current_user.id,
+    ).first()
+    if not conn:
+        raise HTTPException(status_code=404, detail="Personal Jira connection not found")
+    conn.workspace_id = workspace_id
+    conn.is_shared = True
+    db.add(conn)
+    db.commit()
+    db.refresh(conn)
+    log_audit("workspace.connection_share", current_user.id, workspace_id=workspace_id, db=db, connection_id=conn.id)
+    return conn
+
+
+@router.delete("/{workspace_id}/connections/{conn_id}/share", response_model=JiraConnectionResponse)
+def unshare_connection_from_workspace(
+    workspace_id: int,
+    conn_id: int,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    if not check_permission(db, current_user.id, workspace_id, Action.CONNECTIONS_MANAGE):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    conn = db.query(JiraConnection).filter(
+        JiraConnection.id == conn_id,
+        JiraConnection.workspace_id == workspace_id,
+        JiraConnection.is_shared == True,
+    ).first()
+    if not conn:
+        raise HTTPException(status_code=404, detail="Shared Jira connection not found")
+    if conn.user_id != current_user.id and get_workspace_role(db, current_user.id, workspace_id) != WorkspaceRole.OWNER:
+        raise HTTPException(status_code=403, detail="Only the connection owner or workspace owner can unshare this connection")
+    conn.workspace_id = None
+    conn.is_shared = False
+    db.add(conn)
+    db.commit()
+    db.refresh(conn)
+    log_audit("workspace.connection_unshare", current_user.id, workspace_id=workspace_id, db=db, connection_id=conn.id)
+    return conn
+
+
+@router.get("/{workspace_id}/audit-logs", response_model=List[WorkspaceAuditLogResponse])
+def list_workspace_audit_logs(
+    workspace_id: int,
+    limit: int = 50,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    if not check_permission(db, current_user.id, workspace_id, Action.AUDIT_READ):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    rows = db.query(AuditLog).filter(AuditLog.workspace_id == workspace_id).order_by(AuditLog.created_at.desc()).limit(max(1, min(limit, 200))).all()
+    return [
+        WorkspaceAuditLogResponse(
+            id=row.id,
+            user_id=row.user_id,
+            action=row.action,
+            metadata=row.event_metadata or {},
+            created_at=row.created_at,
+        )
+        for row in rows
+    ]
+
+
+@router.get("/{workspace_id}/usage", response_model=WorkspaceUsageResponse)
+def get_workspace_usage(
+    workspace_id: int,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    if not check_permission(db, current_user.id, workspace_id, Action.AUDIT_READ):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    return WorkspaceUsageResponse(
+        workspace_id=workspace_id,
+        members_count=db.query(WorkspaceMember).filter(WorkspaceMember.workspace_id == workspace_id).count(),
+        templates_count=db.query(WorkspaceTemplate).filter(WorkspaceTemplate.workspace_id == workspace_id).count(),
+        shared_connections_count=db.query(JiraConnection).filter(JiraConnection.workspace_id == workspace_id, JiraConnection.is_shared == True).count(),
+        jobs_count=db.query(Job).filter(Job.workspace_id == workspace_id).count(),
+        audit_events_count=db.query(AuditLog).filter(AuditLog.workspace_id == workspace_id).count(),
+    )

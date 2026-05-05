@@ -22,6 +22,7 @@ class Workspace(Base):
     
     owner = relationship("User", foreign_keys=[owner_id])
     members = relationship("WorkspaceMember", back_populates="workspace", cascade="all, delete-orphan")
+    templates = relationship("WorkspaceTemplate", back_populates="workspace", cascade="all, delete-orphan")
 
 class WorkspaceMember(Base):
     __tablename__ = "workspace_members"
@@ -52,3 +53,5 @@ class WorkspaceTemplate(Base):
     content = Column(JSON, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    workspace = relationship("Workspace", back_populates="templates")

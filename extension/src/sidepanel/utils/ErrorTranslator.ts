@@ -142,8 +142,8 @@ export function translateError(error: unknown, context?: string): TranslatedErro
     result.title = 'Xray Cloud Unavailable';
     result.description = 'Xray Cloud is not configured correctly on the backend. Contact the BugMind administrator.';
   } else if (message.includes('Xray Cloud publishing is now separated')) {
-    result.title = 'Xray Cloud Not Implemented';
-    result.description = 'This BugMind deployment does not yet support publishing test cases to Xray Cloud.';
+    result.title = 'Xray Cloud Setup Required';
+    result.description = 'Xray Cloud publishing uses the separated Cloud setup. Add Xray Cloud credentials in Settings and try again.';
   } else if (message.includes('No test cases were provided for Xray publishing')) {
     result.title = 'No Test Cases To Publish';
     result.description = 'Generate test cases first, then publish them to Xray.';

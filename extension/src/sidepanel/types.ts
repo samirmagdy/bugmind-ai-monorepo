@@ -241,11 +241,20 @@ export interface WorkspaceMember {
   email?: string;
 }
 
+export interface WorkspaceTemplate {
+  id: number;
+  workspace_id: number;
+  name: string;
+  template_type: 'bug' | 'test' | 'preset' | 'style';
+  content: Record<string, unknown>;
+}
+
 export interface Workspace {
   id: number;
   name: string;
   owner_id: number;
   members?: WorkspaceMember[];
+  templates?: WorkspaceTemplate[];
   role?: string;
 }
 

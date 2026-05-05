@@ -157,10 +157,11 @@ const MainView: React.FC = () => {
   const descriptionText = session.issueData?.description?.trim() || '';
   const hasStructuredCriteria = acceptanceCriteria.length > 120 || acceptanceCriteria.includes('\n') || acceptanceCriteria.includes('-');
   const recommendedWorkflow = !session.issueData ? null : hasStructuredCriteria ? 'tests' : (acceptanceCriteria.length < 48 && descriptionText.length > 0 ? 'analysis' : 'manual');
+  const issueTypeLabel = session.issueData?.typeName?.trim() || 'Issue';
   const recommendationLabel = !session.issueData
-    ? 'Open a Jira story to enable all workflows.'
+    ? 'Open a Jira issue to enable all workflows.'
     : recommendedWorkflow === 'tests'
-      ? 'Recommended: Generate Test Cases for this story'
+      ? 'Recommended: Generate Test Cases for this issue'
       : recommendedWorkflow === 'analysis'
         ? 'Recommended: Run AI Gap Analysis to uncover missing scenarios'
         : 'Recommended: I Found a Bug for quick reporting';
@@ -728,11 +729,11 @@ const MainView: React.FC = () => {
                       <div className="flex items-center justify-between gap-3">
                         <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--text-muted)]">Choose Workflow</div>
                         <StatusBadge tone="info" className="opacity-80">
-                          {session.issueData ? 'Story Detected' : 'Context Needed'}
+                          {session.issueData ? `${issueTypeLabel} Detected` : 'Context Needed'}
                         </StatusBadge>
                       </div>
-                      <h3 className="workflow-card-title">Start from one action</h3>
-                      <p className="workflow-card-subtitle">Each workflow opens in its own focused page while keeping the same Jira context above.</p>
+                      <h3 className="workflow-card-title">Choose what you want to do next</h3>
+                      <p className="workflow-card-subtitle">Your Jira issue context stays available while you work.</p>
                       <div className={`rounded-[1rem] border px-3.5 py-3 text-[11px] font-medium leading-relaxed ${
                         session.issueData
                           ? 'border-[var(--border-soft)] bg-[var(--surface-soft)] text-[var(--text-secondary)]'
@@ -768,10 +769,10 @@ const MainView: React.FC = () => {
                             <div className="flex items-center gap-2">
                               <h4 className="workflow-card-title text-[15px]">I Found a Bug</h4>
                               <StatusBadge className={recommendedWorkflow === 'manual' ? '' : 'opacity-80'}>
-                                {recommendedWorkflow === 'manual' ? 'Recommended' : 'Primary'}
+                                {recommendedWorkflow === 'manual' ? 'Recommended' : 'Available'}
                               </StatusBadge>
                             </div>
-                            <p className="workflow-card-subtitle">Generate structured bugs ready to submit in Jira.</p>
+                            <p className="workflow-card-subtitle">Convert plain English notes into Jira-ready bug reports.</p>
                           </div>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
@@ -801,7 +802,7 @@ const MainView: React.FC = () => {
                               <h4 className="workflow-card-title text-[15px]">AI Gap Analysis</h4>
                               {recommendedWorkflow === 'analysis' && <StatusBadge tone="info">Recommended</StatusBadge>}
                             </div>
-                            <p className="workflow-card-subtitle">Get a report of missing scenarios, requirements, and risk areas.</p>
+                            <p className="workflow-card-subtitle">Find missing requirements, edge cases, risks, and unclear acceptance criteria.</p>
                           </div>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
@@ -831,7 +832,7 @@ const MainView: React.FC = () => {
                               <h4 className="workflow-card-title text-[15px]">Generate Test Cases</h4>
                               {recommendedWorkflow === 'tests' && <StatusBadge tone="success">Recommended</StatusBadge>}
                             </div>
-                            <p className="workflow-card-subtitle">Create and export Xray-ready test cases linked to this story.</p>
+                            <p className="workflow-card-subtitle">Generate Xray-ready test cases linked to the current Jira issue.</p>
                           </div>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">

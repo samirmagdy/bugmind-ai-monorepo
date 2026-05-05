@@ -12,6 +12,7 @@ class Action:
     MEMBERS_MANAGE = "members.manage"
     CONNECTIONS_MANAGE = "connections.manage"
     MAPPINGS_MANAGE = "mappings.manage"
+    TEMPLATES_MANAGE = "templates.manage"
     AI_GENERATE = "ai.generate"
     PUBLISH = "publish"
     AUDIT_READ = "audit.read"
@@ -20,16 +21,16 @@ class Action:
 ROLE_PERMISSIONS = {
     WorkspaceRole.OWNER: [
         Action.WORKSPACE_READ, Action.WORKSPACE_UPDATE, Action.MEMBERS_MANAGE,
-        Action.CONNECTIONS_MANAGE, Action.MAPPINGS_MANAGE, Action.AI_GENERATE,
+        Action.CONNECTIONS_MANAGE, Action.MAPPINGS_MANAGE, Action.TEMPLATES_MANAGE, Action.AI_GENERATE,
         Action.PUBLISH, Action.AUDIT_READ
     ],
     WorkspaceRole.ADMIN: [
         Action.WORKSPACE_READ, Action.WORKSPACE_UPDATE, Action.MEMBERS_MANAGE,
-        Action.CONNECTIONS_MANAGE, Action.MAPPINGS_MANAGE, Action.AI_GENERATE,
+        Action.CONNECTIONS_MANAGE, Action.MAPPINGS_MANAGE, Action.TEMPLATES_MANAGE, Action.AI_GENERATE,
         Action.PUBLISH, Action.AUDIT_READ
     ],
     WorkspaceRole.QA_LEAD: [
-        Action.WORKSPACE_READ, Action.MAPPINGS_MANAGE, Action.AI_GENERATE,
+        Action.WORKSPACE_READ, Action.MAPPINGS_MANAGE, Action.TEMPLATES_MANAGE, Action.AI_GENERATE,
         Action.PUBLISH, Action.AUDIT_READ
     ],
     WorkspaceRole.QA_ENGINEER: [

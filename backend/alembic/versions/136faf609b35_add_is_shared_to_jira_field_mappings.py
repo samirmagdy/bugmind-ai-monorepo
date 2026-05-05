@@ -19,10 +19,10 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Add column
-    op.add_column('jira_field_mappings', sa.Column('is_shared', sa.Boolean(), nullable=True))
-    # Initialize
-    op.execute("UPDATE jira_field_mappings SET is_shared = FALSE")
+    op.add_column(
+        'jira_field_mappings',
+        sa.Column('is_shared', sa.Boolean(), nullable=False, server_default=sa.false()),
+    )
 
 
 def downgrade() -> None:

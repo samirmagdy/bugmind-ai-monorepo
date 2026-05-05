@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from datetime import datetime
 from pydantic import BaseModel, EmailStr
 from app.models.workspace import WorkspaceRole, WorkspaceTemplateType
@@ -59,6 +59,7 @@ class WorkspaceUpdate(WorkspaceBase):
 class WorkspaceResponse(WorkspaceBase):
     id: int
     owner_id: int
+    role: Optional[WorkspaceRole] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
     
@@ -68,3 +69,23 @@ class WorkspaceResponse(WorkspaceBase):
 class WorkspaceDetailResponse(WorkspaceResponse):
     members: List[WorkspaceMemberResponse]
     templates: List[WorkspaceTemplateResponse]
+
+
+class WorkspaceAuditLogResponse(BaseModel):
+    id: int
+    user_id: Optional[int] = None
+    action: str
+    metadata: Dict[str, Any] = {}
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class WorkspaceUsageResponse(BaseModel):
+    workspace_id: int
+    members_count: int
+    templates_count: int
+    shared_connections_count: int
+    jobs_count: int
+    audit_events_count: int
