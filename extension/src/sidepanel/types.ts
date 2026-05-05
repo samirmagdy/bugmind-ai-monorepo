@@ -321,7 +321,7 @@ export interface BulkProgressPayload {
   percent: number;
 }
 
-export type View = 'auth' | 'setup' | 'main' | 'success' | 'settings' | 'preview';
+export type View = 'auth' | 'setup' | 'main' | 'success' | 'settings' | 'preview' | 'jobs';
 export type MainWorkflow = 'home' | 'manual' | 'analysis' | 'tests' | 'bulk';
 
 // Phase 1: Test categories — must be before INITIAL_SESSION

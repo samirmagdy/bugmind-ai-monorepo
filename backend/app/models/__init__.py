@@ -4,6 +4,7 @@ from app.models.audit import AuditLog
 from app.models.subscription import Subscription, PlanType
 from app.models.jira import JiraConnection, JiraFieldMapping, JiraAuthType
 from app.models.usage import BugGeneration, UsageLog
+from app.models.job import Job
 from app.core.database import Base
 
 __all__ = [
@@ -18,5 +19,6 @@ __all__ = [
     "JiraAuthType",
     "BugGeneration",
     "UsageLog",
+    "Job",
     "Base",
 ]
