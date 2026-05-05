@@ -914,6 +914,8 @@ def check_duplicates(
         candidate=candidate,
         instance_url=instance_url,
         story_key=req.story_key,
+        issue_type_id=req.issue_type_id,
+        issue_type_name=req.issue_type_name,
     )
 
     log_audit(

@@ -922,6 +922,8 @@ export const AIProvider: React.FC<{
       const payload: DuplicateCheckRequestPayload = {
         jira_connection_id: session.jiraConnectionId,
         project_key: projectKey,
+        issue_type_id: session.selectedIssueType?.id || null,
+        issue_type_name: session.selectedIssueType?.name || null,
         story_key: session.issueData?.key || undefined,
         instance_url: session.instanceUrl,
         candidate_summary: bug.summary || '',
@@ -963,7 +965,7 @@ export const AIProvider: React.FC<{
         duplicateMatches: [],
       });
     }
-  }, [session.bugs, session.jiraConnectionId, session.issueData?.key, session.instanceUrl, apiBase, authToken, refreshAuthToken, updateSession, getProjectRequestParams]);
+  }, [session.bugs, session.jiraConnectionId, session.issueData?.key, session.instanceUrl, session.selectedIssueType?.id, session.selectedIssueType?.name, apiBase, authToken, refreshAuthToken, updateSession, getProjectRequestParams]);
 
 
   const linkToExisting = useCallback(async (existingKey: string): Promise<DuplicateLinkResponse | null> => {

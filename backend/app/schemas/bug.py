@@ -316,6 +316,8 @@ class DuplicateCheckRequest(BaseModel):
     """Request to check a generated bug candidate for duplicates."""
     jira_connection_id: int
     project_key: str
+    issue_type_id: Optional[str] = None
+    issue_type_name: Optional[str] = None
     story_key: Optional[str] = None
     instance_url: Optional[str] = None
     candidate_summary: str = ""

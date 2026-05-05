@@ -191,10 +191,16 @@ def score_duplicate(
 
     candidate_combined = f"{candidate.summary} {candidate.description}"
 
-    # ── 1. Title token similarity (40%) ──────────────────────────────────
+    # ── 1. Title and body token similarity ───────────────────────────────
     candidate_title_tokens = extract_tokens(candidate.summary)
     existing_title_tokens = extract_tokens(existing_summary)
-    title_score = _jaccard(candidate_title_tokens, existing_title_tokens)
+    title_score = max(
+        _jaccard(candidate_title_tokens, existing_title_tokens),
+        _sets_overlap(candidate_title_tokens, existing_title_tokens) * 0.75,
+    )
+    candidate_body_tokens = extract_tokens(candidate_combined)
+    existing_body_tokens = extract_tokens(existing_combined)
+    body_score = _jaccard(candidate_body_tokens, existing_body_tokens)
 
     # ── 2. Error signature match (25%) ───────────────────────────────────
     candidate_errors = extract_error_signatures(
@@ -232,12 +238,17 @@ def score_duplicate(
 
     # ── Weighted composite ───────────────────────────────────────────────
     total = (
-        title_score * 0.40
-        + error_score * 0.25
-        + label_score * 0.15
+        title_score * 0.30
+        + body_score * 0.30
+        + error_score * 0.18
+        + label_score * 0.07
         + path_score * 0.10
-        + recency_score * 0.10
+        + recency_score * 0.05
     )
+    if error_score >= 0.8:
+        total = max(total, CONFIDENCE_LOW + 0.01)
+    if path_score >= 0.8:
+        total = max(total, CONFIDENCE_LOW + 0.01)
 
     if total < CONFIDENCE_LOW:
         return None
@@ -246,6 +257,8 @@ def score_duplicate(
     reasons: list[str] = []
     if title_score >= 0.4:
         reasons.append("similar summary")
+    if body_score >= 0.35:
+        reasons.append("similar description")
     if error_score >= 0.5:
         reasons.append("matching error signature")
     if label_score >= 0.5:
@@ -303,41 +316,58 @@ def build_search_queries(
     project_key: str,
     candidate: DuplicateCandidate,
     story_key: Optional[str] = None,
+    issue_type_id: Optional[str] = None,
+    issue_type_name: Optional[str] = None,
 ) -> List[str]:
     """
     Build a list of JQL queries to find potential duplicates.
     Each query targets a different signal.
     """
     queries: List[str] = []
-    base_filter = f'project = {_quote_jql(project_key)} AND issuetype in (Bug, Defect, "Bug Report")'
+    project_filter = f'project = {_quote_jql(project_key)}'
+    issue_type_filters: List[str] = []
+    if issue_type_id:
+        issue_type_filters.append(f'{project_filter} AND issuetype = {_quote_jql(issue_type_id)}')
+    if issue_type_name:
+        issue_type_filters.append(f'{project_filter} AND issuetype = {_quote_jql(issue_type_name)}')
+    issue_type_filters.append(f'{project_filter} AND issuetype in (Bug, Defect, "Bug Report")')
+
+    # Last-resort project-only fallback prevents custom/localized bug type names
+    # from making duplicate detection look empty before scoring can run.
+    base_filters = list(dict.fromkeys(issue_type_filters))
 
     # 1. Summary keyword search
     keywords = _extract_keywords(candidate.summary)
     if keywords:
         text_clause = " OR ".join(f'summary ~ {_quote_jql(kw)}' for kw in keywords[:4])
-        queries.append(f'{base_filter} AND ({text_clause}) ORDER BY created DESC')
+        for base_filter in base_filters:
+            queries.append(f'{base_filter} AND ({text_clause}) ORDER BY created DESC')
 
     # 2. Error message search
     error_sigs = extract_error_signatures(
         f"{candidate.description} {candidate.error_message}"
     )
     for sig in list(error_sigs)[:2]:
-        queries.append(
-            f'{base_filter} AND text ~ {_quote_jql(sig)} ORDER BY created DESC'
-        )
+        for base_filter in base_filters:
+            queries.append(
+                f'{base_filter} AND text ~ {_quote_jql(sig)} ORDER BY created DESC'
+            )
 
     # 3. Issues linked to same story/epic
     if story_key:
-        queries.append(
-            f'{base_filter} AND issue in linkedIssues({_quote_jql(story_key)}) ORDER BY created DESC'
-        )
+        for base_filter in base_filters:
+            queries.append(
+                f'{base_filter} AND issue in linkedIssues({_quote_jql(story_key)}) ORDER BY created DESC'
+            )
 
     # 4. Recently created bugs in same project (last 30 days)
-    queries.append(
-        f'{base_filter} AND created >= -30d ORDER BY created DESC'
-    )
+    for base_filter in base_filters:
+        queries.append(
+            f'{base_filter} AND created >= -90d ORDER BY created DESC'
+        )
+    queries.append(f'{project_filter} AND created >= -30d ORDER BY created DESC')
 
-    return queries
+    return list(dict.fromkeys(queries))
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -350,6 +380,8 @@ def find_duplicates(
     candidate: DuplicateCandidate,
     instance_url: str = "",
     story_key: Optional[str] = None,
+    issue_type_id: Optional[str] = None,
+    issue_type_name: Optional[str] = None,
     max_results: int = 10,
 ) -> tuple[List[DuplicateMatch], bool, str]:
     """
@@ -361,7 +393,7 @@ def find_duplicates(
         - check_failed: True if all Jira queries failed
         - failure_reason: human-readable reason if check_failed
     """
-    queries = build_search_queries(project_key, candidate, story_key)
+    queries = build_search_queries(project_key, candidate, story_key, issue_type_id, issue_type_name)
     if not queries:
         return [], False, ""
 

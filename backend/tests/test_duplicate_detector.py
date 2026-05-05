@@ -270,6 +270,18 @@ class TestBuildSearchQueries:
         queries = build_search_queries("PROJ", candidate, story_key="PROJ-42")
         assert any("linkedIssues" in q for q in queries)
 
+    def test_with_configured_issue_type_and_project_fallback(self):
+        candidate = DuplicateCandidate(summary="Login failure")
+        queries = build_search_queries(
+            "PROJ",
+            candidate,
+            issue_type_id="10004",
+            issue_type_name="Production Defect",
+        )
+        assert any('issuetype = "10004"' in q for q in queries)
+        assert any('issuetype = "Production Defect"' in q for q in queries)
+        assert any('project = "PROJ" AND created >= -30d' in q for q in queries)
+
     def test_with_error_message(self):
         candidate = DuplicateCandidate(
             summary="API failure",
@@ -366,3 +378,23 @@ class TestEdgeCases:
         issue = {"key": "X-2", "fields": {}}
         match = score_duplicate(candidate, issue)
         assert match is None or isinstance(match, DuplicateMatch)
+
+    def test_similar_description_can_match_when_title_wording_differs(self):
+        candidate = DuplicateCandidate(
+            summary="Unsuccessful login",
+            description="User cannot sign in with valid credentials and stays on login page",
+        )
+        issue = {
+            "key": "X-3",
+            "fields": {
+                "summary": "Login fails for valid user",
+                "description": "User cannot sign in with valid credentials and remains on login page",
+                "status": {"name": "Open"},
+                "priority": {"name": "Medium"},
+                "labels": [],
+                "components": [],
+                "created": "2026-05-01T00:00:00Z",
+            }
+        }
+        match = score_duplicate(candidate, issue)
+        assert match is not None

@@ -334,6 +334,8 @@ export function buildProjectRequestParams(issueData: ProjectIssueLike | null | u
 export interface DuplicateCheckRequestPayload {
   jira_connection_id: number;
   project_key: string;
+  issue_type_id?: string | null;
+  issue_type_name?: string | null;
   story_key?: string | null;
   instance_url?: string | null;
   candidate_summary: string;

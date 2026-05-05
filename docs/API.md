@@ -962,11 +962,14 @@ The system uses deterministic text similarity (no AI calls):
 1. Extracts keywords from the candidate bug summary
 2. Searches Jira via JQL for bugs with similar summaries, matching error signatures, linked to the same story, and recently created
 3. Scores each result using a weighted composite:
-   - Title token similarity (Jaccard): **40%**
-   - Error signature match: **25%**
-   - Component/label overlap: **15%**
+   - Title token similarity: **30%**
+   - Description/body similarity: **30%**
+   - Error signature match: **18%**
+   - Component/label overlap: **7%**
    - API endpoint/path match: **10%**
-   - Recency bonus (< 90 days): **10%**
+   - Recency bonus (< 90 days): **5%**
+
+The duplicate search uses the configured Jira issue type when available, falls back to common bug type names, then performs a recent project search so custom or localized Jira issue types do not silently hide possible matches.
 
 #### Confidence scores
 
