@@ -103,6 +103,7 @@ export interface AITestCaseGenerationRequestPayload extends ProjectRequestParams
   model?: string;
   custom_instructions?: string;
   supporting_context?: string;
+  test_categories?: string[];
 }
 
 export interface AIPreviewRequestPayload extends ProjectRequestParams {
@@ -236,10 +237,16 @@ export interface GeneratedFindingResponsePayload {
   expected_result: string;
   actual_result: string;
   severity?: string;
+  priority?: string;
   confidence?: number;
   category?: string;
+  environment?: string;
+  root_cause?: string;
   acceptance_criteria_refs?: string[];
   evidence?: string[];
+  suggested_evidence?: string[];
+  labels?: string[];
+  review_required?: boolean;
   duplicate_group?: string | null;
   overlap_warning?: string | null;
   fields?: Record<string, unknown>;

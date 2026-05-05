@@ -6,7 +6,7 @@ import {
   Compass, ArrowRight, Check, Layout, AlertTriangle, BrainCircuit, Paperclip, X, ClipboardList,
   Trash2, Copy, ArrowUp, ArrowDown, Square, CheckSquare, FileText
 } from 'lucide-react';
-import { BugReport, JiraField, JiraFieldOption, JiraUser, SupportingArtifact, TestCase, ManualBugInput, AnalysisCoverageItem, MainWorkflow } from '../../types';
+import { BugReport, JiraField, JiraFieldOption, JiraUser, SupportingArtifact, TestCase, ManualBugInput, AnalysisCoverageItem, MainWorkflow, TEST_CATEGORIES } from '../../types';
 import AutoResizeTextarea from '../common/AutoResizeTextarea';
 import { ActionButton, SurfaceCard, StatusBadge, StatusPanel } from '../common/DesignSystem';
 import LuxurySearchableSelect, { SelectOption, SelectValue } from '../common/LuxurySearchableSelect';
@@ -1212,7 +1212,7 @@ const MainView: React.FC = () => {
                           <div className="space-y-2">
                             <label className="context-label uppercase tracking-wider mb-1.5 block ml-1">Test Coverage Types</label>
                             <div className="grid grid-cols-2 gap-2">
-                              {['Positive', 'Negative', 'Edge', 'Regression', 'Security', 'Accessibility', 'Integration', 'Permissions'].map((type) => (
+                              {(TEST_CATEGORIES as readonly string[]).map((type) => (
                                 <button
                                   key={type}
                                   type="button"
@@ -1333,6 +1333,11 @@ const MainView: React.FC = () => {
                         onChange={e => handleUpdateTestCase(idx, { title: e.target.value })}
                         className="w-full bg-transparent border-none p-0 text-sm font-bold text-[var(--text-primary)] outline-none"
                       />
+                      {testCase.objective && (
+                        <div className="text-[11px] text-[var(--text-secondary)] italic">
+                          {testCase.objective}
+                        </div>
+                      )}
                       <div className="space-y-1.5">
                         <label className="context-label uppercase tracking-widest block">Steps</label>
                         <AutoResizeTextarea
@@ -1382,6 +1387,22 @@ const MainView: React.FC = () => {
                           placeholder="Components"
                         />
                       </div>
+                      {testCase.test_data && (
+                        <div className="space-y-1.5">
+                          <label className="context-label uppercase tracking-widest block">Test Data</label>
+                          <AutoResizeTextarea
+                            value={testCase.test_data || ''}
+                            onChange={e => handleUpdateTestCase(idx, { test_data: e.target.value })}
+                            className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-[0.9rem] p-2.5 text-xs text-[var(--text-secondary)] font-mono outline-none"
+                          />
+                        </div>
+                      )}
+                      {testCase.review_notes && (
+                        <div className="rounded-[0.9rem] border border-[var(--warning)]/30 bg-[var(--warning)]/5 px-3 py-2">
+                          <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--warning)] mb-1">Review Note</div>
+                          <div className="text-[11px] text-[var(--text-secondary)]">{testCase.review_notes}</div>
+                        </div>
+                      )}
                     </SurfaceCard>
                   ))}
                 </div>
@@ -1622,6 +1643,11 @@ const MainView: React.FC = () => {
                                 Overlap {bug.duplicate_group}
                               </StatusBadge>
                             )}
+                            {bug.review_required && (
+                              <StatusBadge tone="danger" className="text-[9px]">
+                                Needs Review
+                              </StatusBadge>
+                            )}
                           </div>
                         </div>
                         <ChevronDown 
@@ -1702,6 +1728,39 @@ const MainView: React.FC = () => {
                           </div>
                           <div className="grid grid-cols-2 gap-3">
                             <div className="space-y-1.5">
+                              <label className="context-label uppercase tracking-widest block">Priority</label>
+                              <LuxurySearchableSelect
+                                options={['Highest', 'High', 'Medium', 'Low', 'Lowest'].map((value) => ({ id: value, name: value }))}
+                                value={bug.priority ? { id: bug.priority, name: bug.priority } : null}
+                                onChange={(next) => {
+                                  const nextValue = isSelectOption(next) ? String(next.id) : '';
+                                  handleUpdateBug(idx, { priority: nextValue || 'Medium' });
+                                }}
+                                placeholder="Select priority..."
+                              />
+                            </div>
+                            <div className="space-y-1.5">
+                              <label className="context-label uppercase tracking-widest block">Environment</label>
+                              <AutoResizeTextarea
+                                value={bug.environment || ''}
+                                onChange={e => handleUpdateBug(idx, { environment: e.target.value })}
+                                className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-[0.9rem] p-2.5 text-xs text-[var(--text-secondary)] outline-none"
+                                placeholder="e.g. Chrome / macOS / Production"
+                              />
+                            </div>
+                          </div>
+                          {bug.root_cause && (
+                            <div className="space-y-1.5">
+                              <label className="context-label uppercase tracking-widest block">Possible Root Cause</label>
+                              <AutoResizeTextarea
+                                value={bug.root_cause || ''}
+                                onChange={e => handleUpdateBug(idx, { root_cause: e.target.value })}
+                                className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-[0.9rem] p-2.5 text-xs text-[var(--text-secondary)] outline-none"
+                              />
+                            </div>
+                          )}
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="space-y-1.5">
                               <label className="context-label uppercase tracking-widest block">AC References</label>
                               <AutoResizeTextarea
                                 value={(bug.acceptance_criteria_refs || []).join('\n')}
@@ -1722,6 +1781,30 @@ const MainView: React.FC = () => {
                               />
                             </div>
                           </div>
+                          {(bug.suggested_evidence || []).length > 0 && (
+                            <div className="space-y-1.5">
+                              <label className="context-label uppercase tracking-widest block">Suggested Evidence to Collect</label>
+                              <div className="flex flex-wrap gap-1.5">
+                                {(bug.suggested_evidence || []).map((item, evidenceIdx) => (
+                                  <StatusBadge key={`evidence-${evidenceIdx}`} tone="info" className="text-[9px]">
+                                    {item}
+                                  </StatusBadge>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {(bug.labels || []).length > 0 && (
+                            <div className="space-y-1.5">
+                              <label className="context-label uppercase tracking-widest block">Labels</label>
+                              <div className="flex flex-wrap gap-1.5">
+                                {(bug.labels || []).map((label, labelIdx) => (
+                                  <StatusBadge key={`label-${labelIdx}`} tone="info" className="text-[9px]">
+                                    {label}
+                                  </StatusBadge>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                           {bug.overlap_warning && (
                             <StatusPanel
                               tone="warning"

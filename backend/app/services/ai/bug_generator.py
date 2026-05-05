@@ -249,10 +249,16 @@ class BugGenerator(BaseAIGenerator):
         - Each bug's "actual" result must detail the observed deviation.
         - Each bug's "description" must be a professional summary of the problem and its impact (Core Findings), EXCLUDING the detailed steps, expected, or actual result sections as these are captured separately.
         - Each bug must include a "severity" from Critical, High, Medium, Low.
+        - Each bug must include a "priority" from Highest, High, Medium, Low, Lowest.
         - Each bug must include a "confidence" integer from 0 to 100.
         - Each bug must include a "category" like Functional Gap, Edge Case, Validation, Permissions, Workflow, Data Integrity, UX, or Regression Risk.
+        - Each bug must include "environment" describing the relevant platform, browser, or API context (e.g. "Web / Chrome 120+", "REST API / Production", "iOS 17 / Safari").
+        - Each bug must include "root_cause" with a brief hypothesis of the probable root cause.
         - Each bug must include "acceptance_criteria_refs" as a short list of AC references or story sections that support the finding.
         - Each bug must include "evidence" as a short list of quoted or paraphrased signals from the story or user notes.
+        - Each bug must include "suggested_evidence" as a short list of evidence the tester should collect (e.g. "Screenshot of error modal", "Network HAR capture", "Console log output").
+        - Each bug must include "labels" as a list of 1-3 short tags (e.g. ["regression", "checkout", "validation"]).
+        - Each bug must include "review_required" as true if confidence < 60 or the finding is speculative, false otherwise.
         - You must produce an "analysis_summary" object with:
           - "issue_type_mode"
           - "summary_headline"
@@ -286,10 +292,16 @@ class BugGenerator(BaseAIGenerator):
                     "expected": "Expected behavior per the ACs",
                     "actual": "Actual observed deviation",
                     "severity": "High",
+                    "priority": "High",
                     "confidence": 82,
                     "category": "Validation",
+                    "environment": "Web / Chrome 120+ / Production",
+                    "root_cause": "Missing server-side validation for edge case input",
                     "acceptance_criteria_refs": ["AC1", "Checkout flow"],
                     "evidence": ["Story requires X", "Acceptance criteria mention Y"],
+                    "suggested_evidence": ["Screenshot of error state", "Network request log"],
+                    "labels": ["validation", "checkout"],
+                    "review_required": false,
                     "custom_fields": {{ "customfield_12345": {{ "id": "10001" }} }}
                 }}
             ],

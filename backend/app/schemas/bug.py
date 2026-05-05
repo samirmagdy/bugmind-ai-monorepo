@@ -26,6 +26,14 @@ class FindingGenerationRequest(BaseModel):
     supporting_context: Optional[str] = None
 
 
+# Valid test categories for category selector
+TEST_CATEGORIES = [
+    "Positive", "Negative", "Boundary", "Regression", "Permission",
+    "Validation", "API", "UI", "Mobile", "Accessibility", "Performance",
+]
+DEFAULT_TEST_CATEGORIES = ["Positive", "Negative", "Boundary", "Regression"]
+
+
 class TestCaseGenerationRequest(BaseModel):
     selected_text: Optional[str] = None
     issue_context: Optional[IssueContext] = None
@@ -38,6 +46,25 @@ class TestCaseGenerationRequest(BaseModel):
     model: Optional[str] = None
     custom_instructions: Optional[str] = None
     supporting_context: Optional[str] = None
+    test_categories: Optional[List[str]] = None
+
+
+class QualityCheckRequest(BaseModel):
+    description: str = ""
+    steps_to_reproduce: str = ""
+    expected_result: str = ""
+    actual_result: str = ""
+    user_description: str = ""
+    selected_text: str = ""
+
+
+class StoryAnalysisRequest(BaseModel):
+    summary: str = ""
+    description: str = ""
+    acceptance_criteria: str = ""
+    issue_key: Optional[str] = None
+    test_categories: Optional[List[str]] = None
+    include_description: bool = True
 
 class StructBugField(BaseModel):
     field_id: str
@@ -50,10 +77,16 @@ class GeneratedFindingResponse(BaseModel):
     expected_result: str
     actual_result: str
     severity: Optional[str] = None
+    priority: Optional[str] = None
     confidence: Optional[int] = None
     category: Optional[str] = None
+    environment: Optional[str] = None
+    root_cause: Optional[str] = None
     acceptance_criteria_refs: List[str] = []
     evidence: List[str] = []
+    suggested_evidence: List[str] = []
+    labels: List[str] = []
+    review_required: bool = False
     duplicate_group: Optional[str] = None
     overlap_warning: Optional[str] = None
     fields: Dict[str, Any]
@@ -104,10 +137,16 @@ class BugDraft(BaseModel):
     expected_result: str
     actual_result: str
     severity: Optional[str] = None
+    priority: Optional[str] = None
     confidence: Optional[int] = None
     category: Optional[str] = None
+    environment: Optional[str] = None
+    root_cause: Optional[str] = None
     acceptance_criteria_refs: List[str] = []
     evidence: List[str] = []
+    suggested_evidence: List[str] = []
+    labels: List[str] = []
+    review_required: bool = False
     duplicate_group: Optional[str] = None
     overlap_warning: Optional[str] = None
     extra_fields: Optional[Dict[str, Any]] = None
@@ -144,12 +183,15 @@ class SubmitBugsRequest(BaseModel):
 
 class TestCase(BaseModel):
     title: str
+    objective: Optional[str] = None
     steps: List[str]
     expected_result: str
     priority: str
     selected: Optional[bool] = True
     test_type: Optional[str] = "Manual"
     preconditions: Optional[str] = None
+    test_data: Optional[str] = None
+    review_notes: Optional[str] = None
     acceptance_criteria_refs: List[str] = []
     labels: List[str] = []
     components: List[str] = []

@@ -58,12 +58,15 @@ export interface CreatedIssue {
 
 export interface TestCase {
   title: string;
+  objective?: string;
   steps: string[];
   expected_result: string;
   priority: string;
   selected?: boolean;
   test_type?: string;
   preconditions?: string;
+  test_data?: string;
+  review_notes?: string;
   acceptance_criteria_refs?: string[];
   labels?: string[];
   components?: string[];
@@ -97,10 +100,16 @@ export interface BugReport {
   expected_result: string;
   actual_result: string;
   severity: string;
+  priority?: string;
   confidence?: number;
   category?: string;
+  environment?: string;
+  root_cause?: string;
   acceptance_criteria_refs?: string[];
   evidence?: string[];
+  suggested_evidence?: string[];
+  labels?: string[];
+  review_required?: boolean;
   duplicate_group?: string | null;
   overlap_warning?: string | null;
   edited?: boolean;
@@ -302,6 +311,14 @@ export interface BulkProgressPayload {
 export type View = 'auth' | 'setup' | 'main' | 'success' | 'settings' | 'preview';
 export type MainWorkflow = 'home' | 'manual' | 'analysis' | 'tests' | 'bulk';
 
+// Phase 1: Test categories — must be before INITIAL_SESSION
+export const TEST_CATEGORIES = [
+  'Positive', 'Negative', 'Boundary', 'Regression', 'Permission',
+  'Validation', 'API', 'UI', 'Mobile', 'Accessibility', 'Performance',
+] as const;
+
+export const DEFAULT_TEST_CATEGORIES = ['Positive', 'Negative', 'Boundary', 'Regression'];
+
 export const INITIAL_SESSION: TabSession = {
   view: 'main',
   mainWorkflow: 'home',
@@ -316,7 +333,7 @@ export const INITIAL_SESSION: TabSession = {
   coverageScore: null,
   gapAnalysisSummary: null,
   bugGenerationCount: 5,
-  testGenerationTypes: ['Positive', 'Negative', 'Edge', 'Regression'],
+  testGenerationTypes: [...DEFAULT_TEST_CATEGORIES],
   generationSupportingContext: '',
   supportingArtifacts: [],
   manualInputs: [{ text: '', supportingContext: '', supportingArtifacts: [] }],
@@ -373,4 +390,31 @@ export interface Usage {
   limit: number;
   remaining: number;
   plan: string;
+}
+
+// Phase 1: Quality check
+export interface QualityCheckItem {
+  label: string;
+  present: boolean;
+  hint: string;
+}
+
+export interface QualityCheckResult {
+  score: number;
+  missing_items: QualityCheckItem[];
+  hints: string[];
+  summary: string;
+}
+
+// Phase 1: Story analysis
+export interface StoryAnalysis {
+  ac_count: number;
+  estimated_complexity: 'small' | 'medium' | 'large';
+  has_description: boolean;
+  description_length: number;
+  has_acceptance_criteria: boolean;
+  privacy_redaction_active: boolean;
+  content_warnings: string[];
+  selected_categories?: string[] | null;
+  include_description?: boolean;
 }

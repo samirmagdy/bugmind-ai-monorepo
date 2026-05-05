@@ -1,3 +1,4 @@
+import time
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
@@ -15,6 +16,8 @@ from app.schemas.bug import (
     ManualBugGenerationResponse,
     PreviewPreparationRequest,
     PreviewPreparationResponse,
+    QualityCheckRequest,
+    StoryAnalysisRequest,
     SubmitBugsRequest,
     SubmitBugsResponse,
     TestCaseGenerationRequest,
@@ -31,6 +34,8 @@ from app.services.ai.workflows import (
     submit_bugs_response,
 )
 from app.services.subscription.limit_checker import LimitChecker
+from app.services.ai.quality_scorer import score_bug_input
+from app.services.ai.story_analyzer import analyze_story_context
 
 
 router = APIRouter()
@@ -53,7 +58,9 @@ async def generate_bug_report(
 ):
     rate_limiter.check("ai.generate", str(current_user.id), limit=10, window_seconds=60)
     LimitChecker.check_allowed(db, current_user.id)
+    start_time = time.monotonic()
     response = await generate_findings_response(req, db, current_user, include_analysis_summary=True)
+    duration_ms = int((time.monotonic() - start_time) * 1000)
     LimitChecker.record_usage(db, current_user.id, "/generate", 0)
     log_audit(
         "ai.generate",
@@ -63,6 +70,10 @@ async def generate_bug_report(
         project_key=req.project_key,
         issue_type_id=req.issue_type_id,
         request_path=str(request.url.path),
+        generation_type="gap_analysis",
+        output_count=len(response.bugs),
+        duration_ms=duration_ms,
+        success=True,
     )
     return response
 
@@ -76,7 +87,9 @@ async def generate_manual_bug_report(
 ):
     rate_limiter.check("ai.generate", str(current_user.id), limit=10, window_seconds=60)
     LimitChecker.check_allowed(db, current_user.id)
+    start_time = time.monotonic()
     response = await generate_findings_response(req, db, current_user, include_analysis_summary=False)
+    duration_ms = int((time.monotonic() - start_time) * 1000)
     LimitChecker.record_usage(db, current_user.id, "/generate", 0)
     log_audit(
         "ai.generate.manual",
@@ -86,7 +99,10 @@ async def generate_manual_bug_report(
         project_key=req.project_key,
         issue_type_id=req.issue_type_id,
         request_path=str(request.url.path),
-        generated_count=len(response.bugs),
+        generation_type="manual",
+        output_count=len(response.bugs),
+        duration_ms=duration_ms,
+        success=True,
     )
     return response
 
@@ -100,7 +116,9 @@ async def generate_test_suite(
 ):
     rate_limiter.check("ai.test_cases", str(current_user.id), limit=5, window_seconds=60)
     LimitChecker.check_allowed(db, current_user.id)
+    start_time = time.monotonic()
     response = await generate_test_suite_response(req, db, current_user)
+    duration_ms = int((time.monotonic() - start_time) * 1000)
     LimitChecker.record_usage(db, current_user.id, "/test-cases", 0)
     log_audit(
         "ai.test_cases",
@@ -110,9 +128,48 @@ async def generate_test_suite(
         project_key=req.project_key,
         issue_type_id=req.issue_type_id,
         request_path=str(request.url.path),
-        generated_count=len(response.test_cases),
+        generation_type="test_cases",
+        selected_categories=req.test_categories,
+        output_count=len(response.test_cases),
+        duration_ms=duration_ms,
+        success=True,
     )
     return response
+
+
+@router.post("/quality-check")
+async def check_bug_quality(
+    req: QualityCheckRequest,
+    current_user: User = Depends(deps.get_current_user),
+):
+    """Score bug input quality from 0-100 with missing items and hints."""
+    return score_bug_input(
+        description=req.description,
+        steps_to_reproduce=req.steps_to_reproduce,
+        expected_result=req.expected_result,
+        actual_result=req.actual_result,
+        user_description=req.user_description,
+        selected_text=req.selected_text,
+    )
+
+
+@router.post("/analyze-context")
+async def analyze_context(
+    req: StoryAnalysisRequest,
+    current_user: User = Depends(deps.get_current_user),
+):
+    """Lightweight pre-generation story analysis."""
+    analysis = analyze_story_context(
+        summary=req.summary,
+        description=req.description,
+        acceptance_criteria=req.acceptance_criteria,
+        issue_key=req.issue_key,
+    )
+    return {
+        **analysis.model_dump(),
+        "selected_categories": req.test_categories,
+        "include_description": req.include_description,
+    }
 
 
 @router.post("/bulk/test-cases", response_model=BulkTestGenerationResponse)

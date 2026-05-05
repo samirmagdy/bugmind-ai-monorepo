@@ -219,10 +219,16 @@ export const AIProvider: React.FC<{
     expected_result: bug.expected_result || '',
     actual_result: bug.actual_result || '',
     severity: bug.severity || 'Medium',
+    priority: bug.priority || 'Medium',
     confidence: typeof bug.confidence === 'number' ? bug.confidence : 75,
     category: bug.category || 'Functional Gap',
+    environment: bug.environment || undefined,
+    root_cause: bug.root_cause || undefined,
     acceptance_criteria_refs: bug.acceptance_criteria_refs || [],
     evidence: bug.evidence || [],
+    suggested_evidence: bug.suggested_evidence || [],
+    labels: bug.labels || [],
+    review_required: Boolean(bug.review_required),
     duplicate_group: bug.duplicate_group || null,
     overlap_warning: bug.overlap_warning || null,
     edited: false,
@@ -234,12 +240,15 @@ export const AIProvider: React.FC<{
 
   const normalizeFrontendTestCase = useCallback((testCase: TestCase): TestCase => ({
     title: testCase.title || 'Untitled test case',
+    objective: testCase.objective || undefined,
     steps: Array.isArray(testCase.steps) ? testCase.steps.filter(Boolean) : [],
     expected_result: testCase.expected_result || '',
     priority: testCase.priority || 'Medium',
     selected: testCase.selected !== false,
     test_type: testCase.test_type || 'Manual',
     preconditions: testCase.preconditions || '',
+    test_data: testCase.test_data || undefined,
+    review_notes: testCase.review_notes || undefined,
     acceptance_criteria_refs: Array.isArray(testCase.acceptance_criteria_refs) ? testCase.acceptance_criteria_refs : [],
     labels: Array.isArray(testCase.labels) ? testCase.labels : [],
     components: Array.isArray(testCase.components) ? testCase.components : []
@@ -530,8 +539,8 @@ export const AIProvider: React.FC<{
         project_id: projectId,
         issue_type_id: session.selectedIssueType.id,
         issue_type_name: session.selectedIssueType.name,
+        test_categories: session.testGenerationTypes?.length ? session.testGenerationTypes : undefined,
         supporting_context: [
-          session.testGenerationTypes?.length ? `Requested test coverage types: ${session.testGenerationTypes.join(', ')}` : '',
           session.generationSupportingContext,
           buildArtifactContext()
         ].filter(Boolean).join('\n\n')

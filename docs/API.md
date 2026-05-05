@@ -929,9 +929,19 @@ This is the main frontend integration flow used by the Chrome extension.
 ### Auxiliary calls
 
 - `GET /api/v1/ai/usage`
+- `POST /api/v1/ai/quality-check` — Scores bug input quality (0-100) with missing items and hints
+- `POST /api/v1/ai/analyze-context` — Lightweight pre-generation story analysis (AC count, complexity, warnings)
 - `GET /api/v1/settings/ai`
 - `POST /api/v1/settings/ai`
 - `POST /api/v1/jira/users/search`
+
+### Test Categories (Phase 1)
+
+Valid test categories for `test_categories` field:
+
+`Positive`, `Negative`, `Boundary`, `Regression`, `Permission`, `Validation`, `API`, `UI`, `Mobile`, `Accessibility`, `Performance`
+
+Default categories (when `test_categories` is omitted): `Positive`, `Negative`, `Boundary`, `Regression`
 
 ## Data Contracts Summary
 
@@ -944,7 +954,17 @@ This is the main frontend integration flow used by the Chrome extension.
   "steps_to_reproduce": "string",
   "expected_result": "string",
   "actual_result": "string",
-  "severity": "optional string",
+  "severity": "optional string — Critical | High | Medium | Low",
+  "priority": "optional string — Highest | High | Medium | Low | Lowest",
+  "confidence": "optional int — 0-100",
+  "category": "optional string — e.g. Functional Gap, Validation, Edge Case",
+  "environment": "optional string — e.g. Chrome / macOS / Production",
+  "root_cause": "optional string — probable root cause hypothesis",
+  "acceptance_criteria_refs": ["AC1", "Checkout flow"],
+  "evidence": ["Story requires X"],
+  "suggested_evidence": ["Screenshot of error", "Network log"],
+  "labels": ["regression", "checkout"],
+  "review_required": false,
   "extra_fields": {
     "customfield_12345": "any Jira-shaped value"
   }
@@ -974,9 +994,17 @@ This is the main frontend integration flow used by the Chrome extension.
 ```json
 {
   "title": "string",
+  "objective": "optional string — what this test validates",
   "steps": ["step 1", "step 2"],
   "expected_result": "string",
-  "priority": "string"
+  "priority": "string",
+  "test_type": "optional string — Positive, Negative, etc.",
+  "preconditions": "optional string",
+  "test_data": "optional string — specific data needed for the test",
+  "review_notes": "optional string — assumptions or concerns",
+  "acceptance_criteria_refs": ["AC1"],
+  "labels": ["checkout"],
+  "components": ["Payments"]
 }
 ```
 
