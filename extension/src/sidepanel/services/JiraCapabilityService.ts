@@ -1,4 +1,4 @@
-import { IssueType, JiraCapabilityFieldSchema, JiraCapabilityProfile, JiraFieldOption, JiraProject, TabSession } from '../types';
+import { IssueData, IssueType, JiraCapabilityFieldSchema, JiraCapabilityProfile, JiraFieldOption, JiraProject, TabSession } from '../types';
 
 type JiraAuthType = 'cloud' | 'server';
 
@@ -19,6 +19,21 @@ type RawField = {
   required?: boolean;
   schema?: { type?: string; system?: string; custom?: string };
   allowedValues?: unknown[];
+};
+
+export type JiraReadinessItem = {
+  key: string;
+  label: string;
+  ok: boolean;
+  blocking: boolean;
+  detail?: string;
+};
+
+export type JiraCapabilityFeature = {
+  key: string;
+  label: string;
+  enabled: boolean;
+  detail: string;
 };
 
 function normalizeBaseUrl(url: string): string {
@@ -316,6 +331,24 @@ export class JiraCapabilityService {
     return updated;
   }
 
+  async saveSyncStrategy(profile: JiraCapabilityProfile, syncStrategy: JiraCapabilityProfile['syncStrategy']): Promise<JiraCapabilityProfile> {
+    const updated: JiraCapabilityProfile = {
+      ...profile,
+      syncStrategy,
+    };
+    await this.save(updated);
+    return updated;
+  }
+
+  async saveSourceStoryMapping(profile: JiraCapabilityProfile, sourceStoryMapping: JiraCapabilityProfile['sourceStoryMapping']): Promise<JiraCapabilityProfile> {
+    const updated: JiraCapabilityProfile = {
+      ...profile,
+      sourceStoryMapping,
+    };
+    await this.save(updated);
+    return updated;
+  }
+
   private async fetchProjects(authType: JiraAuthType, warnings: string[]): Promise<JiraProject[]> {
     const raw = authType === 'cloud'
       ? await this.optionalJson<Record<string, unknown>>('/rest/api/3/project/search', warnings, 'Project search unavailable')
@@ -444,6 +477,163 @@ export class JiraCapabilityService {
 }
 
 export const jiraCapabilityService = new JiraCapabilityService();
+
+export function isEmptyCapabilityValue(value: unknown): boolean {
+  return value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0);
+}
+
+export function getMissingRequiredTargetFieldKeys(
+  profile: JiraCapabilityProfile | null | undefined,
+  defaults: Record<string, unknown> = {}
+): string[] {
+  if (!profile) return [];
+  return profile.targetTestCreateFields.requiredFields
+    .filter(fieldKey => !['project', 'issuetype', 'summary', 'description'].includes(fieldKey))
+    .filter(fieldKey => isEmptyCapabilityValue(defaults[fieldKey]));
+}
+
+export function getMappedSourceStoryFields(profile: JiraCapabilityProfile | null | undefined): Array<{ key: keyof JiraCapabilityProfile['sourceStoryMapping']; label: string; fieldId?: string }> {
+  if (!profile) return [];
+  return [
+    { key: 'acceptanceCriteria', label: 'Acceptance Criteria', fieldId: profile.sourceStoryMapping.acceptanceCriteria },
+    { key: 'mainFlow', label: 'Main Flow', fieldId: profile.sourceStoryMapping.mainFlow },
+    { key: 'alternativeFlow', label: 'Alternative Flow', fieldId: profile.sourceStoryMapping.alternativeFlow },
+    { key: 'businessRules', label: 'Business Rules', fieldId: profile.sourceStoryMapping.businessRules },
+  ];
+}
+
+export function buildJiraReadinessItems(
+  profile: JiraCapabilityProfile | null | undefined,
+  defaults: Record<string, unknown> = {},
+  hasXrayCloudCredentials = false
+): JiraReadinessItem[] {
+  if (!profile) return [];
+  const missingRequired = getMissingRequiredTargetFieldKeys(profile, defaults);
+  const mappedSources = getMappedSourceStoryFields(profile).filter(item => item.fieldId).length;
+  const requiresCloudCredentials = profile.xray.mode === 'xray-cloud';
+
+  return [
+    { key: 'connection', label: 'Jira connected', ok: profile.connection.connected, blocking: true },
+    { key: 'project', label: 'Project selected', ok: Boolean(profile.selectedProject), blocking: true },
+    { key: 'browse', label: 'Can read stories', ok: profile.permissions.canBrowse, blocking: true },
+    { key: 'create', label: 'Can create Test issues', ok: profile.permissions.canCreateIssues, blocking: true },
+    { key: 'link', label: 'Can link Tests to Stories', ok: profile.permissions.canLinkIssues, blocking: false },
+    { key: 'issueType', label: 'Test issue type found', ok: Boolean(profile.issueTypes.test), blocking: true },
+    {
+      key: 'requiredDefaults',
+      label: 'Required defaults configured',
+      ok: missingRequired.length === 0,
+      blocking: true,
+      detail: missingRequired.map(fieldKey => profile.targetTestCreateFields.fieldSchemas[fieldKey]?.name || fieldKey).join(', '),
+    },
+    { key: 'sourceFields', label: 'Source fields mapped', ok: mappedSources > 0, blocking: false, detail: mappedSources ? `${mappedSources} mapped` : 'Description only' },
+    { key: 'xrayMode', label: 'Xray mode detected', ok: profile.xray.mode !== 'unknown', blocking: false, detail: profile.xray.mode },
+    {
+      key: 'xrayCloudCredentials',
+      label: 'Xray Cloud credentials',
+      ok: !requiresCloudCredentials || hasXrayCloudCredentials,
+      blocking: requiresCloudCredentials,
+      detail: requiresCloudCredentials ? (hasXrayCloudCredentials ? 'Configured' : 'Required for native Cloud publish') : 'Not required',
+    },
+  ];
+}
+
+export function getJiraReadinessScore(items: JiraReadinessItem[]): number | null {
+  if (!items.length) return null;
+  return Math.round((items.filter(item => item.ok).length / items.length) * 100);
+}
+
+export function getBlockingReadinessFailures(items: JiraReadinessItem[]): JiraReadinessItem[] {
+  return items.filter(item => item.blocking && !item.ok);
+}
+
+export function buildCapabilityFeatures(
+  profile: JiraCapabilityProfile | null | undefined,
+  hasXrayCloudCredentials = false
+): JiraCapabilityFeature[] {
+  if (!profile) return [];
+  const mappedSources = getMappedSourceStoryFields(profile).filter(item => item.fieldId).length;
+  return [
+    {
+      key: 'storyExtraction',
+      label: 'Source story enrichment',
+      enabled: profile.permissions.canBrowse && mappedSources > 0,
+      detail: mappedSources > 0 ? `${mappedSources} story field mappings active` : 'Using summary and description only',
+    },
+    {
+      key: 'dynamicTestPayload',
+      label: 'Dynamic Test payload',
+      enabled: Object.keys(profile.targetTestCreateFields.fieldSchemas).length > 0,
+      detail: `${profile.targetTestCreateFields.requiredFields.length} required fields detected`,
+    },
+    {
+      key: 'nativeSteps',
+      label: 'Native Xray steps',
+      enabled: profile.xray.supportsNativeSteps,
+      detail: profile.xray.supportsNativeSteps ? 'Raven step API available' : `Fallback: ${profile.syncStrategy.fallbackWhenNativeStepsFail}`,
+    },
+    {
+      key: 'manualStepsField',
+      label: 'Manual steps field fallback',
+      enabled: profile.xray.supportsManualStepsField,
+      detail: profile.xray.manualStepsFieldId || 'Not detected',
+    },
+    {
+      key: 'repositoryFolders',
+      label: 'Repository folders',
+      enabled: profile.xray.supportsRepositoryFolders,
+      detail: profile.xray.supportsRepositoryFolders ? 'Folder publish enabled' : 'Folder path kept as metadata only',
+    },
+    {
+      key: 'issueLinking',
+      label: 'Story linking',
+      enabled: profile.permissions.canLinkIssues,
+      detail: `${profile.linking.preferredLinkType} (${profile.linking.outward}/${profile.linking.inward})`,
+    },
+    {
+      key: 'cloudCredentials',
+      label: 'Xray Cloud native publish',
+      enabled: profile.xray.mode !== 'xray-cloud' || hasXrayCloudCredentials,
+      detail: profile.xray.mode === 'xray-cloud' ? (hasXrayCloudCredentials ? 'Credentials configured' : 'Needs Xray Cloud API credentials') : 'Not a Cloud-native mode',
+    },
+  ];
+}
+
+export function buildXrayTargetDefaults(profile: JiraCapabilityProfile | null | undefined, session: Pick<TabSession, 'xrayFieldDefaults' | 'issueData'>): Record<string, unknown> {
+  const issueData = session.issueData;
+  const inheritedVersions = profile?.syncStrategy.inheritVersions ? (issueData?.fixVersions || []) : [];
+  return {
+    ...session.xrayFieldDefaults,
+    ...(inheritedVersions.length > 0 ? { fixVersions: inheritedVersions.map(name => ({ name })) } : {}),
+  };
+}
+
+export function buildXrayPayloadPreview(profile: JiraCapabilityProfile | null | undefined, session: Pick<TabSession, 'issueData' | 'xrayTargetProjectKey' | 'xrayTargetProjectId' | 'xrayTestIssueTypeName' | 'xrayLinkType' | 'xrayFolderPath' | 'xrayFieldDefaults'>) {
+  if (!profile || !session.issueData) return null;
+  return {
+    project: session.xrayTargetProjectKey || profile.selectedProject?.key || session.xrayTargetProjectId,
+    issuetype: profile.issueTypes.test?.id || session.xrayTestIssueTypeName,
+    linkType: profile.linking.preferredLinkType || session.xrayLinkType,
+    folderPath: session.xrayFolderPath || session.issueData.key,
+    xrayMode: profile.xray.mode,
+    fallback: profile.syncStrategy.fallbackWhenNativeStepsFail,
+    fields: Object.fromEntries(
+      Object.entries(session.xrayFieldDefaults)
+        .filter(([, value]) => !isEmptyCapabilityValue(value))
+        .map(([key, value]) => [profile.targetTestCreateFields.fieldSchemas[key]?.name || key, value])
+    ),
+    inherited: {
+      labels: profile.syncStrategy.inheritLabels ? session.issueData.labels || [] : [],
+      components: profile.syncStrategy.inheritComponents ? session.issueData.components || [] : [],
+      fixVersions: profile.syncStrategy.inheritVersions ? session.issueData.fixVersions || [] : [],
+    },
+  };
+}
+
+export function isIssueInProfileProject(issueData: IssueData | null | undefined, profile: JiraCapabilityProfile | null | undefined): boolean {
+  if (!issueData || !profile?.selectedProject?.key) return true;
+  return issueData.key.split('-')[0]?.toUpperCase() === profile.selectedProject.key.toUpperCase();
+}
 
 export function buildSessionUpdatesFromJiraProfile(
   profile: JiraCapabilityProfile,

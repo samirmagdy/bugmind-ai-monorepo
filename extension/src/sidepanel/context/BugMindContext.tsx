@@ -28,7 +28,7 @@ import { AIProvider } from './AIProvider';
 import { useAuthContext } from '../hooks/useAuthContext';
 import { useAIContext } from '../hooks/useAIContext';
 import { useJiraContext } from '../hooks/useJiraContext';
-import { getProfileProjectParams } from '../services/JiraCapabilityService';
+import { getMappedSourceStoryFields, getProfileProjectParams } from '../services/JiraCapabilityService';
 
 type BackgroundMessage =
   | { type: 'CONTEXT_UPDATED'; tabId: number; context: ReturnType<typeof useSession>['session'] }
@@ -97,13 +97,7 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
     const fields = rawIssue.fields && typeof rawIssue.fields === 'object'
       ? rawIssue.fields as Record<string, unknown>
       : {};
-    const mapping = profile.sourceStoryMapping;
-    const sections = [
-      { label: 'Acceptance Criteria', fieldId: mapping.acceptanceCriteria },
-      { label: 'Main Flow', fieldId: mapping.mainFlow },
-      { label: 'Alternative Flow', fieldId: mapping.alternativeFlow },
-      { label: 'Business Rules', fieldId: mapping.businessRules },
-    ]
+    const sections = getMappedSourceStoryFields(profile)
       .map(section => {
         const text = section.fieldId ? stringifyJiraFieldValue(fields[section.fieldId]).trim() : '';
         return text ? `${section.label}:\n${text}` : '';

@@ -25,7 +25,7 @@ import {
   DuplicateLinkRequestPayload,
 } from '../services/contracts';
 import { AIContext } from './ai-context';
-import { getProfileProjectParams } from '../services/JiraCapabilityService';
+import { buildJiraReadinessItems, buildXrayTargetDefaults, getBlockingReadinessFailures, getMissingRequiredTargetFieldKeys, getProfileProjectParams } from '../services/JiraCapabilityService';
 
 export const AIProvider: React.FC<{
   children: React.ReactNode,
@@ -785,21 +785,28 @@ export const AIProvider: React.FC<{
       profile?.issueTypes.test ||
       null;
     const linkType = profile?.linking.preferredLinkType || session.xrayLinkType || 'Tests';
-    const profileCanPublish = profile ? profile.readiness.canSyncToXray || profile.readiness.missingRequiredFields.length === 0 : session.xrayPublishSupported;
-    if (!session.xrayPublishSupported && !profileCanPublish) {
-      updateSession({ error: session.xrayUnsupportedReason || 'Xray publishing is not available for this Jira connection.' }, currentTabId);
+    const activeConn = session.connections?.find((c) => c.id === session.jiraConnectionId);
+    const readinessFailures = profile
+      ? getBlockingReadinessFailures(buildJiraReadinessItems(profile, session.xrayFieldDefaults, Boolean(activeConn?.has_xray_cloud_credentials)))
+      : [];
+    const profileCanPublish = profile ? readinessFailures.length === 0 : session.xrayPublishSupported;
+    if (!profileCanPublish) {
+      if (readinessFailures.some(item => item.key === 'xrayCloudCredentials')) {
+        updateSession({ showXrayCloudWizard: true, xrayCloudWizardMode: 'publish' }, currentTabId);
+        return;
+      }
+      updateSession({
+        error: readinessFailures.length
+          ? `Xray publishing is blocked by: ${readinessFailures.map(item => item.label).join(', ')}`
+          : session.xrayUnsupportedReason || 'Xray publishing is not available for this Jira connection.'
+      }, currentTabId);
       return;
     }
     if (!targetProjectId) {
       updateSession({ error: 'Please choose an Xray target project before publishing.' }, currentTabId);
       return;
     }
-    const missingTargetDefaults = (profile?.targetTestCreateFields.requiredFields || [])
-      .filter((fieldKey) => !['project', 'issuetype', 'summary', 'description'].includes(fieldKey))
-      .filter((fieldKey) => {
-        const value = session.xrayFieldDefaults[fieldKey];
-        return value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0);
-      });
+    const missingTargetDefaults = getMissingRequiredTargetFieldKeys(profile, session.xrayFieldDefaults);
     if (missingTargetDefaults.length > 0) {
       const labels = missingTargetDefaults.map(fieldKey => profile?.targetTestCreateFields.fieldSchemas[fieldKey]?.name || fieldKey);
       updateSession({ error: `Required Xray Test defaults missing: ${labels.join(', ')}` }, currentTabId);
@@ -811,7 +818,6 @@ export const AIProvider: React.FC<{
       return;
     }
 
-    const activeConn = session.connections?.find((c) => c.id === session.jiraConnectionId);
     if (session.xrayPublishMode === 'xray_cloud' && !activeConn?.has_xray_cloud_credentials) {
       updateSession({ showXrayCloudWizard: true, xrayCloudWizardMode: 'publish' }, currentTabId);
       return;
@@ -823,14 +829,9 @@ export const AIProvider: React.FC<{
     try {
       const shouldInheritLabels = profile?.syncStrategy.inheritLabels ?? true;
       const shouldInheritComponents = profile?.syncStrategy.inheritComponents ?? true;
-      const shouldInheritVersions = profile?.syncStrategy.inheritVersions ?? true;
       const inheritedLabels = shouldInheritLabels ? (session.issueData.labels || []) : [];
       const inheritedComponents = shouldInheritComponents ? (session.issueData.components || []) : [];
-      const inheritedVersions = shouldInheritVersions ? (session.issueData.fixVersions || []) : [];
-      const targetFieldDefaults = {
-        ...session.xrayFieldDefaults,
-        ...(inheritedVersions.length > 0 ? { fixVersions: inheritedVersions.map(name => ({ name })) } : {}),
-      };
+      const targetFieldDefaults = buildXrayTargetDefaults(profile, session);
       const payload: XrayPublishRequestPayload = {
         jira_connection_id: session.jiraConnectionId,
         story_issue_key: session.issueData.key,

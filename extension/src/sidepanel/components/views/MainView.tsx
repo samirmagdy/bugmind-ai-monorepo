@@ -12,7 +12,16 @@ import { ActionButton, SurfaceCard, StatusBadge, StatusPanel } from '../common/D
 import LuxurySearchableSelect, { SelectOption, SelectValue } from '../common/LuxurySearchableSelect';
 import { TIMEOUTS } from '../../constants';
 import { useI18n } from '../../i18n';
-import { getProfileProjectParams, jiraCapabilityService } from '../../services/JiraCapabilityService';
+import {
+  buildCapabilityFeatures,
+  buildJiraReadinessItems,
+  buildXrayPayloadPreview,
+  getJiraReadinessScore,
+  getMappedSourceStoryFields,
+  getMissingRequiredTargetFieldKeys,
+  getProfileProjectParams,
+  jiraCapabilityService
+} from '../../services/JiraCapabilityService';
 
 const HIDDEN_SYSTEM_FIELD_KEYS = new Set([
   'summary',
@@ -162,33 +171,22 @@ const MainView: React.FC = () => {
   const hasStructuredCriteria = acceptanceCriteria.length > 120 || acceptanceCriteria.includes('\n') || acceptanceCriteria.includes('-');
   const recommendedWorkflow = !session.issueData ? null : hasStructuredCriteria ? 'tests' : (acceptanceCriteria.length < 48 && descriptionText.length > 0 ? 'analysis' : 'manual');
   const issueTypeLabel = session.issueData?.typeName?.trim() || 'Issue';
+  const activeJiraConnection = session.connections?.find(connection => connection.id === session.jiraConnectionId);
   const targetTestFieldEntries = session.jiraCapabilityProfile
     ? Object.entries(session.jiraCapabilityProfile.targetTestCreateFields.fieldSchemas)
       .filter(([fieldKey]) => !['project', 'issuetype', 'summary', 'description'].includes(fieldKey))
       .map(([key, schema]) => ({ key, schema, required: session.jiraCapabilityProfile?.targetTestCreateFields.requiredFields.includes(key) || false }))
       .sort((a, b) => Number(b.required) - Number(a.required) || a.schema.name.localeCompare(b.schema.name))
     : [];
-  const missingXrayRequiredDefaults = session.jiraCapabilityProfile
-    ? session.jiraCapabilityProfile.targetTestCreateFields.requiredFields
-      .filter(fieldKey => !['project', 'issuetype', 'summary', 'description'].includes(fieldKey))
-      .filter(fieldKey => {
-        const value = session.xrayFieldDefaults[fieldKey];
-        return value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0);
-      })
-    : [];
-  const readinessChecks = session.jiraCapabilityProfile ? [
-    { label: 'Jira connected', ok: session.jiraCapabilityProfile.connection.connected },
-    { label: 'Project selected', ok: Boolean(session.jiraCapabilityProfile.selectedProject) },
-    { label: 'Can read stories', ok: session.jiraCapabilityProfile.permissions.canBrowse },
-    { label: 'Can create Test issues', ok: session.jiraCapabilityProfile.permissions.canCreateIssues },
-    { label: 'Can link Tests to Stories', ok: session.jiraCapabilityProfile.permissions.canLinkIssues },
-    { label: 'Test issue type found', ok: Boolean(session.jiraCapabilityProfile.issueTypes.test) },
-    { label: 'Required defaults configured', ok: missingXrayRequiredDefaults.length === 0 },
-    { label: 'Xray mode detected', ok: session.jiraCapabilityProfile.xray.mode !== 'unknown' },
-  ] : [];
-  const readinessScore = readinessChecks.length
-    ? Math.round((readinessChecks.filter(item => item.ok).length / readinessChecks.length) * 100)
-    : null;
+  const missingXrayRequiredDefaults = getMissingRequiredTargetFieldKeys(session.jiraCapabilityProfile, session.xrayFieldDefaults);
+  const readinessChecks = buildJiraReadinessItems(
+    session.jiraCapabilityProfile,
+    session.xrayFieldDefaults,
+    Boolean(activeJiraConnection?.has_xray_cloud_credentials)
+  );
+  const readinessScore = getJiraReadinessScore(readinessChecks);
+  const capabilityFeatures = buildCapabilityFeatures(session.jiraCapabilityProfile, Boolean(activeJiraConnection?.has_xray_cloud_credentials));
+  const mappedSourceStoryFields = getMappedSourceStoryFields(session.jiraCapabilityProfile);
   const canGenerateFromProfile = !session.jiraCapabilityProfile || session.jiraCapabilityProfile.permissions.canBrowse;
   const canCreateFromProfile = !session.jiraCapabilityProfile || session.jiraCapabilityProfile.permissions.canCreateIssues;
   const saveXrayDefault = (fieldKey: string, value: unknown) => {
@@ -203,23 +201,23 @@ const MainView: React.FC = () => {
       });
     }
   };
-  const xrayPayloadPreview = session.jiraCapabilityProfile && session.issueData ? {
-    project: session.xrayTargetProjectKey || session.jiraCapabilityProfile.selectedProject?.key || session.xrayTargetProjectId,
-    issuetype: session.jiraCapabilityProfile.issueTypes.test?.id || session.xrayTestIssueTypeName,
-    linkType: session.jiraCapabilityProfile.linking.preferredLinkType || session.xrayLinkType,
-    folderPath: session.xrayFolderPath || session.issueData.key,
-    xrayMode: session.jiraCapabilityProfile.xray.mode,
-    fields: Object.fromEntries(
-      Object.entries(session.xrayFieldDefaults)
-        .filter(([, value]) => value !== undefined && value !== null && value !== '')
-        .map(([key, value]) => [session.jiraCapabilityProfile?.targetTestCreateFields.fieldSchemas[key]?.name || key, value])
-    ),
-    inherited: {
-      labels: session.jiraCapabilityProfile.syncStrategy.inheritLabels ? session.issueData.labels || [] : [],
-      components: session.jiraCapabilityProfile.syncStrategy.inheritComponents ? session.issueData.components || [] : [],
-      fixVersions: session.jiraCapabilityProfile.syncStrategy.inheritVersions ? session.issueData.fixVersions || [] : [],
-    },
-  } : null;
+  const saveSyncStrategy = (updates: Partial<NonNullable<typeof session.jiraCapabilityProfile>['syncStrategy']>) => {
+    const profile = session.jiraCapabilityProfile;
+    if (!profile) return;
+    const nextSyncStrategy = {
+      ...profile.syncStrategy,
+      ...updates
+    };
+    const updatedProfile = {
+      ...profile,
+      syncStrategy: nextSyncStrategy
+    };
+    updateSession({ jiraCapabilityProfile: updatedProfile });
+    void jiraCapabilityService.saveSyncStrategy(profile, nextSyncStrategy).then((savedProfile) => {
+      updateSession({ jiraCapabilityProfile: savedProfile });
+    });
+  };
+  const xrayPayloadPreview = buildXrayPayloadPreview(session.jiraCapabilityProfile, session);
   const recommendationLabel = !session.issueData
     ? 'Open a Jira issue to enable all workflows.'
     : recommendedWorkflow === 'tests'
@@ -1556,12 +1554,96 @@ const MainView: React.FC = () => {
                         </div>
                         <div className="grid grid-cols-2 gap-2">
                           {readinessChecks.map(check => (
-                            <div key={check.label} className="flex items-center gap-2 text-[11px] text-[var(--text-secondary)]">
+                            <div key={check.key} className="flex items-center gap-2 text-[11px] text-[var(--text-secondary)]" title={check.detail}>
                               <span className={`h-1.5 w-1.5 rounded-full ${check.ok ? 'bg-[var(--success)]' : 'bg-[var(--error)]'}`} />
                               <span>{check.label}</span>
                             </div>
                           ))}
                         </div>
+                      </SurfaceCard>
+                    )}
+
+                    {session.jiraCapabilityProfile && (
+                      <SurfaceCard className="space-y-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <div className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Capability Automation</div>
+                            <div className="text-[11px] text-[var(--text-secondary)]">Detected Jira/Xray capabilities now drive extraction, payloads, linking, and fallbacks.</div>
+                          </div>
+                          <StatusBadge tone={capabilityFeatures.every(feature => feature.enabled) ? 'success' : 'warning'}>
+                            {capabilityFeatures.filter(feature => feature.enabled).length}/{capabilityFeatures.length} Active
+                          </StatusBadge>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-2">
+                          {capabilityFeatures.map(feature => (
+                            <div key={feature.key} className="flex items-start justify-between gap-3 rounded-[0.85rem] border border-[var(--border-soft)] bg-[var(--surface-soft)] px-3 py-2">
+                              <div>
+                                <div className="text-[11px] font-bold text-[var(--text-primary)]">{feature.label}</div>
+                                <div className="text-[10px] text-[var(--text-muted)]">{feature.detail}</div>
+                              </div>
+                              <StatusBadge tone={feature.enabled ? 'success' : 'warning'}>
+                                {feature.enabled ? 'On' : 'Needs Setup'}
+                              </StatusBadge>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <label className="flex items-center gap-2 rounded-[0.85rem] border border-[var(--border-soft)] bg-[var(--bg-input)] px-3 py-2 text-[11px] text-[var(--text-secondary)]">
+                            <input
+                              type="checkbox"
+                              checked={session.jiraCapabilityProfile.syncStrategy.inheritLabels}
+                              onChange={event => saveSyncStrategy({ inheritLabels: event.target.checked })}
+                            />
+                            Inherit labels
+                          </label>
+                          <label className="flex items-center gap-2 rounded-[0.85rem] border border-[var(--border-soft)] bg-[var(--bg-input)] px-3 py-2 text-[11px] text-[var(--text-secondary)]">
+                            <input
+                              type="checkbox"
+                              checked={session.jiraCapabilityProfile.syncStrategy.inheritComponents}
+                              onChange={event => saveSyncStrategy({ inheritComponents: event.target.checked })}
+                            />
+                            Inherit components
+                          </label>
+                          <label className="flex items-center gap-2 rounded-[0.85rem] border border-[var(--border-soft)] bg-[var(--bg-input)] px-3 py-2 text-[11px] text-[var(--text-secondary)]">
+                            <input
+                              type="checkbox"
+                              checked={session.jiraCapabilityProfile.syncStrategy.inheritVersions}
+                              onChange={event => saveSyncStrategy({ inheritVersions: event.target.checked })}
+                            />
+                            Inherit versions
+                          </label>
+                          <div className="rounded-[0.85rem] border border-[var(--border-soft)] bg-[var(--bg-input)] px-3 py-2 text-[11px] text-[var(--text-secondary)]">
+                            <div className="font-bold text-[var(--text-primary)]">Transition permission</div>
+                            <div>{session.jiraCapabilityProfile.permissions.canTransitionIssues ? 'Available when workflow automation is enabled' : 'Not available for this user'}</div>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-2">
+                          <div className="space-y-1.5">
+                            <label className="context-label uppercase tracking-wider block ml-1">Native Steps Fallback</label>
+                            <select
+                              value={session.jiraCapabilityProfile.syncStrategy.fallbackWhenNativeStepsFail}
+                              onChange={event => saveSyncStrategy({ fallbackWhenNativeStepsFail: event.target.value as 'manualStepsField' | 'description' })}
+                              className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-[0.9rem] px-3 py-2.5 text-xs text-[var(--text-primary)] outline-none"
+                            >
+                              <option value="manualStepsField" disabled={!session.jiraCapabilityProfile.xray.supportsManualStepsField}>Manual steps field</option>
+                              <option value="description">Description fallback</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        {mappedSourceStoryFields.length > 0 && (
+                          <div className="grid grid-cols-2 gap-2">
+                            {mappedSourceStoryFields.map(field => (
+                              <div key={field.key} className="rounded-[0.85rem] border border-[var(--border-soft)] bg-[var(--bg-input)] px-3 py-2">
+                                <div className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">{field.label}</div>
+                                <div className="text-[11px] text-[var(--text-secondary)] truncate">{field.fieldId || 'Not detected'}</div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </SurfaceCard>
                     )}
 
