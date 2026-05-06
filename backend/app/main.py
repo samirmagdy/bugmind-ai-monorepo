@@ -3,6 +3,7 @@ import traceback
 import time
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
+from typing import Optional
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
@@ -29,6 +30,7 @@ REQUIRED_COLUMNS = {
     "password_reset_codes": {"email", "code_hash", "expires_at", "used_at"},
 }
 APP_STARTED_AT = time.time()
+MAX_REQUEST_BODY_SIZE = 5 * 1024 * 1024
 
 
 def _normalize_request_origin(raw_origin: str) -> str:
@@ -38,6 +40,27 @@ def _normalize_request_origin(raw_origin: str) -> str:
     if parsed.scheme and parsed.netloc:
         return f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
     return raw_origin.rstrip("/")
+
+
+def _validate_content_length(content_length: Optional[str]) -> None:
+    if not content_length:
+        return
+    try:
+        request_size = int(content_length)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid Content-Length header")
+    if request_size < 0:
+        raise HTTPException(status_code=400, detail="Invalid Content-Length header")
+    if request_size > MAX_REQUEST_BODY_SIZE:
+        raise HTTPException(status_code=413, detail="Request payload too large (max 5MB)")
+
+
+def _internal_error_detail(exc: Exception) -> dict[str, str]:
+    return {
+        "code": "INTERNAL_ERROR",
+        "message": "An unexpected error occurred" if settings.is_production else str(exc),
+        "user_action": "An internal error occurred. Please contact support and provide the trace ID.",
+    }
 
 
 @asynccontextmanager
@@ -90,13 +113,7 @@ if settings.allowed_hosts_list:
 
 @app.middleware("http")
 async def limit_request_size(request: Request, call_next):
-    # Limit body size to 5MB (5 * 1024 * 1024 bytes)
-    MAX_SIZE = 5 * 1024 * 1024
-    
-    content_length = request.headers.get("Content-Length")
-    if content_length and int(content_length) > MAX_SIZE:
-        raise HTTPException(status_code=413, detail="Request payload too large (max 5MB)")
-    
+    _validate_content_length(request.headers.get("Content-Length"))
     return await call_next(request)
 
 @app.middleware("http")
@@ -129,7 +146,7 @@ async def add_security_headers(request: Request, call_next):
     except Exception as e:
         # Fallback for errors in middleware or before exception handlers
         logger.exception("Exception in middleware chain: %s", str(e))
-        error_body = build_error_response(500, str(e))
+        error_body = build_error_response(500, _internal_error_detail(e))
         return JSONResponse(
             status_code=500,
             content=error_body.model_dump(),

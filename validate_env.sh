@@ -23,17 +23,26 @@ fi
 echo ""
 echo "Checking environment variables in root .env..."
 
+mask_env_value() {
+    local key="$1"
+    if grep -q "^${key}=" .env; then
+        echo "  ${key}=<set>"
+    else
+        echo "  Not set"
+    fi
+}
+
 if [ -f ".env" ]; then
     echo "DATABASE_URL:"
-    grep "DATABASE_URL=" .env | head -1 || echo "  Not set"
+    mask_env_value "DATABASE_URL"
     
     echo ""
     echo "OPENROUTER_API_KEY:"
-    grep "OPENROUTER_API_KEY=" .env | head -1 || echo "  Not set"
+    mask_env_value "OPENROUTER_API_KEY"
     
     echo ""
     echo "SECRET_KEY:"
-    grep "SECRET_KEY=" .env | head -1 || echo "  Not set"
+    mask_env_value "SECRET_KEY"
 fi
 
 echo ""

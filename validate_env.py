@@ -13,8 +13,26 @@ sys.path.insert(0, str(Path(__file__).parent / "backend"))
 
 from app.core.config import settings
 
+SENSITIVE_VARS = {
+    "DATABASE_URL",
+    "SECRET_KEY",
+    "ENCRYPTION_KEY",
+    "OPENROUTER_API_KEY",
+    "STRIPE_SECRET_KEY",
+    "STRIPE_WEBHOOK_SECRET",
+    "XRAY_CLOUD_CLIENT_SECRET",
+    "SMTP_PASSWORD",
+}
+
+def mask_value(var_name, value):
+    if not value:
+        return "(not set)"
+    if var_name in SENSITIVE_VARS:
+        return "<set>"
+    return value[:20] + "..." if len(value) > 20 else value
+
 def check_env(var_name, required=False, pattern=None):
-    value = os.environ.get(var_name, "")
+    value = str(getattr(settings, var_name, "") or os.environ.get(var_name, "") or "")
     status = "✓" if value else "✗" if required else "○"
     
     if required and not value:
@@ -23,26 +41,26 @@ def check_env(var_name, required=False, pattern=None):
     
     if pattern and value:
         if re.match(pattern, value):
-            print(f"{status} {var_name}: {value[:20]}..." if len(value) > 20 else f"{status} {var_name}: {value}")
+            print(f"{status} {var_name}: {mask_value(var_name, value)}")
             return True
         else:
-            print(f"{status} {var_name}: {value[:20]}..." if len(value) > 20 else f"{status} {var_name}: {value}")
+            print(f"{status} {var_name}: {mask_value(var_name, value)}")
             print(f"    WARNING: Value doesn't match expected pattern")
-            return False
+            return not required
     
     if value:
-        print(f"{status} {var_name}: {value[:20]}..." if len(value) > 20 else f"{status} {var_name}: {value}")
+        print(f"{status} {var_name}: {mask_value(var_name, value)}")
     else:
         print(f"{status} {var_name}: (not set)")
     
-    return True if not required else False
+    return True
 
 def main():
     print("=" * 60)
     print("Environment Configuration Validation")
     print("=" * 60)
     print(f"Current Environment: {settings.ENVIRONMENT}")
-    print(f"Current DATABASE_URL: {settings.DATABASE_URL[:30]}..." if len(settings.DATABASE_URL) > 30 else f"Current DATABASE_URL: {settings.DATABASE_URL}")
+    print(f"Current DATABASE_URL: {mask_value('DATABASE_URL', settings.DATABASE_URL)}")
     print()
     
     all_good = True
