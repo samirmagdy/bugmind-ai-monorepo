@@ -21,11 +21,13 @@ import OnboardingTour from './components/common/OnboardingTour';
 import { ActionButton, StatusPanel } from './components/common/DesignSystem';
 import { XrayCloudWizard } from './components/views/XrayCloudWizard';
 import { APP_VERSION } from './constants';
+import { useI18n } from './i18n';
 
 export default function App() {
   const { 
     session, updateSession, auth, initializing, checkAuth, refreshIssue, debug, handleLogout, sessionHydrated 
   } = useBugMind();
+  const { t, dir } = useI18n();
   const debugLog = debug.log;
   const themeClass = session.theme === 'dark' ? 'theme-dark' : 'theme-light';
   
@@ -36,13 +38,15 @@ export default function App() {
     document.documentElement.classList.remove('theme-light', 'theme-dark');
     document.body.classList.remove('theme-light', 'theme-dark');
     document.documentElement.classList.add(themeClass);
+    document.documentElement.dir = dir;
+    document.documentElement.lang = session.locale || 'en';
     document.body.classList.add(themeClass);
 
     return () => {
       document.documentElement.classList.remove(themeClass);
       document.body.classList.remove(themeClass);
     };
-  }, [themeClass]);
+  }, [dir, session.locale, themeClass]);
 
   useEffect(() => {
     if (!auth.storageLoaded) return;
@@ -154,7 +158,7 @@ export default function App() {
                     <p>{translated.description}</p>
                     {translated.userAction && (
                       <p className="font-bold text-[var(--text-primary)]">
-                        Action: {translated.userAction}
+                        {t('common.action')}: {translated.userAction}
                       </p>
                     )}
                     {translated.traceId && (
@@ -181,7 +185,7 @@ export default function App() {
                     variant="secondary"
                     className="h-8 px-3 text-xs"
                   >
-                    Dismiss
+                    {t('common.dismiss')}
                   </ActionButton>
                 )}
               />
@@ -192,7 +196,7 @@ export default function App() {
             <StatusPanel
               icon={CheckCircle2}
               tone="success"
-              title="Success"
+              title={t('common.success')}
               description={session.success}
               action={(
                 <ActionButton
@@ -200,7 +204,7 @@ export default function App() {
                   variant="secondary"
                   className="h-8 px-3 text-xs"
                 >
-                  Dismiss
+                  {t('common.dismiss')}
                 </ActionButton>
               )}
             />
@@ -222,7 +226,7 @@ export default function App() {
           onClick={() => debug.setShow(!debug.show)}
           className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-[0.16em] transition-colors opacity-75 ${debug.show ? 'bg-[var(--surface-soft)] text-[var(--primary-blue)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:opacity-100'}`}
         >
-          Debug Log
+          {t('footer.debug')}
         </button>
         
         <div className="flex items-center gap-3">
@@ -231,7 +235,7 @@ export default function App() {
               onClick={handleLogout}
               className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)] hover:text-[var(--error)] hover:bg-[var(--surface-soft)] transition-colors opacity-75 hover:opacity-100"
             >
-              Sign Out
+              {t('footer.signOut')}
             </button>
           )}
           <span className="text-[10px] text-[var(--text-muted)] font-semibold opacity-60">{APP_VERSION}</span>
@@ -240,7 +244,7 @@ export default function App() {
 
       {debug.show && <DebugConsole />}
       {session.showXrayCloudWizard && <XrayCloudWizard />}
-      {session.loading && <BlockingLoader />}
+      {session.loading && <BlockingLoader message={session.generationProgressMessage || t('loader.default')} percent={session.generationProgressPercent} etaSeconds={session.generationEtaSeconds} />}
       {auth.authToken && sessionHydrated && !session.onboardingCompleted && <OnboardingTour />}
     </div>
   );

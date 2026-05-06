@@ -66,7 +66,12 @@ class BugJiraPayloadResolver:
                 if raw_value.get("name"):
                     return {"name": raw_value.get("name")}
                 return None
-            return {"id": raw_value} if raw_value else None
+            if not raw_value:
+                return None
+            matched = self._match_allowed_value(str(raw_value), field_meta)
+            if matched:
+                return matched
+            return {"name": str(raw_value)} if field_type == "priority" else {"value": str(raw_value)}
 
         elif field_type == "sprint":
             if isinstance(raw_value, dict):
@@ -164,6 +169,27 @@ class BugJiraPayloadResolver:
             return [{"value": v} if isinstance(v, str) else v for v in raw_value]
 
         return raw_value
+
+    def _match_allowed_value(self, raw_value: str, field_meta: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        normalized = str(raw_value or "").strip().lower()
+        if not normalized:
+            return None
+
+        for option in field_meta.get("allowed_values") or []:
+            if not isinstance(option, dict):
+                continue
+            for option_key in ("id", "value", "name", "label"):
+                option_value = option.get(option_key)
+                if option_value is not None and str(option_value).strip().lower() == normalized:
+                    if option.get("id"):
+                        return {"id": str(option["id"])}
+                    if option.get("value"):
+                        return {"value": str(option["value"])}
+                    if option.get("name"):
+                        return {"name": str(option["name"])}
+                    if option.get("label"):
+                        return {"value": str(option["label"])}
+        return None
 
     def _format_jira_description(self, ai_output: Dict[str, Any]) -> str:
         """

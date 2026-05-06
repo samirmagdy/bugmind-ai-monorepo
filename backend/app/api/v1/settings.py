@@ -6,6 +6,7 @@ from app.models.jira import JiraFieldMapping
 from app.schemas.settings import AISettingsResponse, AISettingsUpdate, JiraSettingsUpdate
 from app.core.security import decrypt_credential, encrypt_credential
 from app.core.audit import log_audit
+from app.services.jira.connection_service import get_owned_connection
 
 router = APIRouter()
 
@@ -62,8 +63,10 @@ def update_jira_settings(
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
+    get_owned_connection(db, current_user.id, settings.jira_connection_id)
     query = db.query(JiraFieldMapping).filter(
         JiraFieldMapping.user_id == current_user.id,
+        JiraFieldMapping.jira_connection_id == settings.jira_connection_id,
         JiraFieldMapping.project_key == settings.project_key,
         JiraFieldMapping.issue_type_id == settings.issue_type_id
     )
@@ -76,6 +79,7 @@ def update_jira_settings(
     if not mapping:
         mapping = JiraFieldMapping(
             user_id=current_user.id,
+            jira_connection_id=settings.jira_connection_id,
             project_key=settings.project_key,
             project_id=settings.project_id,
             issue_type_id=settings.issue_type_id,
@@ -85,6 +89,7 @@ def update_jira_settings(
         )
         db.add(mapping)
     else:
+        mapping.jira_connection_id = settings.jira_connection_id
         if settings.project_id is not None:
             mapping.project_id = settings.project_id
         if settings.visible_fields is not None:

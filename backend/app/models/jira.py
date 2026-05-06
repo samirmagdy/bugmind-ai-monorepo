@@ -34,6 +34,7 @@ class JiraFieldMapping(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
+    jira_connection_id = Column(Integer, ForeignKey("jira_connections.id", ondelete="CASCADE"), nullable=True, index=True)
     workspace_id = Column(Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True, index=True)
     project_key = Column(String, nullable=False)
     project_id = Column(String, nullable=True)

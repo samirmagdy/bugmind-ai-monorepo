@@ -157,22 +157,29 @@ def resolve_jira_bootstrap_context(
     if not metadata_fields and last_field_error:
         raise last_field_error
 
-    # 2. Fetch field mappings (personal first, then shared)
-    mapping = db.query(JiraFieldMapping).filter(
+    # 2. Fetch field mappings (connection-scoped personal first, then legacy, then shared)
+    base_mapping = db.query(JiraFieldMapping).filter(
         JiraFieldMapping.user_id == current_user.id,
         JiraFieldMapping.project_key == canonical_project_key,
         JiraFieldMapping.issue_type_id == selected_issue_type_id,
     )
     canonical_mapping_project_id = canonical_project_id if str(canonical_project_id).isdigit() else None
-    if canonical_mapping_project_id is None:
-        mapping = mapping.filter(JiraFieldMapping.project_id.is_(None))
-    else:
-        mapping = mapping.filter(JiraFieldMapping.project_id == canonical_mapping_project_id)
-    
-    mapping_record = mapping.first()
+    def apply_project_filters(query):
+        if canonical_mapping_project_id is None:
+            return query.filter(JiraFieldMapping.project_id.is_(None))
+        return query.filter(JiraFieldMapping.project_id == canonical_mapping_project_id)
+
+    mapping_record = apply_project_filters(
+        base_mapping.filter(JiraFieldMapping.jira_connection_id == conn.id)
+    ).first()
+    allow_legacy_mapping_fallback = len(connections) <= 1
+    if not mapping_record and allow_legacy_mapping_fallback:
+        mapping_record = apply_project_filters(
+            base_mapping.filter(JiraFieldMapping.jira_connection_id.is_(None))
+        ).first()
     if not mapping_record:
         # Fallback to shared workspace mapping
-        mapping_record = db.query(JiraFieldMapping).join(
+        shared_mapping = db.query(JiraFieldMapping).join(
             WorkspaceMember, JiraFieldMapping.workspace_id == WorkspaceMember.workspace_id
         ).filter(
             WorkspaceMember.user_id == current_user.id,
@@ -180,11 +187,13 @@ def resolve_jira_bootstrap_context(
             JiraFieldMapping.project_key == canonical_project_key,
             JiraFieldMapping.issue_type_id == selected_issue_type_id,
         )
-        if canonical_mapping_project_id is None:
-            mapping_record = mapping_record.filter(JiraFieldMapping.project_id.is_(None))
-        else:
-            mapping_record = mapping_record.filter(JiraFieldMapping.project_id == canonical_mapping_project_id)
-        mapping_record = mapping_record.first()
+        mapping_record = apply_project_filters(
+            shared_mapping.filter(JiraFieldMapping.jira_connection_id == conn.id)
+        ).first()
+        if not mapping_record and allow_legacy_mapping_fallback:
+            mapping_record = apply_project_filters(
+                shared_mapping.filter(JiraFieldMapping.jira_connection_id.is_(None))
+            ).first()
 
     visible_fields = mapping_record.visible_fields if mapping_record else []
     ai_mapping = mapping_record.field_mappings if mapping_record else {}

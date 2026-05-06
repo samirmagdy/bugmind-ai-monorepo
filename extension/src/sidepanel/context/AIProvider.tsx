@@ -210,6 +210,70 @@ export const AIProvider: React.FC<{
     return `${prefix}-${currentTabId ?? 'tab'}-${randomId}`;
   }, [currentTabId]);
 
+  const fingerprintPayload = useCallback((payload: unknown) => {
+    return JSON.stringify(payload);
+  }, []);
+
+  const snapshotWork = useCallback((curr: TabSession, label: string) => ({
+    label,
+    createdAt: Date.now(),
+    bugs: (curr.bugs || []).map((bug) => ({ ...bug, extra_fields: { ...(bug.extra_fields || {}) } })),
+    testCases: (curr.testCases || []).map((testCase) => ({ ...testCase, steps: [...(testCase.steps || [])] })),
+  }), []);
+
+  const recordHistory = useCallback((label: string) => {
+    if (!currentTabId) return;
+    setTabSessions(prev => {
+      const curr = prev[currentTabId] || INITIAL_SESSION;
+      return {
+        ...prev,
+        [currentTabId]: {
+          ...curr,
+          undoStack: [snapshotWork(curr, label), ...(curr.undoStack || [])].slice(0, 25),
+          redoStack: [],
+        },
+      };
+    });
+  }, [currentTabId, setTabSessions, snapshotWork]);
+
+  const undoWork = useCallback(() => {
+    if (!currentTabId) return;
+    setTabSessions(prev => {
+      const curr = prev[currentTabId] || INITIAL_SESSION;
+      const [target, ...rest] = curr.undoStack || [];
+      if (!target) return prev;
+      return {
+        ...prev,
+        [currentTabId]: {
+          ...curr,
+          bugs: target.bugs,
+          testCases: target.testCases,
+          undoStack: rest,
+          redoStack: [snapshotWork(curr, 'Redo point'), ...(curr.redoStack || [])].slice(0, 25),
+        },
+      };
+    });
+  }, [currentTabId, setTabSessions, snapshotWork]);
+
+  const redoWork = useCallback(() => {
+    if (!currentTabId) return;
+    setTabSessions(prev => {
+      const curr = prev[currentTabId] || INITIAL_SESSION;
+      const [target, ...rest] = curr.redoStack || [];
+      if (!target) return prev;
+      return {
+        ...prev,
+        [currentTabId]: {
+          ...curr,
+          bugs: target.bugs,
+          testCases: target.testCases,
+          redoStack: rest,
+          undoStack: [snapshotWork(curr, 'Undo point'), ...(curr.undoStack || [])].slice(0, 25),
+        },
+      };
+    });
+  }, [currentTabId, setTabSessions, snapshotWork]);
+
   const buildDefaultExtraFields = useCallback(() => {
     return sanitizeExtraFields((session.fieldDefaults || {}) as BugReport['extra_fields']);
   }, [sanitizeExtraFields, session.fieldDefaults]);
@@ -358,6 +422,7 @@ export const AIProvider: React.FC<{
       const curr = prev[currentTabId] || INITIAL_SESSION;
       const newBugs = [...(curr.bugs || [])];
       if (newBugs[index]) {
+        const before = newBugs[index];
         newBugs[index] = {
           ...newBugs[index],
           ...updates,
@@ -366,10 +431,32 @@ export const AIProvider: React.FC<{
             : newBugs[index].extra_fields,
           edited: true
         };
+        const transientKeys = ['userSearchQuery', 'userSearchResults', 'isSearchingUsers', 'activeUserSearchField', 'lastSearchedQuery'];
+        const isTransientOnly = Object.keys(updates).every((key) => transientKeys.includes(key));
+        if (!isTransientOnly) {
+          return {
+            ...prev,
+            [currentTabId]: {
+              ...curr,
+              bugs: newBugs,
+              undoStack: [snapshotWork(curr, `Edited bug ${index + 1}`), ...(curr.undoStack || [])].slice(0, 25),
+              redoStack: [],
+              revisions: [{
+                id: `bug-${Date.now()}-${index}`,
+                type: 'bug' as const,
+                index,
+                title: newBugs[index].summary || `Bug ${index + 1}`,
+                before,
+                after: newBugs[index],
+                createdAt: Date.now(),
+              }, ...(curr.revisions || [])].slice(0, 50),
+            }
+          };
+        }
       }
       return { ...prev, [currentTabId]: { ...curr, bugs: newBugs } };
     });
-  }, [currentTabId, setTabSessions]);
+  }, [currentTabId, setTabSessions, snapshotWork]);
 
   const handleUpdateTestCase = useCallback((index: number, updates: Partial<TestCase>) => {
     if (!currentTabId) return;
@@ -377,11 +464,30 @@ export const AIProvider: React.FC<{
       const curr = prev[currentTabId] || INITIAL_SESSION;
       const newCases = [...(curr.testCases || [])];
       if (newCases[index]) {
+        const before = newCases[index];
         newCases[index] = { ...newCases[index], ...updates };
+        return {
+          ...prev,
+          [currentTabId]: {
+            ...curr,
+            testCases: newCases,
+            undoStack: [snapshotWork(curr, `Edited test case ${index + 1}`), ...(curr.undoStack || [])].slice(0, 25),
+            redoStack: [],
+              revisions: [{
+                id: `test-${Date.now()}-${index}`,
+                type: 'test' as const,
+              index,
+              title: newCases[index].title || `Test case ${index + 1}`,
+              before,
+              after: newCases[index],
+              createdAt: Date.now(),
+            }, ...(curr.revisions || [])].slice(0, 50),
+          }
+        };
       }
       return { ...prev, [currentTabId]: { ...curr, testCases: newCases } };
     });
-  }, [currentTabId, setTabSessions]);
+  }, [currentTabId, setTabSessions, snapshotWork]);
 
   const buildGenerationLearningHints = useCallback(() => {
     const editedBugs = (session.bugs || []).filter((bug) => bug.edited);
@@ -425,11 +531,22 @@ export const AIProvider: React.FC<{
     const requestIssueKey = session.issueData.key;
     const requestJiraConnectionId = session.jiraConnectionId;
     const requestIssueTypeId = session.selectedIssueType.id;
-    updateSession({ loading: true, error: null, success: null, testCases: [], coverageScore: null, gapAnalysisSummary: null }, currentTabId);
+    updateSession({
+      loading: true,
+      error: null,
+      success: null,
+      testCases: [],
+      coverageScore: null,
+      gapAnalysisSummary: null,
+      generationProgressMessage: 'Reading Jira context...',
+      generationProgressPercent: 12,
+      generationEtaSeconds: 45,
+    }, currentTabId);
     logDebug('AI-START', `Analyzing ${session.issueData.key}...`);
 
     try {
       const { projectKey, projectId } = getProjectRequestParams();
+      updateSession({ generationProgressMessage: 'Preparing AI prompt...', generationProgressPercent: 28, generationEtaSeconds: 35 }, currentTabId);
       const payload: AIGenerationRequestPayload = {
         issue_context: buildIssueContext(),
         jira_connection_id: session.jiraConnectionId,
@@ -452,6 +569,7 @@ export const AIProvider: React.FC<{
         await throwApiErrorResponse(res, `Failed to generate analytical report (${res.status})`);
       }
 
+      updateSession({ generationProgressMessage: 'Structuring findings...', generationProgressPercent: 82, generationEtaSeconds: 8 }, currentTabId);
       const data = await readJsonResponse<GapAnalysisResponsePayload>(res);
       const bugs = (data.bugs || []).map(toFrontendBug);
       if (!bugs.length) {
@@ -484,6 +602,9 @@ export const AIProvider: React.FC<{
             testCases: [],
             coverageScore,
             gapAnalysisSummary: normalizeGapAnalysisSummary(data.analysis_summary),
+            generationProgressMessage: 'Analysis complete.',
+            generationProgressPercent: 100,
+            generationEtaSeconds: 0,
             success: data.warnings?.length ? data.warnings.join(' ') : null,
           }
         };
@@ -510,7 +631,7 @@ export const AIProvider: React.FC<{
       if (generateBugsRequestRef.current === requestId) {
         setTabSessions(prev => {
           const curr = prev[requestTabId] || INITIAL_SESSION;
-          return { ...prev, [requestTabId]: { ...curr, loading: false } };
+        return { ...prev, [requestTabId]: { ...curr, loading: false, generationEtaSeconds: null } };
         });
       }
     }
@@ -530,9 +651,18 @@ export const AIProvider: React.FC<{
     const requestIssueKey = session.issueData.key;
     const requestJiraConnectionId = session.jiraConnectionId;
     const requestIssueTypeId = session.selectedIssueType.id;
-    updateSession({ loading: true, error: null, success: null, gapAnalysisSummary: null }, currentTabId);
+    updateSession({
+      loading: true,
+      error: null,
+      success: null,
+      gapAnalysisSummary: null,
+      generationProgressMessage: 'Reading acceptance criteria...',
+      generationProgressPercent: 12,
+      generationEtaSeconds: 50,
+    }, currentTabId);
     try {
       const { projectKey, projectId } = getProjectRequestParams();
+      updateSession({ generationProgressMessage: 'Generating test coverage...', generationProgressPercent: 35, generationEtaSeconds: 35 }, currentTabId);
       const payload: AITestCaseGenerationRequestPayload = {
         issue_context: buildIssueContext(),
         jira_connection_id: session.jiraConnectionId,
@@ -556,6 +686,7 @@ export const AIProvider: React.FC<{
       if (!res.ok) {
         await throwApiErrorResponse(res, `Failed to generate test cases (${res.status})`);
       }
+      updateSession({ generationProgressMessage: 'Normalizing test suite...', generationProgressPercent: 84, generationEtaSeconds: 7 }, currentTabId);
       const data = await readJsonResponse<AITestCasesResponsePayload>(res);
       const testCases = (data.test_cases || []).map(normalizeFrontendTestCase);
       if (!testCases.length) {
@@ -592,7 +723,10 @@ export const AIProvider: React.FC<{
             createdIssues: [],
             xrayProjects: [],
             xrayTargetProjectId: null,
-            xrayTargetProjectKey: null
+            xrayTargetProjectKey: null,
+            generationProgressMessage: 'Test suite complete.',
+            generationProgressPercent: 100,
+            generationEtaSeconds: 0
           }
         };
       });
@@ -615,7 +749,7 @@ export const AIProvider: React.FC<{
       if (generateTestsRequestRef.current === requestId) {
         setTabSessions(prev => {
           const curr = prev[requestTabId] || INITIAL_SESSION;
-          return { ...prev, [requestTabId]: { ...curr, loading: false } };
+          return { ...prev, [requestTabId]: { ...curr, loading: false, generationEtaSeconds: null } };
         });
       }
     }
@@ -1042,11 +1176,19 @@ export const AIProvider: React.FC<{
         issue_type_id: session.selectedIssueType.id,
         bugs
       };
+      const payloadFingerprint = fingerprintPayload(payload);
+      const idempotencyKey = session.submitIdempotencyFingerprint === payloadFingerprint && session.submitIdempotencyKey
+        ? session.submitIdempotencyKey
+        : buildIdempotencyKey('ai-submit');
+      updateSession({
+        submitIdempotencyKey: idempotencyKey,
+        submitIdempotencyFingerprint: payloadFingerprint,
+      });
       const res = await apiRequest(`${apiBase}/ai/submit`, {
         method: 'POST',
         token: authToken,
         onUnauthorized: refreshAuthToken,
-        headers: { 'Idempotency-Key': buildIdempotencyKey('ai-submit') },
+        headers: { 'Idempotency-Key': idempotencyKey },
         body: JSON.stringify(payload)
       });
 
@@ -1066,6 +1208,8 @@ export const AIProvider: React.FC<{
         resolvedPayload: null,
         validationErrors: [],
         expandedBug: null,
+        submitIdempotencyKey: null,
+        submitIdempotencyFingerprint: null,
         success: data.warnings?.length ? data.warnings.join(' ') : null,
       });
     } catch (err: unknown) {
@@ -1101,7 +1245,7 @@ export const AIProvider: React.FC<{
       submitBugsInFlightRef.current = false;
       updateSession({ loading: false });
     }
-  }, [authToken, apiBase, buildIdempotencyKey, extractBulkSubmitFailure, getProjectRequestParams, parseJiraRequiredFieldErrors, refreshAuthToken, session.bugs, session.instanceUrl, session.issueData, session.jiraConnectionId, session.previewBugIndex, session.selectedIssueType, session.visibleFields, updateSession, validateBug]);
+  }, [authToken, apiBase, buildIdempotencyKey, extractBulkSubmitFailure, fingerprintPayload, getProjectRequestParams, parseJiraRequiredFieldErrors, refreshAuthToken, session.bugs, session.instanceUrl, session.issueData, session.jiraConnectionId, session.previewBugIndex, session.selectedIssueType, session.submitIdempotencyFingerprint, session.submitIdempotencyKey, session.visibleFields, updateSession, validateBug]);
 
   const searchUsers = useCallback(async (query: string, bugIndex?: number, fieldId?: string) => {
     if (query.length < 2 || !session.jiraConnectionId) return;
@@ -1386,6 +1530,9 @@ export const AIProvider: React.FC<{
     searchUsers,
     handleUpdateBug,
     handleUpdateTestCase,
+    recordHistory,
+    undoWork,
+    redoWork,
     publishTestCasesToXray,
     bulkFetchEpic,
     bulkGenerateTests,
@@ -1396,7 +1543,7 @@ export const AIProvider: React.FC<{
     preparePreviewBug,
     checkDuplicates,
     linkToExisting,
-  }), [usage, fetchUsage, customModel, customKey, hasCustomKeySaved, clearCustomKeyRequested, fetchAISettings, generateBugs, generateTestCases, handleManualGenerate, submitBugs, regenerateBug, searchUsers, handleUpdateBug, handleUpdateTestCase, publishTestCasesToXray, bulkFetchEpic, bulkGenerateTests, bulkAnalyzeStories, bulkCompareBrd, bulkLoadAttachmentAsBrd, validateBug, preparePreviewBug, checkDuplicates, linkToExisting]);
+  }), [usage, fetchUsage, customModel, customKey, hasCustomKeySaved, clearCustomKeyRequested, fetchAISettings, generateBugs, generateTestCases, handleManualGenerate, submitBugs, regenerateBug, searchUsers, handleUpdateBug, handleUpdateTestCase, recordHistory, undoWork, redoWork, publishTestCasesToXray, bulkFetchEpic, bulkGenerateTests, bulkAnalyzeStories, bulkCompareBrd, bulkLoadAttachmentAsBrd, validateBug, preparePreviewBug, checkDuplicates, linkToExisting]);
 
   return <AIContext.Provider value={value}>{children}</AIContext.Provider>;
 };

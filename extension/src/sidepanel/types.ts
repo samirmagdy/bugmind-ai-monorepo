@@ -209,6 +209,16 @@ export interface TabSession {
   previewBugIndex: number | null;
   validationErrors: string[];
   resolvedPayload: ResolvedPayload | null;
+  submitIdempotencyKey: string | null;
+  submitIdempotencyFingerprint: string | null;
+  undoStack: WorkHistoryEntry[];
+  redoStack: WorkHistoryEntry[];
+  revisions: RevisionEntry[];
+  generationProgressMessage: string;
+  generationProgressPercent: number;
+  generationEtaSeconds: number | null;
+  locale: 'en' | 'ar';
+  mappingWizardCompleted: boolean;
   // Phase 2: Duplicate detection
   duplicateMatches: DuplicateMatch[];
   duplicateCheckFailed: boolean;
@@ -350,6 +360,26 @@ export interface BulkProgressPayload {
   percent: number;
 }
 
+export interface WorkSnapshot {
+  bugs: BugReport[];
+  testCases: TestCase[];
+}
+
+export interface WorkHistoryEntry extends WorkSnapshot {
+  label: string;
+  createdAt: number;
+}
+
+export interface RevisionEntry {
+  id: string;
+  type: 'bug' | 'test';
+  index: number;
+  title: string;
+  before: BugReport | TestCase | null;
+  after: BugReport | TestCase | null;
+  createdAt: number;
+}
+
 export type View = 'auth' | 'setup' | 'main' | 'success' | 'settings' | 'preview' | 'jobs' | 'workspace';
 export type MainWorkflow = 'home' | 'manual' | 'analysis' | 'tests' | 'bulk';
 
@@ -418,6 +448,16 @@ export const INITIAL_SESSION: TabSession = {
   previewBugIndex: null,
   validationErrors: [],
   resolvedPayload: null,
+  submitIdempotencyKey: null,
+  submitIdempotencyFingerprint: null,
+  undoStack: [],
+  redoStack: [],
+  revisions: [],
+  generationProgressMessage: '',
+  generationProgressPercent: 0,
+  generationEtaSeconds: null,
+  locale: 'en',
+  mappingWizardCompleted: false,
   duplicateMatches: [],
   duplicateCheckFailed: false,
   duplicateCheckFailureReason: '',

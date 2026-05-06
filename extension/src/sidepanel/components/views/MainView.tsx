@@ -4,13 +4,14 @@ import {
   Plus, ChevronDown, Bug,
   Loader2, Send, AlertCircle, Zap, RefreshCw,
   Compass, ArrowRight, Check, Layout, AlertTriangle, BrainCircuit, Paperclip, X, ClipboardList,
-  Trash2, Copy, ArrowUp, ArrowDown, Square, CheckSquare, FileText
+  Trash2, Copy, ArrowUp, ArrowDown, Square, CheckSquare, FileText, RotateCcw, RotateCw, History, HelpCircle
 } from 'lucide-react';
 import { BugReport, JiraField, JiraFieldOption, JiraUser, SupportingArtifact, TestCase, ManualBugInput, AnalysisCoverageItem, MainWorkflow, TEST_CATEGORIES } from '../../types';
 import AutoResizeTextarea from '../common/AutoResizeTextarea';
 import { ActionButton, SurfaceCard, StatusBadge, StatusPanel } from '../common/DesignSystem';
 import LuxurySearchableSelect, { SelectOption, SelectValue } from '../common/LuxurySearchableSelect';
 import { TIMEOUTS } from '../../constants';
+import { useI18n } from '../../i18n';
 
 const HIDDEN_SYSTEM_FIELD_KEYS = new Set([
   'summary',
@@ -144,9 +145,11 @@ const MainView: React.FC = () => {
       generateBugs, generateTestCases, handleManualGenerate, 
       handleUpdateBug, handleUpdateTestCase, publishTestCasesToXray, 
       searchUsers, preparePreviewBug, regenerateBug,
-      bulkFetchEpic, bulkGenerateTests, bulkAnalyzeStories, bulkCompareBrd, bulkLoadAttachmentAsBrd
+      bulkFetchEpic, bulkGenerateTests, bulkAnalyzeStories, bulkCompareBrd, bulkLoadAttachmentAsBrd,
+      recordHistory, undoWork, redoWork
     } 
   } = useBugMind();
+  const { t } = useI18n();
   const { log } = debug;
   const isRecoveringStalePage = session.error === 'STALE_PAGE' && !session.issueData;
   const staleRecoveryAttemptsRef = useRef(0);
@@ -165,6 +168,11 @@ const MainView: React.FC = () => {
       : recommendedWorkflow === 'analysis'
         ? 'Recommended: Run AI Gap Analysis to uncover missing scenarios'
         : 'Recommended: I Found a Bug for quick reporting';
+
+  const updateWorkWithHistory = (label: string, updates: Partial<typeof session>) => {
+    recordHistory(label);
+    updateSession(updates);
+  };
 
   const setWorkflow = (mainWorkflow: MainWorkflow) => {
     let nextIssueType = session.selectedIssueType;
@@ -223,7 +231,7 @@ const MainView: React.FC = () => {
   };
 
   const addTestCase = () => {
-    updateSession({
+    updateWorkWithHistory('Added test case', {
       testCases: [
         ...session.testCases,
         {
@@ -243,7 +251,7 @@ const MainView: React.FC = () => {
   };
 
   const removeTestCase = (index: number) => {
-    updateSession({ testCases: session.testCases.filter((_, idx) => idx !== index) });
+    updateWorkWithHistory(`Deleted test case ${index + 1}`, { testCases: session.testCases.filter((_, idx) => idx !== index) });
   };
 
   const duplicateTestCase = (index: number) => {
@@ -251,7 +259,7 @@ const MainView: React.FC = () => {
     if (!source) return;
     const next = [...session.testCases];
     next.splice(index + 1, 0, { ...source, title: `${source.title} (copy)`, steps: [...source.steps] });
-    updateSession({ testCases: next });
+    updateWorkWithHistory(`Duplicated test case ${index + 1}`, { testCases: next });
   };
 
   const moveTestCase = (index: number, direction: -1 | 1) => {
@@ -259,11 +267,11 @@ const MainView: React.FC = () => {
     if (nextIndex < 0 || nextIndex >= session.testCases.length) return;
     const next = [...session.testCases];
     [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
-    updateSession({ testCases: next });
+    updateWorkWithHistory(`Moved test case ${index + 1}`, { testCases: next });
   };
 
   const setAllTestCasesSelected = (selected: boolean) => {
-    updateSession({ testCases: session.testCases.map(testCase => ({ ...testCase, selected })) });
+    updateWorkWithHistory(selected ? 'Selected all test cases' : 'Unselected all test cases', { testCases: session.testCases.map(testCase => ({ ...testCase, selected })) });
   };
 
   const toggleTestGenerationType = (type: string) => {
@@ -670,6 +678,28 @@ const MainView: React.FC = () => {
       {/* Action/List Section */}
       {session.error === 'NOT_A_JIRA_PAGE' ? null : (
         <div className="relative overflow-y-auto flex-1 pt-1 pb-2">
+          <SurfaceCard className="mb-3 flex items-center justify-between gap-3 px-3 py-2">
+            <div className="flex min-w-0 items-center gap-2">
+              <History size={14} className="text-[var(--primary-blue)]" />
+              <div className="min-w-0">
+                <div className="text-[10px] font-black uppercase tracking-[0.16em] text-[var(--text-muted)]">{t('history.title')}</div>
+                <div className="truncate text-[11px] text-[var(--text-secondary)]">
+                  {(session.revisions || [])[0]?.title || t('history.empty')}
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-1">
+              <button type="button" onClick={undoWork} disabled={!session.undoStack?.length} className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border-soft)] text-[var(--text-muted)] disabled:opacity-30" aria-label={t('history.undo')} title={t('history.undo')}>
+                <RotateCcw size={13} />
+              </button>
+              <button type="button" onClick={redoWork} disabled={!session.redoStack?.length} className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border-soft)] text-[var(--text-muted)] disabled:opacity-30" aria-label={t('history.redo')} title={t('history.redo')}>
+                <RotateCw size={13} />
+              </button>
+              <button type="button" onClick={() => updateSession({ success: (session.revisions || []).slice(0, 5).map((rev) => `${new Date(rev.createdAt).toLocaleTimeString()} - ${rev.title}`).join('\n') || t('history.empty') })} className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border-soft)] text-[var(--primary-blue)]" aria-label={t('history.revisions')} title={t('history.revisions')}>
+                <HelpCircle size={13} />
+              </button>
+            </div>
+          </SurfaceCard>
           {/* Locked State Overlay */}
           {session.error === 'UNSUPPORTED_ISSUE_TYPE' && (
             <div className="absolute inset-0 z-20 flex flex-col items-center justify-start pt-8 p-3 animate-in fade-in zoom-in slide-in-from-top-3 duration-700">
@@ -1271,7 +1301,7 @@ const MainView: React.FC = () => {
                       Add
                     </button>
                     <button 
-                      onClick={() => updateSession({ testCases: [], coverageScore: null, gapAnalysisSummary: null, error: null, createdIssues: [], xrayWarnings: [], mainWorkflow: 'home' })} 
+                      onClick={() => updateWorkWithHistory('Cleared test cases', { testCases: [], coverageScore: null, gapAnalysisSummary: null, error: null, createdIssues: [], xrayWarnings: [], mainWorkflow: 'home' })} 
                       className="text-xs font-bold text-[var(--error)]"
                     >
                       Clear
@@ -1599,7 +1629,7 @@ const MainView: React.FC = () => {
                   <h3 className="text-lg font-bold text-[var(--text-primary)]">{(session.bugs || []).length} Analysis Findings</h3>
                   <div className="flex gap-4">
                     <button 
-                      onClick={() => updateSession({ bugs: [], testCases: [], coverageScore: null, gapAnalysisSummary: null, error: null, mainWorkflow: 'home' })} 
+                      onClick={() => updateWorkWithHistory('Cleared findings', { bugs: [], testCases: [], coverageScore: null, gapAnalysisSummary: null, error: null, mainWorkflow: 'home' })} 
                       className="text-xs font-bold text-[var(--error)]"
                     >
                       Clear

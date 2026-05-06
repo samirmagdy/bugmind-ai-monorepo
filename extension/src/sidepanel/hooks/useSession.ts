@@ -20,6 +20,12 @@ function stripEphemeralJiraState(session: Partial<TabSession>): Partial<TabSessi
   delete sanitized.aiMapping;
   delete sanitized.validationErrors;
   delete sanitized.resolvedPayload;
+  delete sanitized.undoStack;
+  delete sanitized.redoStack;
+  delete sanitized.revisions;
+  delete sanitized.generationProgressMessage;
+  delete sanitized.generationProgressPercent;
+  delete sanitized.generationEtaSeconds;
 
   return sanitized;
 }

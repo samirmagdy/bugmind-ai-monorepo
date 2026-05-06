@@ -21,6 +21,9 @@ export interface AIContextType {
   searchUsers: (query: string, bugIndex?: number, fieldId?: string) => Promise<import('../types').JiraUser[] | void>;
   handleUpdateBug: (index: number, updates: Partial<BugReport>) => void;
   handleUpdateTestCase: (index: number, updates: Partial<TestCase>) => void;
+  recordHistory: (label: string) => void;
+  undoWork: () => void;
+  redoWork: () => void;
   publishTestCasesToXray: () => Promise<void>;
   bulkFetchEpic: () => Promise<void>;
   bulkGenerateTests: () => Promise<void>;

@@ -2,9 +2,11 @@ import React, { useState } from 'react';
 import { useBugMind } from '../../hooks/useBugMind';
 import { ChevronRight, X, Info, ShieldCheck, Zap } from 'lucide-react';
 import { ActionButton, SurfaceCard } from './DesignSystem';
+import { useI18n } from '../../i18n';
 
 const OnboardingTour: React.FC = () => {
   const { session, completeOnboarding } = useBugMind();
+  const { t } = useI18n();
   const [step, setStep] = useState(0);
 
   if (session.onboardingCompleted) return null;
@@ -12,17 +14,20 @@ const OnboardingTour: React.FC = () => {
   const steps = [
     {
       title: "Welcome to BugMind AI",
-      content: "Experience the next generation of quality assurance. BugMind synthesizes Jira requirements to reveal functional edge cases and hidden logic gaps with mathematical precision.",
+      titleKey: 'onboarding.title1',
+      contentKey: 'onboarding.body1',
       icon: <Zap className="w-10 h-10 text-[var(--status-info)]" fill="currentColor" />
     },
     {
-      title: "Zero-Trust Integration",
-      content: "Your data's integrity is our priority. We employ end-to-end encryption for Jira handshakes. Credentials remain in your local vault, ensuring absolute sovereign control.",
+      title: "Map Jira Fields Once",
+      titleKey: 'onboarding.title2',
+      contentKey: 'onboarding.body2',
       icon: <ShieldCheck className="w-10 h-10 text-[var(--status-success)]" />
     },
     {
-      title: "Intelligent Synthesis",
-      content: "Deploy analysis across any Jira environment. Our engine audits descriptions and criteria to generate structured, production-ready bug reports and test assets.",
+      title: "Review, Undo, Publish",
+      titleKey: 'onboarding.title3',
+      contentKey: 'onboarding.body3',
       icon: <Info className="w-10 h-10 text-[var(--status-info)]" />
     }
   ];
@@ -57,10 +62,10 @@ const OnboardingTour: React.FC = () => {
 
           <div className="space-y-4">
             <h3 className="text-xl font-black text-[var(--text-main)] tracking-tight leading-tight">
-              {currentStep.title}
+              {t(currentStep.titleKey)}
             </h3>
             <p className="text-base leading-relaxed opacity-90 tracking-normal text-[var(--text-soft)]">
-              {currentStep.content}
+              {t(currentStep.contentKey)}
             </p>
           </div>
 
@@ -84,7 +89,7 @@ const OnboardingTour: React.FC = () => {
             >
               <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000"></div>
               <span className="relative text-xs uppercase tracking-[0.2em]">
-                {step < steps.length - 1 ? 'Continue' : 'Initialize'}
+                {step < steps.length - 1 ? t('common.continue') : t('common.finish')}
               </span>
               <ChevronRight size={18} className="relative group-hover:translate-x-1 transition-transform" />
             </ActionButton>

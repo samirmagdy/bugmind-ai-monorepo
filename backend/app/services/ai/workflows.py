@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.audit import log_audit
 from app.core.idempotency import idempotency_store
 from app.core.security import decrypt_credential
-from app.models.jira import JiraFieldMapping
+from app.models.jira import JiraConnection, JiraFieldMapping
 from app.models.subscription import PlanType, Subscription
 from app.models.usage import UsageLog
 from app.models.user import User
@@ -87,27 +87,46 @@ from app.models.workspace import WorkspaceMember
 def _get_field_mapping_record(
     db: Session,
     user_id: int,
+    jira_connection_id: Optional[int],
     project_key: str,
     project_id: Optional[str],
     issue_type_id: str,
 ) -> Optional[JiraFieldMapping]:
-    # 1. Try personal mapping
-    query = db.query(JiraFieldMapping).filter(
+    def apply_project_filters(query):
+        if project_id is None:
+            return query.filter(JiraFieldMapping.project_id.is_(None))
+        return query.filter(JiraFieldMapping.project_id == project_id)
+
+    def allow_legacy_mapping_fallback() -> bool:
+        if jira_connection_id is None:
+            return True
+        connection_count = db.query(JiraConnection).filter(JiraConnection.user_id == user_id).count()
+        return connection_count <= 1
+
+    # 1. Try connection-scoped personal mapping
+    base_personal_query = db.query(JiraFieldMapping).filter(
         JiraFieldMapping.project_key == project_key,
         JiraFieldMapping.issue_type_id == issue_type_id,
         JiraFieldMapping.user_id == user_id,
     )
-    if project_id is None:
-        query = query.filter(JiraFieldMapping.project_id.is_(None))
-    else:
-        query = query.filter(JiraFieldMapping.project_id == project_id)
-    
-    personal_mapping = query.first()
+    personal_mapping = None
+    if jira_connection_id is not None:
+        personal_mapping = apply_project_filters(
+            base_personal_query.filter(JiraFieldMapping.jira_connection_id == jira_connection_id)
+        ).first()
     if personal_mapping:
         return personal_mapping
 
-    # 2. Try shared workspace mapping
-    query = db.query(JiraFieldMapping).join(
+    if allow_legacy_mapping_fallback():
+        # 2. Fall back to legacy personal mappings created before connection scoping.
+        personal_mapping = apply_project_filters(
+            base_personal_query.filter(JiraFieldMapping.jira_connection_id.is_(None))
+        ).first()
+        if personal_mapping:
+            return personal_mapping
+
+    # 3. Try connection-scoped shared workspace mapping
+    base_shared_query = db.query(JiraFieldMapping).join(
         WorkspaceMember, JiraFieldMapping.workspace_id == WorkspaceMember.workspace_id
     ).filter(
         JiraFieldMapping.is_shared == True,
@@ -115,12 +134,20 @@ def _get_field_mapping_record(
         JiraFieldMapping.issue_type_id == issue_type_id,
         WorkspaceMember.user_id == user_id,
     )
-    if project_id is None:
-        query = query.filter(JiraFieldMapping.project_id.is_(None))
-    else:
-        query = query.filter(JiraFieldMapping.project_id == project_id)
-        
-    return query.first()
+    shared_mapping = None
+    if jira_connection_id is not None:
+        shared_mapping = apply_project_filters(
+            base_shared_query.filter(JiraFieldMapping.jira_connection_id == jira_connection_id)
+        ).first()
+    if shared_mapping:
+        return shared_mapping
+
+    if allow_legacy_mapping_fallback():
+        # 4. Fall back to legacy shared mappings.
+        return apply_project_filters(
+            base_shared_query.filter(JiraFieldMapping.jira_connection_id.is_(None))
+        ).first()
+    return None
 
 
 def compose_story_context(selected_text: Optional[str], issue_context) -> str:
@@ -285,7 +312,7 @@ def _build_issue_fields(bug: dict, issue_type_id: str, project_key: str, project
         for key, value in (bug.get("extra_fields") or {}).items()
         if key not in STANDARD_ISSUE_FIELDS and key not in NON_CREATABLE_ISSUE_FIELDS
     }
-    return {
+    payload = {
         "summary": bug.get("summary"),
         "description": bug.get("description"),
         "steps_to_reproduce": bug.get("steps_to_reproduce", ""),
@@ -295,6 +322,11 @@ def _build_issue_fields(bug: dict, issue_type_id: str, project_key: str, project
         "issuetype": {"id": issue_type_id},
         **extra_fields,
     }
+    for semantic_key in ("priority", "severity", "labels"):
+        value = bug.get(semantic_key)
+        if value not in (None, "", []):
+            payload.setdefault(semantic_key, value)
+    return payload
 
 
 def _merge_saved_field_defaults(payload_fields: dict, mapping_record: Optional[JiraFieldMapping], schema: Optional[list] = None) -> dict:
@@ -398,8 +430,8 @@ def _is_missing_jira_value(field: dict, value: object) -> bool:
     return False
 
 
-def _resolve_payload(db: Session, user_id: int, project_key: str, project_id: Optional[str], issue_type_id: str, schema: list, payload_fields: dict, platform: str = "cloud") -> dict:
-    mapping_record = _get_field_mapping_record(db, user_id, project_key, project_id, issue_type_id)
+def _resolve_payload(db: Session, user_id: int, jira_connection_id: Optional[int], project_key: str, project_id: Optional[str], issue_type_id: str, schema: list, payload_fields: dict, platform: str = "cloud") -> dict:
+    mapping_record = _get_field_mapping_record(db, user_id, jira_connection_id, project_key, project_id, issue_type_id)
     mapping_config = mapping_record.field_mappings if mapping_record else {}
     resolver = BugJiraPayloadResolver(mapping_config, schema, platform=platform)
     ai_raw = canonicalize_ai_payload({
@@ -474,7 +506,7 @@ async def generate_findings_response(req: FindingGenerationRequest, db: Session,
         ai_bugs_raw = [ai_raw]
     ai_bugs_raw, overlap_warnings = _annotate_bug_overlaps(ai_bugs_raw)
 
-    mapping_record = _get_field_mapping_record(db, current_user.id, req.project_key, req.project_id, req.issue_type_id)
+    mapping_record = _get_field_mapping_record(db, current_user.id, req.jira_connection_id, req.project_key, req.project_id, req.issue_type_id)
     mapping_config = mapping_record.field_mappings if mapping_record else {}
     platform = "server" if isinstance(adapter, JiraServerAdapter) else "cloud"
     resolver = BugJiraPayloadResolver(mapping_config, schema, platform=platform)
@@ -654,14 +686,14 @@ def prepare_bug_preview_response(req: PreviewPreparationRequest, db: Session, cu
     prefer_project_key = isinstance(adapter, JiraServerAdapter)
     schema_project_id = req.project_id or req.project_key
     schema = JiraMetadataEngine(adapter).get_field_schema(schema_project_id, req.issue_type_id)
-    mapping_record = _get_field_mapping_record(db, current_user.id, req.project_key, req.project_id, req.issue_type_id)
+    mapping_record = _get_field_mapping_record(db, current_user.id, req.jira_connection_id, req.project_key, req.project_id, req.issue_type_id)
     payload_fields = inject_standard_field_aliases(
         schema,
         _build_issue_fields(req.bug.model_dump(), req.issue_type_id, req.project_key, req.project_id, prefer_project_key=prefer_project_key),
     )
     payload_fields = _merge_saved_field_defaults(payload_fields, mapping_record, schema)
     platform = "server" if prefer_project_key else "cloud"
-    resolved_payload = _resolve_payload(db, current_user.id, req.project_key, req.project_id, req.issue_type_id, schema, payload_fields, platform=platform)
+    resolved_payload = _resolve_payload(db, current_user.id, req.jira_connection_id, req.project_key, req.project_id, req.issue_type_id, schema, payload_fields, platform=platform)
     missing_fields = _validate_payload(schema, resolved_payload.get("fields", {}))
     return PreviewPreparationResponse(valid=len(missing_fields) == 0, missing_fields=missing_fields, resolved_payload=resolved_payload)
 
@@ -705,7 +737,7 @@ def submit_bugs_response(request: Request, req: SubmitBugsRequest, db: Session, 
         except HTTPException:
             available_link_types = []
     link_candidates = resolve_link_type_candidates("Relates", available_link_types) if story_issue_key else []
-    mapping_record = _get_field_mapping_record(db, current_user.id, req.project_key, req.project_id, req.issue_type_id)
+    mapping_record = _get_field_mapping_record(db, current_user.id, req.jira_connection_id, req.project_key, req.project_id, req.issue_type_id)
     platform = "server" if prefer_project_key else "cloud"
     prepared_payloads: List[tuple[int, Any, Dict[str, Any]]] = []
 
@@ -716,7 +748,7 @@ def submit_bugs_response(request: Request, req: SubmitBugsRequest, db: Session, 
                 _build_issue_fields(bug.model_dump(), req.issue_type_id, req.project_key, req.project_id, prefer_project_key=prefer_project_key),
             )
             payload_fields = _merge_saved_field_defaults(payload_fields, mapping_record, schema)
-            resolved_payload = _resolve_payload(db, current_user.id, req.project_key, req.project_id, req.issue_type_id, schema, payload_fields, platform=platform)
+            resolved_payload = _resolve_payload(db, current_user.id, req.jira_connection_id, req.project_key, req.project_id, req.issue_type_id, schema, payload_fields, platform=platform)
             missing_fields = _validate_payload(schema, resolved_payload.get("fields", {}))
             if missing_fields:
                 raise HTTPException(
