@@ -831,7 +831,10 @@ export const AIProvider: React.FC<{
       const shouldInheritComponents = profile?.syncStrategy.inheritComponents ?? true;
       const inheritedLabels = shouldInheritLabels ? (session.issueData.labels || []) : [];
       const inheritedComponents = shouldInheritComponents ? (session.issueData.components || []) : [];
-      const targetFieldDefaults = buildXrayTargetDefaults(profile, session);
+      const targetFieldDefaults = buildXrayTargetDefaults(profile, {
+        xrayFieldDefaults: session.xrayFieldDefaults,
+        issueData: session.issueData,
+      });
       const payload: XrayPublishRequestPayload = {
         jira_connection_id: session.jiraConnectionId,
         story_issue_key: session.issueData.key,
