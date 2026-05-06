@@ -269,6 +269,65 @@ def apply_optional_xray_fields(fields_payload: dict, test_fields: list[dict], te
         fields_payload[precondition_field] = preconditions
 
 
+def _compact_dict(value: dict[str, Any]) -> dict[str, Any]:
+    return {key: item for key, item in value.items() if item not in (None, "")}
+
+
+def normalize_target_default_value(field: dict, value: Any) -> Any:
+    field_type = str(field.get("type") or "").strip().lower()
+
+    if isinstance(value, list):
+        return [
+            normalize_target_default_value({**field, "type": field_type.replace("multi-", "")}, item)
+            for item in value
+            if item not in (None, "")
+        ]
+
+    if not isinstance(value, dict):
+        return value
+
+    field_key = str(field.get("key") or field.get("id") or "").strip()
+    raw_id = value.get("id")
+    raw_value = value.get("value")
+    raw_name = value.get("name") or value.get("label")
+
+    if field_type in {"option", "priority", "sprint", "user", "version"} or field_type.startswith("multi-"):
+        if raw_id not in (None, ""):
+            return {"id": str(raw_id)}
+        if raw_value not in (None, ""):
+            return {"value": raw_value}
+        if raw_name not in (None, ""):
+            return {"name": raw_name}
+
+    if field_type == "array" or field_key in {"components", "fixVersions", "versions"}:
+        if raw_id not in (None, ""):
+            return {"id": str(raw_id)}
+        if raw_name not in (None, ""):
+            return {"name": raw_name}
+        if raw_value not in (None, ""):
+            return {"value": raw_value}
+
+    return _compact_dict(value)
+
+
+def apply_target_field_defaults(fields_payload: dict, test_fields: list[dict], defaults: dict[str, Any]) -> None:
+    if not defaults:
+        return
+
+    fields_by_key = {str(field.get("key") or field.get("id")): field for field in test_fields}
+    for key, value in defaults.items():
+        field_key = str(key).strip()
+        field_meta = fields_by_key.get(field_key)
+        if not field_key or not field_meta:
+            continue
+        if value is None or value == "":
+            continue
+        normalized_value = normalize_target_default_value(field_meta, value)
+        if normalized_value in (None, "") or normalized_value == []:
+            continue
+        fields_payload[field_key] = normalized_value
+
+
 def get_xray_cloud_access_token() -> str:
     if not settings.XRAY_CLOUD_CLIENT_ID or not settings.XRAY_CLOUD_CLIENT_SECRET:
         raise HTTPException(
@@ -341,6 +400,7 @@ class XrayServerPublisher:
                     "issuetype": {"id": test_issue_type_id},
                 }
                 apply_optional_xray_fields(fields, test_fields, test_case_payload)
+                apply_target_field_defaults(fields, test_fields, req.target_field_defaults)
                 if repository_path_field_id:
                     fields[repository_path_field_id] = folder_path
 
@@ -484,6 +544,7 @@ class XrayCloudPublisher:
                     "issuetype": {"id": test_issue_type_id},
                 }
                 apply_optional_xray_fields(fields, test_fields, test_case_payload)
+                apply_target_field_defaults(fields, test_fields, req.target_field_defaults)
 
                 # Create the Jira issue
                 issue_key = adapter.create_issue({"fields": fields})
@@ -570,4 +631,3 @@ class XrayCloudPublisher:
             warnings=warnings,
         )
         return response
-

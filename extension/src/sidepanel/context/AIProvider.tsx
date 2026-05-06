@@ -25,6 +25,7 @@ import {
   DuplicateLinkRequestPayload,
 } from '../services/contracts';
 import { AIContext } from './ai-context';
+import { getProfileProjectParams } from '../services/JiraCapabilityService';
 
 export const AIProvider: React.FC<{
   children: React.ReactNode,
@@ -369,11 +370,12 @@ export const AIProvider: React.FC<{
   const buildIssueContext = useCallback((): IssueContextPayload => buildIssueContextPayload(session.issueData), [session.issueData]);
   const getProjectRequestParams = useCallback(() => {
     const { project_key, project_id } = buildProjectRequestParams(session.issueData);
+    const profileProject = getProfileProjectParams(session.jiraCapabilityProfile);
     return {
-      projectKey: session.jiraMetadata?.project_key || project_key,
-      projectId: session.jiraMetadata?.project_id || project_id
+      projectKey: session.jiraMetadata?.project_key || profileProject.projectKey || project_key,
+      projectId: session.jiraMetadata?.project_id || profileProject.projectId || project_id
     };
-  }, [session.issueData, session.jiraMetadata]);
+  }, [session.issueData, session.jiraCapabilityProfile, session.jiraMetadata]);
 
   const fetchUsage = useCallback(async () => {
     if (!authToken) return;
@@ -519,6 +521,10 @@ export const AIProvider: React.FC<{
       logDebug('AI-ABORT', 'Missing session data or Jira connection ID');
       return;
     }
+    if (session.jiraCapabilityProfile && !session.jiraCapabilityProfile.readiness.canGenerateFromJira) {
+      updateSession({ error: 'Your Jira profile does not have Browse Projects permission for this project.' }, currentTabId);
+      return;
+    }
     if (!session.selectedIssueType?.id) {
       updateSession({ error: 'MISSING_ISSUE_TYPE' }, currentTabId);
       logDebug('AI-ABORT', 'Missing Jira issue type selection');
@@ -635,11 +641,15 @@ export const AIProvider: React.FC<{
         });
       }
     }
-  }, [apiBase, authToken, buildArtifactContext, buildGenerationLearningHints, buildIssueContext, currentTabId, fetchUsage, getProjectRequestParams, logDebug, normalizeGapAnalysisSummary, refreshAuthToken, session.bugGenerationCount, session.generationSupportingContext, session.instanceUrl, session.issueData, session.jiraConnectionId, session.selectedIssueType, setTabSessions, toFrontendBug, updateSession]);
+  }, [apiBase, authToken, buildArtifactContext, buildGenerationLearningHints, buildIssueContext, currentTabId, fetchUsage, getProjectRequestParams, logDebug, normalizeGapAnalysisSummary, refreshAuthToken, session.bugGenerationCount, session.generationSupportingContext, session.instanceUrl, session.issueData, session.jiraCapabilityProfile, session.jiraConnectionId, session.selectedIssueType, setTabSessions, toFrontendBug, updateSession]);
 
   const generateTestCases = useCallback(async () => {
     if (generateTestsInFlightRef.current) return;
     if (!currentTabId || !session.issueData || !session.jiraConnectionId) return;
+    if (session.jiraCapabilityProfile && !session.jiraCapabilityProfile.readiness.canGenerateFromJira) {
+      updateSession({ error: 'Your Jira profile does not have Browse Projects permission for this project.' }, currentTabId);
+      return;
+    }
     if (!session.selectedIssueType?.id) {
       updateSession({ error: 'MISSING_ISSUE_TYPE' }, currentTabId);
       return;
@@ -698,6 +708,7 @@ export const AIProvider: React.FC<{
       const coverageScore = rawCoverageScore === null || !Number.isFinite(rawCoverageScore)
         ? null
         : Math.max(0, Math.min(100, rawCoverageScore));
+      const profile = session.jiraCapabilityProfile;
       let applied = false;
       setTabSessions(prev => {
         const curr = prev[requestTabId] || INITIAL_SESSION;
@@ -721,9 +732,16 @@ export const AIProvider: React.FC<{
             xrayFolderPath: requestIssueKey,
             xrayWarnings: [],
             createdIssues: [],
-            xrayProjects: [],
-            xrayTargetProjectId: null,
-            xrayTargetProjectKey: null,
+            xrayProjects: profile?.projects || curr.xrayProjects || [],
+            xrayTargetProjectId: profile?.selectedProject?.id || curr.xrayTargetProjectId || null,
+            xrayTargetProjectKey: profile?.selectedProject?.key || curr.xrayTargetProjectKey || null,
+            xrayTestIssueTypeName: profile?.issueTypes.test?.name || curr.xrayTestIssueTypeName,
+            xrayLinkType: profile?.linking.preferredLinkType || curr.xrayLinkType,
+            xrayPublishSupported: profile ? (profile.readiness.canSyncToXray || profile.readiness.missingRequiredFields.length === 0) : curr.xrayPublishSupported,
+            xrayPublishMode: profile?.xray.mode === 'xray-cloud' ? 'xray_cloud' : curr.xrayPublishMode,
+            xrayUnsupportedReason: profile?.readiness.missingRequiredFields.length
+              ? `Required fields missing: ${profile.readiness.missingRequiredFields.join(', ')}`
+              : curr.xrayUnsupportedReason,
             generationProgressMessage: 'Test suite complete.',
             generationProgressPercent: 100,
             generationEtaSeconds: 0
@@ -753,17 +771,38 @@ export const AIProvider: React.FC<{
         });
       }
     }
-  }, [apiBase, authToken, buildArtifactContext, buildIssueContext, currentTabId, fetchUsage, getProjectRequestParams, normalizeFrontendTestCase, refreshAuthToken, session.generationSupportingContext, session.instanceUrl, session.issueData, session.jiraConnectionId, session.selectedIssueType, session.testGenerationTypes, setTabSessions, updateSession]);
+  }, [apiBase, authToken, buildArtifactContext, buildIssueContext, currentTabId, fetchUsage, getProjectRequestParams, normalizeFrontendTestCase, refreshAuthToken, session.generationSupportingContext, session.instanceUrl, session.issueData, session.jiraCapabilityProfile, session.jiraConnectionId, session.selectedIssueType, session.testGenerationTypes, setTabSessions, updateSession]);
 
   const publishTestCasesToXray = useCallback(async () => {
     if (publishXrayInFlightRef.current) return;
     if (!currentTabId || !session.issueData || !session.jiraConnectionId || !session.testCases.length) return;
-    if (!session.xrayPublishSupported) {
+    const profile = session.jiraCapabilityProfile;
+    const targetProjectId = session.xrayTargetProjectId || profile?.selectedProject?.id || null;
+    const targetProjectKey = session.xrayTargetProjectKey || profile?.selectedProject?.key || null;
+    const testIssueType =
+      session.issueTypes.find(issueType => issueType.name.trim().toLowerCase() === session.xrayTestIssueTypeName.trim().toLowerCase()) ||
+      session.issueTypes.find(issueType => issueType.id === session.xrayTestIssueTypeName) ||
+      profile?.issueTypes.test ||
+      null;
+    const linkType = profile?.linking.preferredLinkType || session.xrayLinkType || 'Tests';
+    const profileCanPublish = profile ? profile.readiness.canSyncToXray || profile.readiness.missingRequiredFields.length === 0 : session.xrayPublishSupported;
+    if (!session.xrayPublishSupported && !profileCanPublish) {
       updateSession({ error: session.xrayUnsupportedReason || 'Xray publishing is not available for this Jira connection.' }, currentTabId);
       return;
     }
-    if (!session.xrayTargetProjectId) {
+    if (!targetProjectId) {
       updateSession({ error: 'Please choose an Xray target project before publishing.' }, currentTabId);
+      return;
+    }
+    const missingTargetDefaults = (profile?.targetTestCreateFields.requiredFields || [])
+      .filter((fieldKey) => !['project', 'issuetype', 'summary', 'description'].includes(fieldKey))
+      .filter((fieldKey) => {
+        const value = session.xrayFieldDefaults[fieldKey];
+        return value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0);
+      });
+    if (missingTargetDefaults.length > 0) {
+      const labels = missingTargetDefaults.map(fieldKey => profile?.targetTestCreateFields.fieldSchemas[fieldKey]?.name || fieldKey);
+      updateSession({ error: `Required Xray Test defaults missing: ${labels.join(', ')}` }, currentTabId);
       return;
     }
     const selectedTestCases = session.testCases.filter((testCase) => testCase.selected !== false);
@@ -782,17 +821,36 @@ export const AIProvider: React.FC<{
     updateSession({ loading: true, error: null, success: null }, currentTabId);
 
     try {
+      const shouldInheritLabels = profile?.syncStrategy.inheritLabels ?? true;
+      const shouldInheritComponents = profile?.syncStrategy.inheritComponents ?? true;
+      const shouldInheritVersions = profile?.syncStrategy.inheritVersions ?? true;
+      const inheritedLabels = shouldInheritLabels ? (session.issueData.labels || []) : [];
+      const inheritedComponents = shouldInheritComponents ? (session.issueData.components || []) : [];
+      const inheritedVersions = shouldInheritVersions ? (session.issueData.fixVersions || []) : [];
+      const targetFieldDefaults = {
+        ...session.xrayFieldDefaults,
+        ...(inheritedVersions.length > 0 ? { fixVersions: inheritedVersions.map(name => ({ name })) } : {}),
+      };
       const payload: XrayPublishRequestPayload = {
         jira_connection_id: session.jiraConnectionId,
         story_issue_key: session.issueData.key,
-        xray_project_id: session.xrayTargetProjectId,
-        xray_project_key: session.xrayTargetProjectKey,
-        test_cases: selectedTestCases.map(normalizeFrontendTestCase),
-        test_issue_type_id: undefined,
-        test_issue_type_name: session.xrayTestIssueTypeName || 'Test',
+        xray_project_id: targetProjectId,
+        xray_project_key: targetProjectKey,
+        test_cases: selectedTestCases.map((testCase) => {
+          const normalized = normalizeFrontendTestCase(testCase);
+          return {
+            ...normalized,
+            labels: Array.from(new Set([...(normalized.labels || []), ...inheritedLabels])),
+            components: Array.from(new Set([...(normalized.components || []), ...inheritedComponents])),
+            priority: normalized.priority || session.issueData?.priority || 'Medium',
+          };
+        }),
+        test_issue_type_id: testIssueType?.id,
+        test_issue_type_name: testIssueType?.name || session.xrayTestIssueTypeName || 'Test',
         repository_path_field_id: session.xrayRepositoryPathFieldId || undefined,
         folder_path: session.xrayFolderPath || session.issueData.key,
-        link_type: session.xrayLinkType || 'Tests'
+        link_type: linkType,
+        target_field_defaults: targetFieldDefaults
       };
       const res = await apiRequest(`${apiBase}/jira/connections/${session.jiraConnectionId}/xray/test-suite`, {
         method: 'POST',
@@ -818,7 +876,7 @@ export const AIProvider: React.FC<{
       publishXrayInFlightRef.current = false;
       updateSession({ loading: false }, currentTabId);
     }
-  }, [apiBase, authToken, buildIdempotencyKey, currentTabId, normalizeFrontendTestCase, refreshAuthToken, session.connections, session.issueData, session.jiraConnectionId, session.testCases, session.xrayFolderPath, session.xrayLinkType, session.xrayPublishMode, session.xrayPublishSupported, session.xrayRepositoryPathFieldId, session.xrayTargetProjectId, session.xrayTargetProjectKey, session.xrayTestIssueTypeName, session.xrayUnsupportedReason, updateSession]);
+  }, [apiBase, authToken, buildIdempotencyKey, currentTabId, normalizeFrontendTestCase, refreshAuthToken, session.connections, session.issueData, session.issueTypes, session.jiraCapabilityProfile, session.jiraConnectionId, session.testCases, session.xrayFieldDefaults, session.xrayFolderPath, session.xrayLinkType, session.xrayPublishMode, session.xrayPublishSupported, session.xrayRepositoryPathFieldId, session.xrayTargetProjectId, session.xrayTargetProjectKey, session.xrayTestIssueTypeName, session.xrayUnsupportedReason, updateSession]);
 
   const handleManualGenerate = useCallback(async () => {
     if (manualGenerateInFlightRef.current) return;

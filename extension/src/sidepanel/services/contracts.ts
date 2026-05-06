@@ -147,6 +147,7 @@ export interface XrayPublishRequestPayload {
   repository_path_field_id?: string;
   folder_path?: string;
   link_type?: string;
+  target_field_defaults?: Record<string, unknown>;
 }
 
 export interface BulkFetchRequestPayload {

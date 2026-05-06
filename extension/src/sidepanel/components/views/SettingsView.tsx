@@ -6,6 +6,7 @@ import { ActionButton, StatusBadge, StatusPanel, SurfaceCard } from '../common/D
 import LuxurySearchableSelect, { SelectOption, SelectValue } from '../common/LuxurySearchableSelect';
 import { apiRequest, readJsonResponse, throwApiErrorResponse } from '../../services/api';
 import { useI18n } from '../../i18n';
+import { getProfileProjectParams } from '../../services/JiraCapabilityService';
 
 const HIDDEN_SYSTEM_FIELD_KEYS = new Set([
   'summary',
@@ -586,7 +587,8 @@ const SettingsView: React.FC = () => {
   }, [jira.verifySsl, session.instanceUrl, showAddConnection]);
 
   const bootstrapJiraConfig = async (issueTypeId?: string, options?: { force?: boolean; loading?: boolean; logTag?: string; errorMessage?: string }) => {
-    const projectKey = session.issueData?.key.split('-')[0];
+    const profileProject = getProfileProjectParams(session.jiraCapabilityProfile);
+    const projectKey = profileProject.projectKey || session.issueData?.key.split('-')[0];
     if (!projectKey || !session.instanceUrl || !session.issueData) return null;
 
     const force = options?.force ?? true;
@@ -605,7 +607,7 @@ const SettingsView: React.FC = () => {
         instanceUrl: session.instanceUrl,
         issueKey: session.issueData.key,
         projectKey,
-        projectId: session.jiraMetadata?.project_id || session.issueData.projectId,
+        projectId: session.jiraMetadata?.project_id || profileProject.projectId || session.issueData.projectId,
         issueTypeId,
         tabId: currentTabId,
         force

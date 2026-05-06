@@ -12,6 +12,7 @@ import {
   JiraFieldOption,
   ResolvedFieldValue
 } from '../../types';
+import { getProfileProjectParams } from '../../services/JiraCapabilityService';
 
 function hasResolvedField(
   fields: Record<string, ResolvedFieldValue> | undefined,
@@ -144,7 +145,8 @@ const PreviewView: React.FC = () => {
   const bug = bugIndex !== null ? session.bugs[bugIndex] : null;
   const totalBugs = session.bugs.length;
   const resolved = session.resolvedPayload?.fields;
-  const projectKey = session.jiraMetadata?.project_key || session.issueData?.key.split('-')[0];
+  const profileProject = getProfileProjectParams(session.jiraCapabilityProfile);
+  const projectKey = session.jiraMetadata?.project_key || profileProject.projectKey || session.issueData?.key.split('-')[0];
   const resolvedSummary = hasResolvedField(resolved, 'summary')
     ? resolvePreviewFieldValue(
         'summary',

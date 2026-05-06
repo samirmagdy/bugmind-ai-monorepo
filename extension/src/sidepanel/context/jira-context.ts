@@ -1,5 +1,5 @@
 import { createContext } from 'react';
-import { JiraBootstrapContext, JiraProject, XrayDefaultsResponse } from '../types';
+import { JiraBootstrapContext, JiraCapabilityProfile, JiraProject, XrayDefaultsResponse } from '../types';
 
 export interface JiraConnectionConfig {
   base_url: string;
@@ -7,12 +7,15 @@ export interface JiraConnectionConfig {
   token: string;
   auth_type: 'cloud' | 'server';
   verify_ssl: boolean;
+  project_key?: string;
+  xray_mode?: 'auto' | 'server-dc-raven' | 'xray-cloud' | 'jira-fields' | 'description-fallback';
 }
 
 export interface JiraContextType {
   jiraPlatform: 'cloud' | 'server';
   setJiraPlatform: (p: 'cloud' | 'server') => void;
   createConnection: (config: JiraConnectionConfig) => Promise<boolean>;
+  discoverJiraProfile: (config: JiraConnectionConfig) => Promise<JiraCapabilityProfile | null>;
   fetchConnections: () => Promise<void>;
   deleteConnection: (id: number, tabId?: number | null) => Promise<void>;
   setActiveConnection: (id: number, hostUrl: string) => Promise<void>;

@@ -12,6 +12,7 @@ import { ActionButton, SurfaceCard, StatusBadge, StatusPanel } from '../common/D
 import LuxurySearchableSelect, { SelectOption, SelectValue } from '../common/LuxurySearchableSelect';
 import { TIMEOUTS } from '../../constants';
 import { useI18n } from '../../i18n';
+import { getProfileProjectParams, jiraCapabilityService } from '../../services/JiraCapabilityService';
 
 const HIDDEN_SYSTEM_FIELD_KEYS = new Set([
   'summary',
@@ -161,6 +162,64 @@ const MainView: React.FC = () => {
   const hasStructuredCriteria = acceptanceCriteria.length > 120 || acceptanceCriteria.includes('\n') || acceptanceCriteria.includes('-');
   const recommendedWorkflow = !session.issueData ? null : hasStructuredCriteria ? 'tests' : (acceptanceCriteria.length < 48 && descriptionText.length > 0 ? 'analysis' : 'manual');
   const issueTypeLabel = session.issueData?.typeName?.trim() || 'Issue';
+  const targetTestFieldEntries = session.jiraCapabilityProfile
+    ? Object.entries(session.jiraCapabilityProfile.targetTestCreateFields.fieldSchemas)
+      .filter(([fieldKey]) => !['project', 'issuetype', 'summary', 'description'].includes(fieldKey))
+      .map(([key, schema]) => ({ key, schema, required: session.jiraCapabilityProfile?.targetTestCreateFields.requiredFields.includes(key) || false }))
+      .sort((a, b) => Number(b.required) - Number(a.required) || a.schema.name.localeCompare(b.schema.name))
+    : [];
+  const missingXrayRequiredDefaults = session.jiraCapabilityProfile
+    ? session.jiraCapabilityProfile.targetTestCreateFields.requiredFields
+      .filter(fieldKey => !['project', 'issuetype', 'summary', 'description'].includes(fieldKey))
+      .filter(fieldKey => {
+        const value = session.xrayFieldDefaults[fieldKey];
+        return value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0);
+      })
+    : [];
+  const readinessChecks = session.jiraCapabilityProfile ? [
+    { label: 'Jira connected', ok: session.jiraCapabilityProfile.connection.connected },
+    { label: 'Project selected', ok: Boolean(session.jiraCapabilityProfile.selectedProject) },
+    { label: 'Can read stories', ok: session.jiraCapabilityProfile.permissions.canBrowse },
+    { label: 'Can create Test issues', ok: session.jiraCapabilityProfile.permissions.canCreateIssues },
+    { label: 'Can link Tests to Stories', ok: session.jiraCapabilityProfile.permissions.canLinkIssues },
+    { label: 'Test issue type found', ok: Boolean(session.jiraCapabilityProfile.issueTypes.test) },
+    { label: 'Required defaults configured', ok: missingXrayRequiredDefaults.length === 0 },
+    { label: 'Xray mode detected', ok: session.jiraCapabilityProfile.xray.mode !== 'unknown' },
+  ] : [];
+  const readinessScore = readinessChecks.length
+    ? Math.round((readinessChecks.filter(item => item.ok).length / readinessChecks.length) * 100)
+    : null;
+  const canGenerateFromProfile = !session.jiraCapabilityProfile || session.jiraCapabilityProfile.permissions.canBrowse;
+  const canCreateFromProfile = !session.jiraCapabilityProfile || session.jiraCapabilityProfile.permissions.canCreateIssues;
+  const saveXrayDefault = (fieldKey: string, value: unknown) => {
+    const nextDefaults = {
+      ...session.xrayFieldDefaults,
+      [fieldKey]: value
+    };
+    updateSession({ xrayFieldDefaults: nextDefaults });
+    if (session.jiraCapabilityProfile) {
+      void jiraCapabilityService.saveXrayFieldDefaults(session.jiraCapabilityProfile, nextDefaults).then((profile) => {
+        updateSession({ jiraCapabilityProfile: profile });
+      });
+    }
+  };
+  const xrayPayloadPreview = session.jiraCapabilityProfile && session.issueData ? {
+    project: session.xrayTargetProjectKey || session.jiraCapabilityProfile.selectedProject?.key || session.xrayTargetProjectId,
+    issuetype: session.jiraCapabilityProfile.issueTypes.test?.id || session.xrayTestIssueTypeName,
+    linkType: session.jiraCapabilityProfile.linking.preferredLinkType || session.xrayLinkType,
+    folderPath: session.xrayFolderPath || session.issueData.key,
+    xrayMode: session.jiraCapabilityProfile.xray.mode,
+    fields: Object.fromEntries(
+      Object.entries(session.xrayFieldDefaults)
+        .filter(([, value]) => value !== undefined && value !== null && value !== '')
+        .map(([key, value]) => [session.jiraCapabilityProfile?.targetTestCreateFields.fieldSchemas[key]?.name || key, value])
+    ),
+    inherited: {
+      labels: session.jiraCapabilityProfile.syncStrategy.inheritLabels ? session.issueData.labels || [] : [],
+      components: session.jiraCapabilityProfile.syncStrategy.inheritComponents ? session.issueData.components || [] : [],
+      fixVersions: session.jiraCapabilityProfile.syncStrategy.inheritVersions ? session.issueData.fixVersions || [] : [],
+    },
+  } : null;
   const recommendationLabel = !session.issueData
     ? 'Open a Jira issue to enable all workflows.'
     : recommendedWorkflow === 'tests'
@@ -196,6 +255,9 @@ const MainView: React.FC = () => {
   const selectedTestCaseCount = session.testCases.filter(testCase => testCase.selected !== false).length;
   const selectedBulkStoryCount = session.bulkSelectedStoryKeys.length;
   const allBulkStoriesSelected = session.bulkStories.length > 0 && selectedBulkStoryCount === session.bulkStories.length;
+  const selectedBulkStoriesOutsideProfile = session.jiraCapabilityProfile
+    ? session.bulkSelectedStoryKeys.filter(key => key.split('-')[0] !== session.jiraCapabilityProfile?.selectedProject?.key)
+    : [];
 
   const toggleBulkStory = (storyKey: string) => {
     const selected = new Set(session.bulkSelectedStoryKeys);
@@ -477,7 +539,8 @@ const MainView: React.FC = () => {
   );
 
   const bootstrapJiraConfig = async (issueTypeId?: string, options?: { force?: boolean; loading?: boolean; logTag?: string; errorMessage?: string }) => {
-    const projectKey = session.issueData?.key.split('-')[0];
+    const profileProject = getProfileProjectParams(session.jiraCapabilityProfile);
+    const projectKey = profileProject.projectKey || session.issueData?.key.split('-')[0];
     if (!projectKey || !session.instanceUrl || !session.issueData) return null;
 
     const force = options?.force ?? true;
@@ -496,7 +559,7 @@ const MainView: React.FC = () => {
         instanceUrl: session.instanceUrl,
         issueKey: session.issueData.key,
         projectKey,
-        projectId: session.jiraMetadata?.project_id || session.issueData.projectId,
+        projectId: session.jiraMetadata?.project_id || profileProject.projectId || session.issueData.projectId,
         issueTypeId,
         tabId: currentTabId,
         force
@@ -559,6 +622,26 @@ const MainView: React.FC = () => {
   useEffect(() => {
     const issueKey = session.issueData?.key || '';
     if (!session.testCases.length || !session.jiraConnectionId) return;
+    const profile = session.jiraCapabilityProfile;
+    if (profile) {
+      const selectedProject = session.xrayTargetProjectId
+        ? profile.projects.find(project => project.id === session.xrayTargetProjectId)
+        : profile.selectedProject;
+      updateSession({
+        xrayProjects: profile.projects,
+        xrayTargetProjectId: selectedProject?.id || null,
+        xrayTargetProjectKey: selectedProject?.key || null,
+        xrayFolderPath: session.xrayFolderPath || issueKey || '',
+        xrayTestIssueTypeName: profile.issueTypes.test?.name || session.xrayTestIssueTypeName || 'Test',
+        xrayLinkType: profile.linking.preferredLinkType || session.xrayLinkType || 'Tests',
+        xrayPublishSupported: profile.readiness.canSyncToXray || profile.readiness.missingRequiredFields.length === 0,
+        xrayPublishMode: profile.xray.mode === 'xray-cloud' ? 'xray_cloud' : 'jira_server',
+        xrayUnsupportedReason: profile.readiness.missingRequiredFields.length > 0
+          ? `Required fields missing: ${profile.readiness.missingRequiredFields.join(', ')}`
+          : null
+      });
+      return;
+    }
     if (session.xrayProjects.length > 0 && session.xrayFolderPath === issueKey) return;
 
     let cancelled = false;
@@ -581,7 +664,7 @@ const MainView: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [jira, session.issueData?.key, session.jiraConnectionId, session.testCases.length, session.xrayFolderPath, session.xrayLinkType, session.xrayProjects.length, session.xrayRepositoryPathFieldId, session.xrayTargetProjectId, session.xrayTargetProjectKey, session.xrayTestIssueTypeName, updateSession]);
+  }, [jira, session.issueData?.key, session.jiraCapabilityProfile, session.jiraConnectionId, session.testCases.length, session.xrayFolderPath, session.xrayLinkType, session.xrayProjects.length, session.xrayRepositoryPathFieldId, session.xrayTargetProjectId, session.xrayTargetProjectKey, session.xrayTestIssueTypeName, updateSession]);
 
   return (
     <div className="space-y-4 animate-in fade-in duration-500">
@@ -1014,7 +1097,7 @@ const MainView: React.FC = () => {
                           <ActionButton
                             onClick={() => handleManualGenerate()}
                             variant="primary"
-                            disabled={session.loading || manualInputs.every(input => !input.text.trim())}
+                            disabled={session.loading || manualInputs.every(input => !input.text.trim()) || !canGenerateFromProfile}
                             className="h-11"
                           >
                             <Zap size={16} />
@@ -1051,7 +1134,7 @@ const MainView: React.FC = () => {
                             onClick={generateBugs}
                             variant="primary"
                             className="h-11 text-[13px]"
-                            disabled={requiresIssueType || session.loading}
+                            disabled={requiresIssueType || session.loading || !canGenerateFromProfile}
                           >
                             <Zap size={16} />
                             Run Gap Analysis
@@ -1179,10 +1262,18 @@ const MainView: React.FC = () => {
                               )}
 
                               <div className="grid grid-cols-1 gap-2">
+                                {selectedBulkStoriesOutsideProfile.length > 0 && (
+                                  <StatusPanel
+                                    tone="warning"
+                                    title="Project Profile Mismatch"
+                                    description={`Selected stories outside ${session.jiraCapabilityProfile?.selectedProject?.key}: ${selectedBulkStoriesOutsideProfile.join(', ')}`}
+                                    icon={AlertTriangle}
+                                  />
+                                )}
                                 <ActionButton
                                   onClick={bulkGenerateTests}
                                   variant="primary"
-                                  disabled={session.loading || selectedBulkStoryCount === 0 || requiresIssueType}
+                                  disabled={session.loading || selectedBulkStoryCount === 0 || requiresIssueType || !canGenerateFromProfile || selectedBulkStoriesOutsideProfile.length > 0}
                                   className="h-10 text-[12px]"
                                 >
                                   <Check size={15} />
@@ -1191,7 +1282,7 @@ const MainView: React.FC = () => {
                                 <ActionButton
                                   onClick={bulkAnalyzeStories}
                                   variant="secondary"
-                                  disabled={session.loading || selectedBulkStoryCount === 0 || requiresIssueType}
+                                  disabled={session.loading || selectedBulkStoryCount === 0 || requiresIssueType || !canGenerateFromProfile || selectedBulkStoriesOutsideProfile.length > 0}
                                   className="h-10 text-[12px]"
                                 >
                                   <BrainCircuit size={15} />
@@ -1227,7 +1318,7 @@ const MainView: React.FC = () => {
                             <ActionButton
                               onClick={bulkCompareBrd}
                               variant="secondary"
-                              disabled={session.loading || selectedBulkStoryCount === 0 || requiresIssueType || !session.bulkBrdText.trim()}
+                              disabled={session.loading || selectedBulkStoryCount === 0 || requiresIssueType || !session.bulkBrdText.trim() || !canGenerateFromProfile || selectedBulkStoriesOutsideProfile.length > 0}
                               className="h-10 text-[12px]"
                             >
                               <ClipboardList size={15} />
@@ -1265,7 +1356,7 @@ const MainView: React.FC = () => {
                             onClick={generateTestCases}
                             variant="primary"
                             className="h-11 text-[13px]"
-                            disabled={requiresIssueType || session.loading}
+                            disabled={requiresIssueType || session.loading || !canGenerateFromProfile}
                           >
                             <Check size={16} />
                             Generate Test Cases
@@ -1308,7 +1399,7 @@ const MainView: React.FC = () => {
                     </button>
                     <button 
                       onClick={generateTestCases} 
-                      disabled={session.loading || requiresIssueType}
+                      disabled={session.loading || requiresIssueType || !canGenerateFromProfile}
                       className="text-xs font-bold text-[var(--primary-blue)]"
                     >
                       Retry
@@ -1450,6 +1541,30 @@ const MainView: React.FC = () => {
                   </div>
 
                   <div className="space-y-3">
+                    {session.jiraCapabilityProfile && (
+                      <SurfaceCard className="space-y-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <div className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Jira Readiness</div>
+                            <div className="text-[11px] text-[var(--text-secondary)]">
+                              {session.jiraCapabilityProfile.selectedProject?.key || 'Project'} · {session.jiraCapabilityProfile.xray.mode}
+                            </div>
+                          </div>
+                          <StatusBadge tone={readinessScore === 100 ? 'success' : readinessScore && readinessScore >= 70 ? 'warning' : 'danger'}>
+                            {readinessScore}% Ready
+                          </StatusBadge>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          {readinessChecks.map(check => (
+                            <div key={check.label} className="flex items-center gap-2 text-[11px] text-[var(--text-secondary)]">
+                              <span className={`h-1.5 w-1.5 rounded-full ${check.ok ? 'bg-[var(--success)]' : 'bg-[var(--error)]'}`} />
+                              <span>{check.label}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </SurfaceCard>
+                    )}
+
                     <div className="space-y-1.5">
                       <label className="context-label uppercase tracking-wider block ml-1">Xray Project</label>
                       <LuxurySearchableSelect
@@ -1479,14 +1594,91 @@ const MainView: React.FC = () => {
                       </div>
                       <div className="space-y-1.5">
                         <label className="context-label uppercase tracking-wider block ml-1">Issue Type</label>
-                        <input
-                          value={session.xrayTestIssueTypeName}
-                          onChange={e => updateSession({ xrayTestIssueTypeName: e.target.value })}
-                          className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-[1rem] px-3 py-2.5 text-xs text-[var(--text-primary)] outline-none"
-                          placeholder="Test"
+                        <LuxurySearchableSelect
+                          options={(session.issueTypes.length ? session.issueTypes : session.jiraCapabilityProfile?.issueTypes.all || [])
+                            .filter(issueType => !issueType.subtask)
+                            .map(issueType => ({ id: issueType.id, name: issueType.name, avatar: issueType.icon_url || issueType.iconUrl }))}
+                          value={
+                            session.xrayTestIssueTypeName
+                              ? { id: session.xrayTestIssueTypeName, name: session.xrayTestIssueTypeName }
+                              : session.jiraCapabilityProfile?.issueTypes.test
+                                ? { id: session.jiraCapabilityProfile.issueTypes.test.id, name: session.jiraCapabilityProfile.issueTypes.test.name }
+                                : null
+                          }
+                          placeholder="Select Test issue type..."
+                          onChange={(next) => {
+                            if (!isSelectOption(next)) return;
+                            const issueType = session.issueTypes.find(item => item.id === String(next.id ?? ''));
+                            updateSession({ xrayTestIssueTypeName: issueType?.name || String(next.name || next.id || 'Test') });
+                            if (session.jiraCapabilityProfile && issueType) {
+                              void jiraCapabilityService.saveTestIssueType(session.jiraCapabilityProfile, issueType).then((profile) => {
+                                updateSession({ jiraCapabilityProfile: profile });
+                              });
+                            }
+                          }}
                         />
                       </div>
                     </div>
+
+                    {session.jiraCapabilityProfile && (() => {
+                      if (targetTestFieldEntries.length === 0) return null;
+
+                      return (
+                        <div className="space-y-3 rounded-[1rem] border border-[var(--border-soft)] bg-[var(--surface-soft)] p-3">
+                          <div>
+                            <div className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Detected Test Fields</div>
+                            <div className="text-[11px] text-[var(--text-secondary)]">Required fields are enforced before publish. Optional fields are sent when populated.</div>
+                          </div>
+                          {targetTestFieldEntries.map(({ key, schema, required }) => {
+                            const currentValue = session.xrayFieldDefaults[key];
+                            const isMulti = schema.type === 'array';
+                            const hasOptions = (schema.allowedValues || []).length > 0;
+
+                            return (
+                              <div key={key} className="space-y-1.5">
+                                <label className="context-label uppercase tracking-wider block ml-1">
+                                  {schema.name} {required && <span className="text-[var(--error)]">*</span>}
+                                </label>
+                                {hasOptions ? (
+                                  <LuxurySearchableSelect
+                                    isMulti={isMulti}
+                                    options={(schema.allowedValues || []).map(toAllowedValueOption)}
+                                    value={currentValue as SelectValue | SelectValue[]}
+                                    placeholder={`Select ${schema.name}...`}
+                                    required
+                                    onChange={(next) => {
+                                      const nextValue = isMulti
+                                        ? (Array.isArray(next) ? next : []).map(toStoredSelectValue)
+                                        : toStoredSelectValue(Array.isArray(next) ? next[0] : next);
+                                      saveXrayDefault(key, nextValue);
+                                    }}
+                                  />
+                                ) : (
+                                  <AutoResizeTextarea
+                                    value={typeof currentValue === 'string' ? currentValue : ''}
+                                    onChange={e => saveXrayDefault(key, e.target.value)}
+                                    className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-[0.9rem] p-2.5 text-xs text-[var(--text-secondary)] outline-none"
+                                    placeholder={`Enter ${schema.name}...`}
+                                  />
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
+
+                    {xrayPayloadPreview && (
+                      <div className="space-y-2 rounded-[1rem] border border-[var(--border-soft)] bg-[var(--bg-input)] p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Payload Preview</div>
+                          <StatusBadge tone="info">{xrayPayloadPreview.xrayMode}</StatusBadge>
+                        </div>
+                        <pre className="max-h-48 overflow-auto whitespace-pre-wrap text-[10px] leading-relaxed text-[var(--text-secondary)]">
+                          {JSON.stringify(xrayPayloadPreview, null, 2)}
+                        </pre>
+                      </div>
+                    )}
                   </div>
 
                   {session.createdIssues.length > 0 && (
@@ -1525,9 +1717,20 @@ const MainView: React.FC = () => {
                     />
                   )}
 
+                  {missingXrayRequiredDefaults.length > 0 && (
+                    <StatusPanel
+                      tone="warning"
+                      title="Required Fields Needed"
+                      description={missingXrayRequiredDefaults
+                        .map(fieldKey => session.jiraCapabilityProfile?.targetTestCreateFields.fieldSchemas[fieldKey]?.name || fieldKey)
+                        .join(', ')}
+                      icon={AlertTriangle}
+                    />
+                  )}
+
                   <ActionButton
                     onClick={publishTestCasesToXray}
-                    disabled={!session.xrayTargetProjectId || selectedTestCaseCount === 0 || session.loading || !session.xrayPublishSupported}
+                    disabled={!session.xrayTargetProjectId || selectedTestCaseCount === 0 || session.loading || !session.xrayPublishSupported || !canCreateFromProfile || missingXrayRequiredDefaults.length > 0}
                     variant="primary"
                   >
                     <Send size={16} />
@@ -1636,7 +1839,7 @@ const MainView: React.FC = () => {
                     </button>
                     <button 
                       onClick={generateBugs} 
-                      disabled={requiresIssueType || session.loading}
+                      disabled={requiresIssueType || session.loading || !canGenerateFromProfile}
                       className="text-xs font-bold text-[var(--primary-blue)]"
                     >
                       Retry

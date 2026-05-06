@@ -17,7 +17,8 @@
   "optional_host_permissions": [
     "*://*/browse/*",
     "*://*/issues/*",
-    "*://*/rest/api/*"
+    "*://*/rest/api/*",
+    "*://*/rest/raven/*"
   ],
   "action": {
     "default_title": "Open BugMind AI"

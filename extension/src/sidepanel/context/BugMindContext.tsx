@@ -19,7 +19,7 @@ import {
 } from '../services/contracts';
 import { BugMindContext, BugMindContextType } from '../hooks/useBugMind';
 import { obfuscate } from '../utils/StorageObfuscator';
-import { DebugLog } from '../types';
+import { DebugLog, IssueData, JiraCapabilityProfile } from '../types';
 
 // New Specialized Providers
 import { AuthProvider } from './AuthProvider';
@@ -28,6 +28,7 @@ import { AIProvider } from './AIProvider';
 import { useAuthContext } from '../hooks/useAuthContext';
 import { useAIContext } from '../hooks/useAIContext';
 import { useJiraContext } from '../hooks/useJiraContext';
+import { getProfileProjectParams } from '../services/JiraCapabilityService';
 
 type BackgroundMessage =
   | { type: 'CONTEXT_UPDATED'; tabId: number; context: ReturnType<typeof useSession>['session'] }
@@ -67,10 +68,104 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
   const resetPasswordInFlightRef = useRef(false);
   const googleLoginInFlightRef = useRef(false);
   const saveSettingsInFlightRef = useRef(false);
+  const enrichedIssueSignatureRef = useRef('');
+
+  const stringifyJiraFieldValue = useCallback((value: unknown): string => {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value);
+    if (Array.isArray(value)) return value.map(item => stringifyJiraFieldValue(item)).filter(Boolean).join('\n');
+    if (typeof value === 'object') {
+      const record = value as Record<string, unknown>;
+      if (record.type === 'doc' && Array.isArray(record.content)) {
+        return stringifyJiraFieldValue(record.content);
+      }
+      if (typeof record.text === 'string') return record.text;
+      if (typeof record.value === 'string') return record.value;
+      if (typeof record.name === 'string') return record.name;
+      if (typeof record.displayName === 'string') return record.displayName;
+      if (Array.isArray(record.content)) return stringifyJiraFieldValue(record.content);
+      return Object.values(record).map(item => stringifyJiraFieldValue(item)).filter(Boolean).join(' ');
+    }
+    return '';
+  }, []);
+
+  const buildProfileIssueData = useCallback((
+    current: IssueData,
+    profile: JiraCapabilityProfile,
+    rawIssue: Record<string, unknown>
+  ): IssueData => {
+    const fields = rawIssue.fields && typeof rawIssue.fields === 'object'
+      ? rawIssue.fields as Record<string, unknown>
+      : {};
+    const mapping = profile.sourceStoryMapping;
+    const sections = [
+      { label: 'Acceptance Criteria', fieldId: mapping.acceptanceCriteria },
+      { label: 'Main Flow', fieldId: mapping.mainFlow },
+      { label: 'Alternative Flow', fieldId: mapping.alternativeFlow },
+      { label: 'Business Rules', fieldId: mapping.businessRules },
+    ]
+      .map(section => {
+        const text = section.fieldId ? stringifyJiraFieldValue(fields[section.fieldId]).trim() : '';
+        return text ? `${section.label}:\n${text}` : '';
+      })
+      .filter(Boolean);
+
+    return {
+      ...current,
+      summary: stringifyJiraFieldValue(fields.summary).trim() || current.summary,
+      description: stringifyJiraFieldValue(fields.description).trim() || current.description,
+      acceptanceCriteria: sections.join('\n\n') || current.acceptanceCriteria,
+      priority: stringifyJiraFieldValue(fields.priority).trim() || current.priority,
+      labels: Array.isArray(fields.labels) ? fields.labels.map(item => stringifyJiraFieldValue(item).trim()).filter(Boolean) : current.labels,
+      components: Array.isArray(fields.components) ? fields.components.map(item => stringifyJiraFieldValue(item).trim()).filter(Boolean) : current.components,
+      fixVersions: Array.isArray(fields.fixVersions) ? fields.fixVersions.map(item => stringifyJiraFieldValue(item).trim()).filter(Boolean) : current.fixVersions,
+    };
+  }, [stringifyJiraFieldValue]);
 
   useEffect(() => {
     selectedIssueTypeIdRef.current = session.selectedIssueType?.id || undefined;
   }, [session.selectedIssueType?.id]);
+
+  useEffect(() => {
+    const profile = session.jiraCapabilityProfile;
+    const issueKey = session.issueData?.key;
+    if (!profile || !issueKey || !session.jiraConnectionId || !auth.authToken) return;
+
+    const mappedFields = Object.values(profile.sourceStoryMapping).filter(Boolean).sort().join(',');
+    if (!mappedFields) return;
+
+    const signature = `${session.jiraConnectionId}:${issueKey}:${mappedFields}`;
+    if (enrichedIssueSignatureRef.current === signature) return;
+    enrichedIssueSignatureRef.current = signature;
+
+    let cancelled = false;
+    logDebug('JIRA-SOURCE', `Fetching mapped source fields for ${issueKey}`);
+    apiRequest(`${auth.apiBase}/jira/connections/${session.jiraConnectionId}/issues/${encodeURIComponent(issueKey)}`, {
+      token: auth.authToken,
+      onUnauthorized: auth.refreshSession,
+      onDebug: logDebug
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          await throwApiErrorResponse(res, `Failed to fetch mapped Jira issue fields (${res.status})`);
+        }
+        return readJsonResponse<Record<string, unknown>>(res);
+      })
+      .then((rawIssue) => {
+        if (cancelled || !session.issueData) return;
+        const enriched = buildProfileIssueData(session.issueData, profile, rawIssue);
+        updateSession({ issueData: enriched });
+        logDebug('JIRA-SOURCE-OK', `Applied source story mapping for ${issueKey}`);
+      })
+      .catch((err) => {
+        enrichedIssueSignatureRef.current = '';
+        logDebug('JIRA-SOURCE-WARN', getErrorMessage(err));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [auth.apiBase, auth.authToken, auth.refreshSession, buildProfileIssueData, logDebug, session.issueData, session.jiraCapabilityProfile, session.jiraConnectionId, updateSession]);
 
   const withTimeout = useCallback(async <T,>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> => {
     return await Promise.race([
@@ -89,12 +184,13 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
     if (!auth.authToken && !tokenOverride) return null;
     if (!context?.instanceUrl) return null;
 
-    const projectKey = context.issueData?.key?.split('-')[0];
+    const profileProject = getProfileProjectParams(session.jiraCapabilityProfile);
+    const projectKey = profileProject.projectKey || context.issueData?.key?.split('-')[0];
     const signature = JSON.stringify({
       tabId: tabId || currentTabId || null,
       instanceUrl: context.instanceUrl,
       projectKey: projectKey || null,
-      projectId: context.issueData?.projectId || null,
+      projectId: profileProject.projectId || context.issueData?.projectId || null,
       issueTypeId: selectedIssueTypeIdRef.current || null
     });
 
@@ -120,7 +216,7 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
         instanceUrl: context.instanceUrl,
         issueKey: context.issueData?.key,
         projectKey,
-        projectId: context.issueData?.projectId,
+        projectId: profileProject.projectId || context.issueData?.projectId,
         issueTypeId: selectedIssueTypeIdRef.current,
         tabId: tabId || currentTabId || undefined,
         tokenOverride
@@ -138,7 +234,7 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
     } finally {
       inFlightBootstrapRef.current = false;
     }
-  }, [auth, currentTabId, jira, logDebug, session.jiraConnectionId, session.jiraMetadata]);
+  }, [auth, currentTabId, jira, logDebug, session.jiraCapabilityProfile, session.jiraConnectionId, session.jiraMetadata]);
 
   const fetchCurrentContext = useCallback(async (force: boolean = false) => {
     if (!currentTabId) return null;
@@ -176,11 +272,12 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
     }
 
     const { project_key, project_id } = buildProjectRequestParams(currentContext?.issueData || null);
+    const profileProject = getProfileProjectParams(session.jiraCapabilityProfile);
     const payload: AuthBootstrapRequestPayload = {
       instance_url: currentContext?.instanceUrl || undefined,
       issue_key: currentContext?.issueData?.key || undefined,
-      project_key,
-      project_id,
+      project_key: profileProject.projectKey || project_key,
+      project_id: profileProject.projectId || project_id,
       issue_type_id: session.selectedIssueType?.id || undefined
     };
 
@@ -223,7 +320,7 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
 
 
     return data.view;
-  }, [auth.apiBase, currentTabId, fetchCurrentContext, jira, logDebug, session.selectedIssueType?.id, updateSession, withTimeout]);
+  }, [auth.apiBase, currentTabId, fetchCurrentContext, jira, logDebug, session.jiraCapabilityProfile, session.selectedIssueType?.id, updateSession, withTimeout]);
 
   const completeAuthenticatedSession = useCallback(async (
     data: AuthTokenResponsePayload,
@@ -687,14 +784,15 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
     },
     saveFieldSettings: async (nf, nm, nd) => {
       try {
-        const pKey = sessionData.session.issueData?.key.split('-')[0];
+        const profileProject = getProfileProjectParams(sessionData.session.jiraCapabilityProfile);
+        const pKey = profileProject.projectKey || sessionData.session.issueData?.key.split('-')[0];
         if (!sessionData.session.jiraConnectionId || !pKey || !sessionData.session.selectedIssueType?.id) {
           throw new Error('Missing Jira context for field settings sync');
         }
         const synced = await jira.saveFieldSettings({
           jiraConnectionId: sessionData.session.jiraConnectionId,
           projectKey: pKey,
-          projectId: sessionData.session.jiraMetadata?.project_id || sessionData.session.issueData?.projectId,
+          projectId: sessionData.session.jiraMetadata?.project_id || profileProject.projectId || sessionData.session.issueData?.projectId,
           issueTypeId: sessionData.session.selectedIssueType.id,
           visibleFields: nf || sessionData.session.visibleFields,
           aiMapping: nm || sessionData.session.aiMapping,

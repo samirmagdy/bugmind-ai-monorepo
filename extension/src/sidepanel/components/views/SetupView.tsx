@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useBugMind } from '../../hooks/useBugMind';
-import { ExternalLink, ArrowLeft, RefreshCw, Globe, ShieldCheck, Lock, AtSign, Link } from 'lucide-react';
+import { ExternalLink, ArrowLeft, RefreshCw, Globe, ShieldCheck, Lock, AtSign, Link, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { ActionButton, SurfaceCard } from '../common/DesignSystem';
 
 const SetupView: React.FC = () => {
@@ -16,6 +16,8 @@ const SetupView: React.FC = () => {
   const [url, setUrl] = useState('');
   const [username, setUsername] = useState('');
   const [token, setToken] = useState('');
+  const [projectKey, setProjectKey] = useState('');
+  const [xrayMode, setXrayMode] = useState<'auto' | 'server-dc-raven' | 'xray-cloud' | 'jira-fields' | 'description-fallback'>('auto');
   const [verifySsl, setVerifySsl] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -47,11 +49,18 @@ const SetupView: React.FC = () => {
         base_url: url,
         username,
         token,
-        verify_ssl: verifySsl
+        verify_ssl: verifySsl,
+        project_key: projectKey.trim() || undefined,
+        xray_mode: xrayMode
       });
 
       if (connected) {
-        updateSession({ success: 'Jira environment synchronized successfully.' });
+        const missing = session.jiraCapabilityProfile?.readiness.missingRequiredFields || [];
+        updateSession({
+          success: missing.length > 0
+            ? `Jira connected. Setup needs required field defaults: ${missing.join(', ')}.`
+            : 'Jira connected and capability profile discovered successfully.'
+        });
         setGlobalView('main');
       } else {
         updateSession({ error: 'Orchestration failed: Check your Jira credentials.' });
@@ -198,6 +207,34 @@ const SetupView: React.FC = () => {
             </div>
           </div>
 
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <label className="context-label uppercase tracking-wider block ml-1">Project Key</label>
+              <input
+                type="text"
+                value={projectKey}
+                onChange={e => setProjectKey(e.target.value.toUpperCase())}
+                className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-2xl px-4 py-2.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)] transition-all"
+                placeholder="Optional, e.g. YMA"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="context-label uppercase tracking-wider block ml-1">Xray Mode</label>
+              <select
+                value={xrayMode}
+                onChange={e => setXrayMode(e.target.value as typeof xrayMode)}
+                className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-2xl px-4 py-2.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)] transition-all"
+              >
+                <option value="auto">Auto detect</option>
+                <option value="server-dc-raven">Server/DC Raven API</option>
+                <option value="xray-cloud">Xray Cloud</option>
+                <option value="jira-fields">Jira fields fallback</option>
+                <option value="description-fallback">Description fallback</option>
+              </select>
+            </div>
+          </div>
+
           <div
             className="flex items-center gap-3 px-1 py-2 cursor-pointer group"
             onClick={() => setVerifySsl(!verifySsl)}
@@ -216,6 +253,36 @@ const SetupView: React.FC = () => {
           </div>
         </SurfaceCard>
 
+        {session.jiraCapabilityProfile && (
+          <SurfaceCard className="space-y-3">
+            <div className="flex items-center gap-2">
+              {session.jiraCapabilityProfile.readiness.canSyncToXray ? (
+                <CheckCircle2 size={16} className="text-[var(--success)]" />
+              ) : (
+                <AlertTriangle size={16} className="text-[var(--warning)]" />
+              )}
+              <span className="text-sm font-bold text-[var(--text-primary)]">Jira Readiness</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="text-[var(--text-secondary)]">User</div>
+              <div className="font-semibold text-[var(--text-primary)] truncate">{session.jiraCapabilityProfile.user.displayName || 'Connected'}</div>
+              <div className="text-[var(--text-secondary)]">Project</div>
+              <div className="font-semibold text-[var(--text-primary)] truncate">{session.jiraCapabilityProfile.selectedProject?.key || 'Auto'}</div>
+              <div className="text-[var(--text-secondary)]">Create Tests</div>
+              <div className="font-semibold text-[var(--text-primary)]">{session.jiraCapabilityProfile.permissions.canCreateIssues ? 'Yes' : 'No'}</div>
+              <div className="text-[var(--text-secondary)]">Link Issues</div>
+              <div className="font-semibold text-[var(--text-primary)]">{session.jiraCapabilityProfile.permissions.canLinkIssues ? 'Yes' : 'No'}</div>
+              <div className="text-[var(--text-secondary)]">Xray Mode</div>
+              <div className="font-semibold text-[var(--text-primary)] truncate">{session.jiraCapabilityProfile.xray.mode}</div>
+            </div>
+            {session.jiraCapabilityProfile.readiness.missingRequiredFields.length > 0 && (
+              <p className="text-xs text-[var(--warning)]">
+                Missing required defaults: {session.jiraCapabilityProfile.readiness.missingRequiredFields.join(', ')}
+              </p>
+            )}
+          </SurfaceCard>
+        )}
+
         <ActionButton 
           type="submit" 
           disabled={isSubmitting}
@@ -227,7 +294,7 @@ const SetupView: React.FC = () => {
           ) : (
             <ShieldCheck size={18} />
           )}
-          {isSubmitting ? 'Connecting...' : 'Save & Authenticate'}
+          {isSubmitting ? 'Discovering...' : 'Connect & Discover Jira'}
         </ActionButton>
       </form>
     </div>

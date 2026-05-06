@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Dict, Any, List, Optional
 
 
@@ -277,6 +277,7 @@ class XrayTestSuitePublishRequest(BaseModel):
     repository_path_field_id: Optional[str] = None
     folder_path: Optional[str] = None
     link_type: Optional[str] = "Tests"
+    target_field_defaults: Dict[str, Any] = Field(default_factory=dict)
 
 
 class XrayPublishedTest(BaseModel):

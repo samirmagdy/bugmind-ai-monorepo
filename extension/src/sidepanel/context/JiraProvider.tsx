@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { TabSession, JiraConnection, JiraProject, JiraBootstrapContext, XrayDefaultsResponse } from '../types';
+import { TabSession, JiraConnection, JiraProject, JiraBootstrapContext, XrayDefaultsResponse, JiraCapabilityProfile } from '../types';
 import { apiRequest, getErrorMessage, readJsonResponse, throwApiErrorResponse } from '../services/api';
 import {
   JiraBootstrapResponsePayload,
@@ -12,6 +12,7 @@ import {
   JiraSettingsRequestPayload,
 } from '../services/contracts';
 import { dbService } from '../services/db';
+import { buildSessionUpdatesFromJiraProfile, jiraCapabilityService } from '../services/JiraCapabilityService';
 import { JiraConnectionConfig, JiraContext } from './jira-context';
 
 function normalizeJiraUrl(url: string | null | undefined): string {
@@ -40,7 +41,7 @@ async function ensureOptionalJiraPermissions(baseUrl: string, authType: 'cloud' 
 
   try {
     const origin = new URL(normalizeJiraUrl(baseUrl)).origin;
-    const origins = [`${origin}/browse/*`, `${origin}/issues/*`, `${origin}/rest/api/*`];
+    const origins = [`${origin}/browse/*`, `${origin}/issues/*`, `${origin}/rest/api/*`, `${origin}/rest/raven/*`];
 
     const contains = await chrome.permissions.contains({ origins });
     if (contains) return true;
@@ -73,6 +74,13 @@ function buildProjectIdentity(projectKey: string, projectId?: string): string {
   return projectId || projectKey;
 }
 
+function findIssueType(issueTypes: JiraBootstrapContext['issue_types'], names: string[]) {
+  const exactNames = names.map(name => name.toLowerCase());
+  return issueTypes.find(issueType => exactNames.includes(issueType.name.trim().toLowerCase())) ||
+    issueTypes.find(issueType => exactNames.some(name => issueType.name.toLowerCase().includes(name))) ||
+    null;
+}
+
 const FRONTEND_METADATA_CACHE_VERSION = 'v2';
 
 export const JiraProvider: React.FC<{ 
@@ -88,6 +96,7 @@ export const JiraProvider: React.FC<{
   const [verifySsl, setVerifySslState] = useState(true);
   const activeFetches = useRef<Set<string>>(new Set());
   const bootstrapPromiseRef = useRef<Map<string, Promise<JiraBootstrapContext | null>>>(new Map());
+  const loadedProfileSignatureRef = useRef('');
   const startFetch = (key: string) => activeFetches.current.add(key);
   const clearFetch = (key: string) => activeFetches.current.delete(key);
 
@@ -111,19 +120,27 @@ export const JiraProvider: React.FC<{
       verifySsl: data.verify_ssl ?? true
     });
 
+    const issueTypes = data.issue_types || [];
+    const bugIssueType = session.jiraCapabilityProfile?.issueTypes.bug || findIssueType(issueTypes, ['Bug', 'Defect']);
+    const testIssueType = session.jiraCapabilityProfile?.issueTypes.test || findIssueType(issueTypes, ['Test', 'Xray Test', 'Manual Test']);
+    const selectedIssueType = session.selectedIssueType || data.selected_issue_type || bugIssueType || testIssueType || null;
+
     updateSession({
       instanceUrl: normalizedBase,
       jiraConnectionId: data.connection_id,
-      issueTypes: data.issue_types || [],
+      issueTypes,
       issueTypesFetched: hasProjectContext,
-      selectedIssueType: data.selected_issue_type || null,
+      selectedIssueType,
+      defaultBugIssueType: session.defaultBugIssueType || bugIssueType,
+      defaultTestCaseIssueType: session.defaultTestCaseIssueType || testIssueType,
+      defaultGapAnalysisIssueType: session.defaultGapAnalysisIssueType || bugIssueType,
       visibleFields: data.visible_fields || [],
       aiMapping: data.ai_mapping || {},
       fieldDefaults: data.field_defaults || {},
       jiraMetadata: data.jira_metadata || null,
       error: null
     }, tabId);
-  }, [saveJiraConfig, updateSession]);
+  }, [saveJiraConfig, session.defaultBugIssueType, session.defaultGapAnalysisIssueType, session.defaultTestCaseIssueType, session.jiraCapabilityProfile, session.selectedIssueType, updateSession]);
 
   const bootstrapContext = useCallback(async ({
     instanceUrl,
@@ -255,6 +272,24 @@ export const JiraProvider: React.FC<{
     });
   }, []);
 
+  useEffect(() => {
+    const projectKey = session.issueData?.key?.split('-')[0] || session.xrayTargetProjectKey;
+    jiraCapabilityService.load({ baseUrl: session.instanceUrl, projectKey }).then((profile) => {
+      if (profile) {
+        const signature = `${profile.connection.baseUrl}:${profile.connection.lastCheckedAt}`;
+        if (loadedProfileSignatureRef.current === signature) return;
+        const activeInstance = normalizeJiraUrl(session.instanceUrl);
+        const profileBase = normalizeJiraUrl(profile.connection.baseUrl);
+        if (activeInstance && profileBase && activeInstance !== profileBase && !activeInstance.startsWith(`${profileBase}/`)) {
+          return;
+        }
+        loadedProfileSignatureRef.current = signature;
+        updateSession(buildSessionUpdatesFromJiraProfile(profile, session));
+        logDebug('JIRA-PROFILE-LOAD', `Loaded Jira capability profile for ${profile.connection.baseUrl}`);
+      }
+    });
+  }, [logDebug, session, updateSession]);
+
   const fetchConnections = useCallback(async () => {
     if (!authToken) return;
     try {
@@ -324,10 +359,12 @@ export const JiraProvider: React.FC<{
         body: JSON.stringify({ is_active: true })
       });
       if (res.ok) {
+        void jiraCapabilityService.clear();
         updateSession({
           jiraConnectionId: id,
           instanceUrl: hostUrl,
           jiraMetadata: null,
+          jiraCapabilityProfile: null,
           issueTypes: [],
           selectedIssueType: null,
           visibleFields: [],
@@ -372,9 +409,11 @@ export const JiraProvider: React.FC<{
       if (res.ok) {
         const updated = await readJsonResponse<JiraConnection>(res);
         if (session.jiraConnectionId === id) {
+          void jiraCapabilityService.clear();
           updateSession({
             instanceUrl: typeof updates.host_url === 'string' ? updates.host_url : undefined,
             jiraMetadata: null,
+            jiraCapabilityProfile: null,
             issueTypes: [],
             selectedIssueType: null,
             visibleFields: [],
@@ -499,9 +538,11 @@ export const JiraProvider: React.FC<{
       });
       if (res.ok) {
         if (session.jiraConnectionId === id) {
+          void jiraCapabilityService.clear();
           updateSession({
             jiraConnectionId: null,
             jiraMetadata: null,
+            jiraCapabilityProfile: null,
             issueTypes: [],
             selectedIssueType: null,
             visibleFields: [],
@@ -533,6 +574,19 @@ export const JiraProvider: React.FC<{
         updateSession({ error: 'Optional permission for this Jira host was denied.' });
         return false;
       }
+
+      logDebug('JIRA-DISCOVERY', `Running token-backed Jira capability discovery for ${config.base_url}...`);
+      const capabilityProfile = await jiraCapabilityService.discover({
+        baseUrl: config.base_url,
+        username: config.username,
+        token: config.token,
+        authType: config.auth_type,
+        projectKey: config.project_key,
+        xrayMode: config.xray_mode || 'auto',
+      });
+      await jiraCapabilityService.save(capabilityProfile);
+      updateSession(buildSessionUpdatesFromJiraProfile(capabilityProfile, session));
+      logDebug('JIRA-DISCOVERY-OK', `Capability profile saved for ${capabilityProfile.selectedProject?.key || 'no project'}`);
 
       const payload: JiraConnectionCreateRequestPayload = {
         host_url: config.base_url.replace(/\/$/, ''),
@@ -566,7 +620,29 @@ export const JiraProvider: React.FC<{
     } finally {
       updateSession({ loading: false });
     }
-  }, [apiBase, authToken, fetchConnections, fetchProjects, logDebug, refreshAuthToken, saveJiraConfig, updateSession]);
+  }, [apiBase, authToken, fetchConnections, fetchProjects, logDebug, refreshAuthToken, saveJiraConfig, session, updateSession]);
+
+  const discoverJiraProfile = useCallback(async (config: JiraConnectionConfig): Promise<JiraCapabilityProfile | null> => {
+    logDebug('JIRA-DISCOVERY', `Discovering Jira capabilities for ${config.base_url}...`);
+    try {
+      const profile = await jiraCapabilityService.discover({
+        baseUrl: config.base_url,
+        username: config.username,
+        token: config.token,
+        authType: config.auth_type,
+        projectKey: config.project_key,
+        xrayMode: config.xray_mode || 'auto',
+      });
+      await jiraCapabilityService.save(profile);
+      updateSession(buildSessionUpdatesFromJiraProfile(profile, session));
+      logDebug('JIRA-DISCOVERY-OK', `Capability profile ready for ${profile.selectedProject?.key || 'no project'}`);
+      return profile;
+    } catch (err) {
+      logDebug('JIRA-DISCOVERY-ERR', String(err));
+      updateSession({ error: getErrorMessage(err) });
+      return null;
+    }
+  }, [logDebug, session, updateSession]);
 
   const value = useMemo(() => ({
     jiraPlatform,
@@ -576,6 +652,7 @@ export const JiraProvider: React.FC<{
     applyBootstrapContext,
     verifySsl, setVerifySsl,
     createConnection,
+    discoverJiraProfile,
     fetchConnections,
     deleteConnection,
     setActiveConnection,
@@ -583,7 +660,7 @@ export const JiraProvider: React.FC<{
     fetchProjects,
     fetchXrayDefaults
   }), [
-    jiraPlatform, saveFieldSettings, bootstrapContext, applyBootstrapContext, verifySsl, setVerifySsl, createConnection, fetchConnections, deleteConnection, setActiveConnection, updateConnection, fetchProjects, fetchXrayDefaults
+    jiraPlatform, saveFieldSettings, bootstrapContext, applyBootstrapContext, verifySsl, setVerifySsl, createConnection, discoverJiraProfile, fetchConnections, deleteConnection, setActiveConnection, updateConnection, fetchProjects, fetchXrayDefaults
   ]);
 
   return <JiraContext.Provider value={value}>{children}</JiraContext.Provider>;

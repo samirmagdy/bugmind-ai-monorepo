@@ -96,6 +96,8 @@ export interface JiraProject {
   id: string;
   key: string;
   name: string;
+  projectTypeKey?: string;
+  simplified?: boolean;
 }
 
 export interface BugReport {
@@ -171,6 +173,7 @@ export interface TabSession {
   supportingArtifacts: SupportingArtifact[];
   manualInputs: ManualBugInput[];
   jiraMetadata: JiraMetadata | null;
+  jiraCapabilityProfile: JiraCapabilityProfile | null;
   issueTypes: IssueType[];
   selectedIssueType: IssueType | null;
   defaultBugIssueType: IssueType | null;
@@ -195,6 +198,7 @@ export interface TabSession {
   xrayRepositoryPathFieldId: string;
   xrayFolderPath: string;
   xrayLinkType: string;
+  xrayFieldDefaults: Record<string, unknown>;
   xrayWarnings: string[];
   xrayPublishSupported: boolean;
   xrayPublishMode: 'jira_server' | 'xray_cloud';
@@ -284,6 +288,90 @@ export interface JiraMetadata {
   fields: JiraField[];
 }
 
+export interface JiraCapabilityFieldSchema {
+  name: string;
+  type: string;
+  required: boolean;
+  allowedValues?: JiraFieldOption[];
+}
+
+export interface JiraCapabilityProfile {
+  jiraProfileVersion: 1;
+  connection: {
+    baseUrl: string;
+    deploymentType: 'cloud' | 'server' | 'dataCenter' | 'unknown';
+    apiVersion: '2' | '3';
+    connected: boolean;
+    lastCheckedAt: string;
+    buildNumber?: string;
+    version?: string;
+  };
+  user: {
+    accountId?: string;
+    displayName?: string;
+    emailAddress?: string;
+    timeZone?: string;
+    active?: boolean;
+  };
+  projects: JiraProject[];
+  selectedProject: JiraProject | null;
+  permissions: {
+    canBrowse: boolean;
+    canCreateIssues: boolean;
+    canEditIssues: boolean;
+    canLinkIssues: boolean;
+    canTransitionIssues: boolean;
+    canAddComments?: boolean;
+    canDeleteIssues?: boolean;
+  };
+  issueTypes: {
+    story: IssueType | null;
+    test: IssueType | null;
+    bug: IssueType | null;
+    all: IssueType[];
+  };
+  sourceStoryMapping: {
+    acceptanceCriteria?: string;
+    mainFlow?: string;
+    alternativeFlow?: string;
+    businessRules?: string;
+  };
+  targetTestCreateFields: {
+    requiredFields: string[];
+    fieldSchemas: Record<string, JiraCapabilityFieldSchema>;
+  };
+  xray: {
+    installed: boolean;
+    mode: 'server-dc-raven' | 'xray-cloud' | 'jira-fields' | 'description-fallback' | 'unknown';
+    supportsNativeSteps: boolean;
+    supportsRepositoryFolders: boolean;
+    supportsManualStepsField: boolean;
+    testTypeFieldId?: string;
+    manualStepsFieldId?: string;
+    fieldDefaults?: Record<string, unknown>;
+  };
+  linking: {
+    preferredLinkType: string;
+    outward: string;
+    inward: string;
+    direction: 'test_to_story' | 'story_to_test';
+  };
+  syncStrategy: {
+    createInSourceProject: boolean;
+    fallbackWhenNativeStepsFail: 'manualStepsField' | 'description';
+    transitionAfterCreate: boolean;
+    inheritLabels: boolean;
+    inheritComponents: boolean;
+    inheritVersions: boolean;
+  };
+  readiness: {
+    canGenerateFromJira: boolean;
+    canSyncToXray: boolean;
+    missingRequiredFields: string[];
+    warnings: string[];
+  };
+}
+
 export interface JiraBootstrapContext {
   connection_id: number;
   instance_url: string;
@@ -326,6 +414,10 @@ export interface IssueData {
   acceptanceCriteria: string;
   typeName: string;
   iconUrl?: string;
+  priority?: string;
+  labels?: string[];
+  components?: string[];
+  fixVersions?: string[];
 }
 
 export interface BulkAttachment {
@@ -410,6 +502,7 @@ export const INITIAL_SESSION: TabSession = {
   supportingArtifacts: [],
   manualInputs: [{ text: '', supportingContext: '', supportingArtifacts: [] }],
   jiraMetadata: null,
+  jiraCapabilityProfile: null,
   issueTypes: [],
   selectedIssueType: null,
   defaultBugIssueType: null,
@@ -434,6 +527,7 @@ export const INITIAL_SESSION: TabSession = {
   xrayRepositoryPathFieldId: '',
   xrayFolderPath: '',
   xrayLinkType: 'Tests',
+  xrayFieldDefaults: {},
   xrayWarnings: [],
   xrayPublishSupported: true,
   xrayPublishMode: 'jira_server',
