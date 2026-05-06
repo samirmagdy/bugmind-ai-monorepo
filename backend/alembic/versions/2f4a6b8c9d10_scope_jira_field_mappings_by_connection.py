@@ -19,33 +19,26 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "jira_field_mappings",
-        sa.Column("jira_connection_id", sa.Integer(), nullable=True),
-    )
-    op.create_index(
-        "ix_jira_field_mappings_jira_connection_id",
-        "jira_field_mappings",
-        ["jira_connection_id"],
-    )
-    op.create_foreign_key(
-        "fk_jira_field_mappings_jira_connection_id",
-        "jira_field_mappings",
-        "jira_connections",
-        ["jira_connection_id"],
-        ["id"],
-        ondelete="CASCADE",
-    )
+    with op.batch_alter_table("jira_field_mappings") as batch_op:
+        batch_op.add_column(sa.Column("jira_connection_id", sa.Integer(), nullable=True))
+        batch_op.create_index(
+            "ix_jira_field_mappings_jira_connection_id",
+            ["jira_connection_id"],
+        )
+        batch_op.create_foreign_key(
+            "fk_jira_field_mappings_jira_connection_id",
+            "jira_connections",
+            ["jira_connection_id"],
+            ["id"],
+            ondelete="CASCADE",
+        )
 
 
 def downgrade() -> None:
-    op.drop_constraint(
-        "fk_jira_field_mappings_jira_connection_id",
-        "jira_field_mappings",
-        type_="foreignkey",
-    )
-    op.drop_index(
-        "ix_jira_field_mappings_jira_connection_id",
-        table_name="jira_field_mappings",
-    )
-    op.drop_column("jira_field_mappings", "jira_connection_id")
+    with op.batch_alter_table("jira_field_mappings") as batch_op:
+        batch_op.drop_constraint(
+            "fk_jira_field_mappings_jira_connection_id",
+            type_="foreignkey",
+        )
+        batch_op.drop_index("ix_jira_field_mappings_jira_connection_id")
+        batch_op.drop_column("jira_connection_id")
