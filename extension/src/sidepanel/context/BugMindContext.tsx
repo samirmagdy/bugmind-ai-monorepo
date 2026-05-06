@@ -103,6 +103,23 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
         return text ? `${section.label}:\n${text}` : '';
       })
       .filter(Boolean);
+    const linkedTestKeys = Array.isArray(fields.issuelinks)
+      ? fields.issuelinks.flatMap((link) => {
+        if (!link || typeof link !== 'object') return [];
+        const record = link as Record<string, unknown>;
+        const linkedIssues = [record.inwardIssue, record.outwardIssue]
+          .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item));
+        return linkedIssues
+          .filter((issue) => {
+            const issueFields = issue.fields && typeof issue.fields === 'object' ? issue.fields as Record<string, unknown> : {};
+            const issueType = issueFields.issuetype && typeof issueFields.issuetype === 'object' ? issueFields.issuetype as Record<string, unknown> : {};
+            const typeName = String(issueType.name || '').trim().toLowerCase();
+            return typeName === profile.issueTypes.test?.name?.trim().toLowerCase() || typeName.includes('test');
+          })
+          .map((issue) => String(issue.key || '').trim())
+          .filter(Boolean);
+      })
+      : [];
 
     return {
       ...current,
@@ -113,6 +130,7 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
       labels: Array.isArray(fields.labels) ? fields.labels.map(item => stringifyJiraFieldValue(item).trim()).filter(Boolean) : current.labels,
       components: Array.isArray(fields.components) ? fields.components.map(item => stringifyJiraFieldValue(item).trim()).filter(Boolean) : current.components,
       fixVersions: Array.isArray(fields.fixVersions) ? fields.fixVersions.map(item => stringifyJiraFieldValue(item).trim()).filter(Boolean) : current.fixVersions,
+      linkedTestKeys: Array.from(new Set(linkedTestKeys.length ? linkedTestKeys : current.linkedTestKeys || [])),
     };
   }, [stringifyJiraFieldValue]);
 

@@ -14,13 +14,19 @@ import { TIMEOUTS } from '../../constants';
 import { useI18n } from '../../i18n';
 import {
   buildCapabilityFeatures,
+  buildCoverageMatrix,
   buildJiraReadinessItems,
+  buildStoryQualityProfile,
+  buildSyncRepairSuggestions,
   buildXrayPayloadPreview,
+  dryRunXrayPayload,
   getJiraReadinessScore,
   getMappedSourceStoryFields,
   getMissingRequiredTargetFieldKeys,
   getProfileProjectParams,
-  jiraCapabilityService
+  jiraCapabilityService,
+  sanitizeJiraCapabilityProfile,
+  suggestTestType
 } from '../../services/JiraCapabilityService';
 
 const HIDDEN_SYSTEM_FIELD_KEYS = new Set([
@@ -256,6 +262,41 @@ const MainView: React.FC = () => {
   const selectedBulkStoriesOutsideProfile = session.jiraCapabilityProfile
     ? session.bulkSelectedStoryKeys.filter(key => key.split('-')[0] !== session.jiraCapabilityProfile?.selectedProject?.key)
     : [];
+  const storyQuality = buildStoryQualityProfile(session.issueData, session.jiraCapabilityProfile);
+  const coverageMatrix = buildCoverageMatrix(session.issueData, session.testCases);
+  const payloadDryRun = dryRunXrayPayload(session.jiraCapabilityProfile, session);
+  const repairSuggestions = buildSyncRepairSuggestions(session.error, session.jiraCapabilityProfile);
+  const suggestedTestType = suggestTestType(session.issueData, session.testCases, session.jiraCapabilityProfile);
+  const missingCoverageCount = coverageMatrix.filter(item => item.status === 'missing').length;
+  const highRiskBulkStories = session.bulkStories
+    .map(story => ({
+      ...story,
+      qaRisk: Math.min(100, Math.round(
+        (story.risk_score || 0) +
+        (!story.description ? 18 : 0) +
+        ((story.attachments || []).length > 0 ? 8 : 0) +
+        (/blocked|critical|payment|security|permission/i.test(`${story.summary} ${story.status || ''}`) ? 12 : 0)
+      ))
+    }))
+    .sort((a, b) => b.qaRisk - a.qaRisk)
+    .slice(0, 5);
+
+  const copySanitizedProfile = async () => {
+    if (!session.jiraCapabilityProfile) return;
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(sanitizeJiraCapabilityProfile(session.jiraCapabilityProfile), null, 2));
+      updateSession({ success: 'Sanitized Jira capability profile copied.' });
+    } catch {
+      updateSession({ error: 'Could not copy the sanitized profile.' });
+    }
+  };
+
+  const applySuggestedTestType = () => {
+    if (!suggestedTestType || !session.testCases.length) return;
+    updateWorkWithHistory(`Applied ${suggestedTestType} test type`, {
+      testCases: session.testCases.map(testCase => ({ ...testCase, test_type: suggestedTestType }))
+    });
+  };
 
   const toggleBulkStory = (storyKey: string) => {
     const selected = new Set(session.bulkSelectedStoryKeys);
@@ -1180,6 +1221,40 @@ const MainView: React.FC = () => {
                             </div>
                           )}
 
+                          {highRiskBulkStories.length > 0 && (
+                            <div className="rounded-[1rem] border border-[var(--border-soft)] bg-[var(--surface-soft)] p-3 space-y-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <div>
+                                  <div className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Bulk Risk Priority</div>
+                                  <div className="text-[11px] text-[var(--text-secondary)]">Auto-ranked from risk score, missing detail, attachments, and sensitive workflow terms.</div>
+                                </div>
+                                <StatusBadge tone="warning">{highRiskBulkStories.length} Focus</StatusBadge>
+                              </div>
+                              <div className="grid grid-cols-1 gap-2">
+                                {highRiskBulkStories.map(story => (
+                                  <button
+                                    key={story.key}
+                                    type="button"
+                                    onClick={() => {
+                                      if (!session.bulkSelectedStoryKeys.includes(story.key)) {
+                                        updateSession({ bulkSelectedStoryKeys: [...session.bulkSelectedStoryKeys, story.key] });
+                                      }
+                                    }}
+                                    className="flex items-start justify-between gap-3 rounded-[0.9rem] border border-[var(--border-soft)] bg-[var(--bg-input)] px-3 py-2 text-left"
+                                  >
+                                    <div className="min-w-0">
+                                      <div className="text-[11px] font-black text-[var(--text-primary)]">{story.key}</div>
+                                      <div className="text-[10px] text-[var(--text-muted)] truncate">{story.summary}</div>
+                                    </div>
+                                    <StatusBadge tone={story.qaRisk >= 70 ? 'danger' : story.qaRisk >= 45 ? 'warning' : 'info'}>
+                                      {story.qaRisk}
+                                    </StatusBadge>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
                           {session.bulkStories.length > 0 && (
                             <div className="space-y-3">
                               <div className="flex items-center justify-between gap-3">
@@ -1404,6 +1479,126 @@ const MainView: React.FC = () => {
                     </button>
                   </div>
                 </div>
+
+                <SurfaceCard className="space-y-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">QA Control Center</div>
+                      <div className="text-[11px] text-[var(--text-secondary)]">Pre-publish checks from the discovered Jira/Xray profile and the current story.</div>
+                    </div>
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <StatusBadge tone={storyQuality.status === 'ready' ? 'success' : storyQuality.status === 'usable' ? 'warning' : 'danger'}>
+                        Story {storyQuality.score}%
+                      </StatusBadge>
+                      <StatusBadge tone={payloadDryRun.valid ? 'success' : 'danger'}>
+                        {payloadDryRun.valid ? 'Payload Ready' : 'Payload Needs Fix'}
+                      </StatusBadge>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="rounded-[1rem] border border-[var(--border-soft)] bg-[var(--surface-soft)] p-3 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Story Quality</div>
+                        <StatusBadge tone={storyQuality.status === 'ready' ? 'success' : storyQuality.status === 'usable' ? 'warning' : 'danger'}>
+                          {storyQuality.status}
+                        </StatusBadge>
+                      </div>
+                      {storyQuality.items.map(item => (
+                        <div key={item.key} className="flex items-start gap-2 text-[11px] text-[var(--text-secondary)]">
+                          <span className={`mt-1.5 h-1.5 w-1.5 rounded-full ${item.ok ? 'bg-[var(--success)]' : item.severity === 'danger' ? 'bg-[var(--error)]' : 'bg-[var(--warning)]'}`} />
+                          <div>
+                            <div className="font-bold text-[var(--text-primary)]">{item.label}</div>
+                            <div className="text-[10px] text-[var(--text-muted)]">{item.detail}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="rounded-[1rem] border border-[var(--border-soft)] bg-[var(--surface-soft)] p-3 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Dry Run</div>
+                        <StatusBadge tone={payloadDryRun.valid ? 'success' : 'danger'}>
+                          {payloadDryRun.issues.length} signal{payloadDryRun.issues.length === 1 ? '' : 's'}
+                        </StatusBadge>
+                      </div>
+                      {payloadDryRun.issues.length === 0 ? (
+                        <div className="text-[11px] text-[var(--text-secondary)]">Jira create payload has the required project, issue type, fields, and selected tests.</div>
+                      ) : (
+                        payloadDryRun.issues.slice(0, 5).map(item => (
+                          <div key={item.key} className="flex items-start gap-2 text-[11px] text-[var(--text-secondary)]">
+                            <span className={`mt-1.5 h-1.5 w-1.5 rounded-full ${item.severity === 'danger' ? 'bg-[var(--error)]' : 'bg-[var(--warning)]'}`} />
+                            <div>
+                              <div className="font-bold text-[var(--text-primary)]">{item.label}</div>
+                              <div className="text-[10px] text-[var(--text-muted)]">{item.detail}</div>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <ActionButton type="button" variant="secondary" onClick={applySuggestedTestType} disabled={!session.testCases.length}>
+                      <Check size={14} />
+                      Use {suggestedTestType}
+                    </ActionButton>
+                    <ActionButton type="button" variant="secondary" onClick={() => updateSession({ view: 'setup' })}>
+                      <RefreshCw size={14} />
+                      Reconnect & Discover
+                    </ActionButton>
+                    <ActionButton type="button" variant="secondary" onClick={copySanitizedProfile} disabled={!session.jiraCapabilityProfile}>
+                      <Copy size={14} />
+                      Copy Profile
+                    </ActionButton>
+                  </div>
+
+                  {session.issueData?.linkedTestKeys && session.issueData.linkedTestKeys.length > 0 && (
+                    <StatusPanel
+                      tone="warning"
+                      icon={AlertTriangle}
+                      title="Existing Linked Tests Detected"
+                      description={`Review existing Tests before creating duplicates: ${session.issueData.linkedTestKeys.join(', ')}`}
+                    />
+                  )}
+
+                  {repairSuggestions.length > 0 && (
+                    <div className="rounded-[1rem] border border-[var(--warning)]/30 bg-[var(--warning)]/5 p-3 space-y-2">
+                      <div className="text-[10px] font-black uppercase tracking-widest text-[var(--warning)]">Auto Repair Suggestions</div>
+                      {repairSuggestions.map(item => (
+                        <div key={item.key} className="text-[11px] text-[var(--text-secondary)]">
+                          <span className="font-bold text-[var(--text-primary)]">{item.label}:</span> {item.detail}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {coverageMatrix.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Coverage Matrix</div>
+                        <StatusBadge tone={missingCoverageCount === 0 ? 'success' : 'warning'}>
+                          {missingCoverageCount} Missing
+                        </StatusBadge>
+                      </div>
+                      <div className="grid grid-cols-1 gap-2">
+                        {coverageMatrix.slice(0, 8).map(item => (
+                          <div key={item.reference} className="flex items-start justify-between gap-3 rounded-[0.9rem] border border-[var(--border-soft)] bg-[var(--bg-input)] px-3 py-2">
+                            <div className="min-w-0">
+                              <div className="text-[11px] font-bold text-[var(--text-primary)] truncate">{item.reference}</div>
+                              <div className="text-[10px] text-[var(--text-muted)] truncate">
+                                {item.testTitles.length ? item.testTitles.join(', ') : 'No matching generated tests'}
+                              </div>
+                            </div>
+                            <StatusBadge tone={item.status === 'covered' ? 'success' : item.status === 'partial' ? 'warning' : 'danger'}>
+                              {item.status}
+                            </StatusBadge>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </SurfaceCard>
 
                 <div className="space-y-3">
                   {session.testCases.map((testCase: TestCase, idx: number) => (
@@ -1812,7 +2007,7 @@ const MainView: React.FC = () => {
 
                   <ActionButton
                     onClick={publishTestCasesToXray}
-                    disabled={!session.xrayTargetProjectId || selectedTestCaseCount === 0 || session.loading || !session.xrayPublishSupported || !canCreateFromProfile || missingXrayRequiredDefaults.length > 0}
+                    disabled={!session.xrayTargetProjectId || selectedTestCaseCount === 0 || session.loading || !session.xrayPublishSupported || !canCreateFromProfile || missingXrayRequiredDefaults.length > 0 || !payloadDryRun.valid}
                     variant="primary"
                   >
                     <Send size={16} />

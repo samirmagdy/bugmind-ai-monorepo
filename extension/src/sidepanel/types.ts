@@ -418,6 +418,7 @@ export interface IssueData {
   labels?: string[];
   components?: string[];
   fixVersions?: string[];
+  linkedTestKeys?: string[];
 }
 
 export interface BulkAttachment {

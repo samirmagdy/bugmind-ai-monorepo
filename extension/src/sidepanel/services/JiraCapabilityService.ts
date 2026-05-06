@@ -36,6 +36,32 @@ export type JiraCapabilityFeature = {
   detail: string;
 };
 
+export type QAInsightItem = {
+  key: string;
+  label: string;
+  ok: boolean;
+  severity: 'info' | 'warning' | 'danger' | 'success';
+  detail: string;
+};
+
+export type StoryQualityProfile = {
+  score: number;
+  status: 'ready' | 'usable' | 'weak';
+  items: QAInsightItem[];
+};
+
+export type CoverageMatrixItem = {
+  reference: string;
+  status: 'covered' | 'partial' | 'missing';
+  testIndexes: number[];
+  testTitles: string[];
+};
+
+export type PayloadDryRunResult = {
+  valid: boolean;
+  issues: QAInsightItem[];
+};
+
 function normalizeBaseUrl(url: string): string {
   const trimmed = url.trim().replace(/\/+$/, '');
   if (!trimmed) return '';
@@ -633,6 +659,215 @@ export function buildXrayPayloadPreview(profile: JiraCapabilityProfile | null | 
 export function isIssueInProfileProject(issueData: IssueData | null | undefined, profile: JiraCapabilityProfile | null | undefined): boolean {
   if (!issueData || !profile?.selectedProject?.key) return true;
   return issueData.key.split('-')[0]?.toUpperCase() === profile.selectedProject.key.toUpperCase();
+}
+
+function splitRequirementReferences(text: string): string[] {
+  const lines = text
+    .split(/\n+/)
+    .map(line => line.trim())
+    .filter(Boolean);
+  const candidates = lines
+    .filter(line => /(^|\b)(AC|BR|REQ|Rule|Flow|\d+[.)-])/i.test(line) || line.length >= 18)
+    .map((line, index) => {
+      const cleaned = line.replace(/^[-*]\s*/, '').trim();
+      const explicit = cleaned.match(/^((?:AC|BR|REQ)[-\s]?\d+|\d+[.)-])/i)?.[1];
+      return explicit ? explicit.replace(/[.)-]$/, '') : `Requirement ${index + 1}`;
+    });
+  return Array.from(new Set(candidates)).slice(0, 20);
+}
+
+export function buildStoryQualityProfile(issueData: IssueData | null | undefined, profile: JiraCapabilityProfile | null | undefined): StoryQualityProfile {
+  const descriptionLength = issueData?.description?.trim().length || 0;
+  const acLength = issueData?.acceptanceCriteria?.trim().length || 0;
+  const mappedSources = getMappedSourceStoryFields(profile).filter(item => item.fieldId).length;
+  const linkedTests = issueData?.linkedTestKeys?.length || 0;
+  const items: QAInsightItem[] = [
+    {
+      key: 'summary',
+      label: 'Clear summary',
+      ok: Boolean(issueData?.summary && issueData.summary.trim().length >= 12),
+      severity: issueData?.summary && issueData.summary.trim().length >= 12 ? 'success' : 'warning',
+      detail: issueData?.summary ? 'Summary is available for generation context.' : 'No summary found on the active issue.',
+    },
+    {
+      key: 'description',
+      label: 'Useful description',
+      ok: descriptionLength >= 80,
+      severity: descriptionLength >= 80 ? 'success' : descriptionLength > 0 ? 'warning' : 'danger',
+      detail: descriptionLength ? `${descriptionLength} characters detected.` : 'No usable description was detected.',
+    },
+    {
+      key: 'acceptanceCriteria',
+      label: 'Acceptance criteria',
+      ok: acLength >= 60,
+      severity: acLength >= 60 ? 'success' : acLength > 0 ? 'warning' : 'danger',
+      detail: acLength ? `${splitRequirementReferences(issueData?.acceptanceCriteria || '').length || 1} requirement signals detected.` : 'No acceptance criteria were found.',
+    },
+    {
+      key: 'mappedFields',
+      label: 'Mapped story fields',
+      ok: mappedSources > 0,
+      severity: mappedSources > 0 ? 'success' : 'warning',
+      detail: mappedSources > 0 ? `${mappedSources} Jira source fields enrich generation.` : 'Generation will use summary/description only.',
+    },
+    {
+      key: 'existingTests',
+      label: 'Existing linked tests',
+      ok: linkedTests === 0,
+      severity: linkedTests > 0 ? 'warning' : 'success',
+      detail: linkedTests > 0 ? `${linkedTests} linked Test issue(s) detected. Review before creating duplicates.` : 'No linked Test issues detected.',
+    },
+  ];
+  const score = Math.round((items.filter(item => item.ok).length / items.length) * 100);
+  return {
+    score,
+    status: score >= 80 ? 'ready' : score >= 50 ? 'usable' : 'weak',
+    items,
+  };
+}
+
+export function buildCoverageMatrix(issueData: IssueData | null | undefined, testCases: TabSession['testCases']): CoverageMatrixItem[] {
+  const references = splitRequirementReferences(issueData?.acceptanceCriteria || '');
+  const fallbackRefs = references.length ? references : ['Story summary', 'Main scenario'];
+  return fallbackRefs.map((reference) => {
+    const normalizedReference = reference.toLowerCase();
+    const matches = testCases
+      .map((testCase, index) => ({ testCase, index }))
+      .filter(({ testCase }) => {
+        const refs = (testCase.acceptance_criteria_refs || []).join(' ').toLowerCase();
+        const body = [
+          testCase.title,
+          testCase.objective,
+          testCase.expected_result,
+          testCase.coverage_notes,
+          ...(testCase.steps || []),
+        ].filter(Boolean).join(' ').toLowerCase();
+        return refs.includes(normalizedReference) || body.includes(normalizedReference);
+      });
+    const status: CoverageMatrixItem['status'] = matches.length > 0
+      ? matches.length >= 2 ? 'covered' : 'partial'
+      : 'missing';
+    return {
+      reference,
+      status,
+      testIndexes: matches.map(item => item.index),
+      testTitles: matches.map(item => item.testCase.title || `Test ${item.index + 1}`),
+    };
+  });
+}
+
+export function dryRunXrayPayload(
+  profile: JiraCapabilityProfile | null | undefined,
+  session: Pick<TabSession, 'issueData' | 'testCases' | 'xrayTargetProjectId' | 'xrayFieldDefaults' | 'xrayTestIssueTypeName'>
+): PayloadDryRunResult {
+  const issues: QAInsightItem[] = [];
+  if (!profile) {
+    issues.push({ key: 'profile', label: 'Capability profile', ok: false, severity: 'danger', detail: 'Run Jira discovery before publishing.' });
+  }
+  if (!session.issueData?.key) {
+    issues.push({ key: 'story', label: 'Source story', ok: false, severity: 'danger', detail: 'Open a Jira story before publishing.' });
+  }
+  if (session.issueData?.key && profile?.selectedProject && !isIssueInProfileProject(session.issueData, profile)) {
+    issues.push({
+      key: 'projectMismatch',
+      label: 'Project mismatch',
+      ok: true,
+      severity: 'warning',
+      detail: `Story is in ${session.issueData.key.split('-')[0]}, while the capability profile targets ${profile.selectedProject.key}.`,
+    });
+  }
+  if (!session.xrayTargetProjectId && !profile?.selectedProject?.id) {
+    issues.push({ key: 'project', label: 'Target project', ok: false, severity: 'danger', detail: 'Select an Xray target project.' });
+  }
+  if (!profile?.issueTypes.test && !session.xrayTestIssueTypeName) {
+    issues.push({ key: 'issueType', label: 'Test issue type', ok: false, severity: 'danger', detail: 'Select or discover the Xray Test issue type.' });
+  }
+  getMissingRequiredTargetFieldKeys(profile, session.xrayFieldDefaults).forEach(fieldKey => {
+    issues.push({
+      key: `required:${fieldKey}`,
+      label: profile?.targetTestCreateFields.fieldSchemas[fieldKey]?.name || fieldKey,
+      ok: false,
+      severity: 'danger',
+      detail: 'Required by Jira create metadata.',
+    });
+  });
+  if (!session.testCases.some(testCase => testCase.selected !== false)) {
+    issues.push({ key: 'selectedTests', label: 'Selected tests', ok: false, severity: 'danger', detail: 'Select at least one test case.' });
+  }
+  session.testCases.forEach((testCase, index) => {
+    if (!testCase.title?.trim()) {
+      issues.push({ key: `test:${index}:title`, label: `Test ${index + 1} title`, ok: false, severity: 'warning', detail: 'Title is empty.' });
+    }
+    if (!testCase.steps?.length) {
+      issues.push({ key: `test:${index}:steps`, label: `Test ${index + 1} steps`, ok: false, severity: 'warning', detail: 'No execution steps.' });
+    }
+    if (!testCase.expected_result?.trim()) {
+      issues.push({ key: `test:${index}:expected`, label: `Test ${index + 1} expected result`, ok: false, severity: 'warning', detail: 'Expected result is empty.' });
+    }
+  });
+  if (profile && !profile.permissions.canLinkIssues) {
+    issues.push({ key: 'link', label: 'Story link', ok: true, severity: 'warning', detail: 'Tests can be created, but linking may be skipped.' });
+  }
+  return {
+    valid: !issues.some(issue => issue.severity === 'danger'),
+    issues,
+  };
+}
+
+export function suggestTestType(issueData: IssueData | null | undefined, testCases: TabSession['testCases'], profile: JiraCapabilityProfile | null | undefined): string {
+  const combined = [
+    issueData?.summary,
+    issueData?.description,
+    issueData?.acceptanceCriteria,
+    ...testCases.flatMap(testCase => [testCase.title, ...(testCase.steps || [])]),
+  ].filter(Boolean).join('\n').toLowerCase();
+  const allowed = profile?.xray.testTypeFieldId
+    ? profile.targetTestCreateFields.fieldSchemas[profile.xray.testTypeFieldId]?.allowedValues || []
+    : [];
+  const chooseAllowed = (candidates: string[], fallback: string) => {
+    const match = allowed.find(option => candidates.some(candidate =>
+      [option.name, option.value, option.label, option.id].filter(Boolean).some(value => String(value).toLowerCase().includes(candidate))
+    ));
+    return match?.value || match?.name || match?.label || fallback;
+  };
+  if (/given\s+.*when\s+.*then|gherkin|cucumber/.test(combined)) return chooseAllowed(['cucumber', 'gherkin'], 'Cucumber');
+  if (/\bapi\b|endpoint|payload|json|graphql|rest\b/.test(combined)) return chooseAllowed(['generic', 'api'], 'Generic');
+  return chooseAllowed(['manual'], 'Manual');
+}
+
+export function buildSyncRepairSuggestions(error: string | null | undefined, profile: JiraCapabilityProfile | null | undefined): QAInsightItem[] {
+  const message = (error || '').toLowerCase();
+  const suggestions: QAInsightItem[] = [];
+  if (!message) return suggestions;
+  if (/required|missing/.test(message)) {
+    suggestions.push({ key: 'required-fields', label: 'Repair required fields', ok: false, severity: 'warning', detail: 'Refresh discovery or fill missing defaults in Detected Test Fields.' });
+  }
+  if (/option|allowed|valid value|invalid value/.test(message)) {
+    suggestions.push({ key: 'allowed-values', label: 'Refresh allowed values', ok: false, severity: 'warning', detail: 'Jira rejected a value. Reconnect & Discover to reload field options.' });
+  }
+  if (/issue type|issuetype/.test(message)) {
+    suggestions.push({ key: 'issue-type', label: 'Repair Test issue type', ok: false, severity: 'warning', detail: 'Select the detected Test issue type again or rerun discovery.' });
+  }
+  if (/link|permission|403|forbidden/.test(message)) {
+    suggestions.push({ key: 'permissions', label: 'Permission repair', ok: false, severity: 'warning', detail: profile?.permissions.canCreateIssues ? 'Create is allowed; check Link Issues or Xray permissions.' : 'Ask a Jira admin for create/link permissions.' });
+  }
+  if (/xray|raven|step/.test(message)) {
+    suggestions.push({ key: 'xray-fallback', label: 'Switch Xray fallback', ok: false, severity: 'warning', detail: 'Use Manual Steps field or Description fallback when native Xray APIs fail.' });
+  }
+  return suggestions;
+}
+
+export function sanitizeJiraCapabilityProfile(profile: JiraCapabilityProfile): Record<string, unknown> {
+  return {
+    ...profile,
+    user: {
+      accountId: profile.user.accountId ? 'redacted' : undefined,
+      displayName: profile.user.displayName,
+      emailAddress: profile.user.emailAddress ? 'redacted' : undefined,
+      timeZone: profile.user.timeZone,
+      active: profile.user.active,
+    },
+  };
 }
 
 export function buildSessionUpdatesFromJiraProfile(
