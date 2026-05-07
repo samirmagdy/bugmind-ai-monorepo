@@ -14,6 +14,7 @@ from app.models.jira import JiraConnection, JiraFieldMapping
 from app.models.subscription import PlanType, Subscription
 from app.models.usage import UsageLog
 from app.models.user import User
+from app.models.workspace import WorkspaceMember
 from app.schemas.bug import (
     BulkAnalyzeRequest,
     BulkBrdCompareRequest,
@@ -81,9 +82,6 @@ def get_usage_summary(db: Session, current_user: User) -> dict:
         "plan": sub.plan.value,
     }
 
-
-from app.models.workspace import WorkspaceMember
-
 def _get_field_mapping_record(
     db: Session,
     user_id: int,
@@ -129,7 +127,7 @@ def _get_field_mapping_record(
     base_shared_query = db.query(JiraFieldMapping).join(
         WorkspaceMember, JiraFieldMapping.workspace_id == WorkspaceMember.workspace_id
     ).filter(
-        JiraFieldMapping.is_shared == True,
+        JiraFieldMapping.is_shared.is_(True),
         JiraFieldMapping.project_key == project_key,
         JiraFieldMapping.issue_type_id == issue_type_id,
         WorkspaceMember.user_id == user_id,
@@ -411,6 +409,98 @@ def _normalize_test_case(raw_test: object) -> Optional[dict]:
     }
 
 
+def _extract_requirement_refs(text: str) -> list[str]:
+    refs: list[str] = []
+    for line in text.splitlines():
+        cleaned = line.strip().strip("-* ")
+        if not cleaned:
+            continue
+        explicit = re.match(r"^((?:AC|BR|REQ)[-\s]?\d+|\d+[.)-])", cleaned, flags=re.IGNORECASE)
+        if explicit:
+            refs.append(explicit.group(1).rstrip(".-)"))
+        elif len(cleaned) >= 20:
+            refs.append(f"Requirement {len(refs) + 1}")
+        if len(refs) >= 8:
+            break
+    return list(dict.fromkeys(refs)) or ["Story requirements"]
+
+
+def _fallback_test_suite(req: TestCaseGenerationRequest, story_context: str) -> dict:
+    issue = req.issue_context
+    summary = (issue.summary if issue else "") or (issue.issue_key if issue else "") or "Jira story"
+    acceptance_criteria = (issue.acceptance_criteria if issue else "") or story_context
+    refs = _extract_requirement_refs(acceptance_criteria)
+    requested_categories = [item for item in (req.test_categories or []) if str(item or "").strip()]
+    categories = requested_categories or ["Positive", "Negative", "Boundary", "Regression"]
+
+    templates = [
+        (
+            "Positive",
+            "happy path",
+            [
+                "Review the story preconditions and prepare valid test data.",
+                "Execute the main user flow described by the story.",
+                "Verify every visible result against the acceptance criteria.",
+            ],
+            "The user can complete the main flow successfully and all mapped acceptance criteria are satisfied.",
+        ),
+        (
+            "Negative",
+            "invalid or blocked path",
+            [
+                "Prepare data or permissions that violate one story rule.",
+                "Attempt to complete the story flow with the invalid condition.",
+                "Verify the system blocks the action and shows a useful message.",
+            ],
+            "The invalid action is prevented without saving incorrect data or exposing unauthorized behavior.",
+        ),
+        (
+            "Boundary",
+            "boundary and validation rules",
+            [
+                "Identify minimum, maximum, empty, and malformed values implied by the story.",
+                "Submit each boundary value through the relevant UI or API.",
+                "Compare validation behavior with the business rules and acceptance criteria.",
+            ],
+            "Boundary values are accepted or rejected consistently with the requirement rules.",
+        ),
+        (
+            "Regression",
+            "existing behavior regression",
+            [
+                "Identify existing flows, linked components, and downstream records affected by the story.",
+                "Complete the new story flow and then repeat the related existing flow.",
+                "Verify existing behavior, audit data, and integrations still work.",
+            ],
+            "Previously supported behavior remains stable after the story change.",
+        ),
+    ]
+
+    tests = []
+    for category, focus, steps, expected in templates:
+        if category not in categories and len(tests) >= min(3, len(categories)):
+            continue
+        test_type = category if category in categories else categories[len(tests) % len(categories)]
+        tests.append({
+            "title": f"Validate {summary} - {focus}",
+            "objective": f"Confirm the {focus} for {summary}.",
+            "steps": steps,
+            "expected_result": expected,
+            "priority": "Medium",
+            "test_type": test_type,
+            "preconditions": "Story requirements are reviewed and the target environment is available.",
+            "test_data": "Use representative data from the story or QA defaults.",
+            "review_notes": "Fallback suite generated because the AI provider returned an unusable response; review and refine before sync.",
+            "acceptance_criteria_refs": refs,
+            "labels": ["bugmind-fallback"],
+            "components": [],
+        })
+        if len(tests) >= max(3, min(6, len(categories))):
+            break
+
+    return {"test_cases": tests, "coverage_score": 45.0}
+
+
 def _is_missing_jira_value(field: dict, value: object) -> bool:
     if value is None or value == "":
         return True
@@ -579,15 +669,26 @@ async def generate_test_suite_response(req: TestCaseGenerationRequest, db: Sessi
     custom_api_key = decrypt_credential(current_user.encrypted_ai_api_key) if current_user.encrypted_ai_api_key else None
     generator = TestCaseGenerator(api_key=custom_api_key)
     story_context = compose_story_context(req.selected_text, req.issue_context)
-    suite = await generator.generate_test_cases(
-        story_context,
-        model=req.model or current_user.custom_ai_model,
-        custom_instructions=req.custom_instructions,
-        issue_type_name=req.issue_type_name,
-        supporting_context=req.supporting_context,
-        test_categories=req.test_categories,
-    )
+    try:
+        suite = await generator.generate_test_cases(
+            story_context,
+            model=req.model or current_user.custom_ai_model,
+            custom_instructions=req.custom_instructions,
+            issue_type_name=req.issue_type_name,
+            supporting_context=req.supporting_context,
+            test_categories=req.test_categories,
+        )
+    except HTTPException as exc:
+        if exc.status_code not in {502, 504}:
+            raise
+        logger.warning("Falling back to deterministic test suite after AI generation failure: %s", exc.detail)
+        suite = _fallback_test_suite(req, story_context)
     normalized_tests = [normalized for raw_test in (suite.get("test_cases") or []) if (normalized := _normalize_test_case(raw_test))]
+    if not normalized_tests:
+        logger.warning("Falling back to deterministic test suite after unusable AI test payload")
+        fallback_suite = _fallback_test_suite(req, story_context)
+        normalized_tests = [normalized for raw_test in (fallback_suite.get("test_cases") or []) if (normalized := _normalize_test_case(raw_test))]
+        suite = fallback_suite
     if not normalized_tests:
         raise HTTPException(status_code=502, detail="AI returned no usable test cases. Please try again with more story detail or supporting context.")
     return TestSuiteResponse(test_cases=normalized_tests, coverage_score=_normalize_percentage(suite.get("coverage_score"), 0.0))

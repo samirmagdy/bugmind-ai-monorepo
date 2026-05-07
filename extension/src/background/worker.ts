@@ -70,6 +70,11 @@ function debugLog(message: string): void {
   }
 }
 
+function isExpectedInjectionFailure(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error || '');
+  return /showing error page|cannot access|cannot be scripted|missing host permission|no tab with id/i.test(message);
+}
+
 function normalizeJiraUrl(url: string | null | undefined): string {
   if (!url) return '';
 
@@ -380,7 +385,11 @@ async function ensureContentScript(tabId: number): Promise<boolean> {
           await new Promise((resolve) => setTimeout(resolve, 150));
         }
       } catch (error) {
-        console.error(`[BugMind-BG] Failed to inject content script into tab ${tabId}:`, error);
+        if (isExpectedInjectionFailure(error)) {
+          debugLog(`[BugMind-BG] Content script unavailable on tab ${tabId}: ${error instanceof Error ? error.message : String(error)}`);
+        } else {
+          console.error(`[BugMind-BG] Failed to inject content script into tab ${tabId}:`, error);
+        }
       } finally {
         tabScriptInjectionInFlight.delete(tabId);
       }
