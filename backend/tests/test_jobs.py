@@ -108,15 +108,18 @@ def test_cancel_job(db, test_user):
 @pytest.mark.anyio
 async def test_worker_process_job_exception(db, test_user):
     job = create_job(db, test_user.id, "epic_test_generation", "PROJ-123", "PROJ")
-    
+
     async def failing_processor(*args, **kwargs):
         raise ValueError("Simulated failure")
-        
-    await process_job(db, job.id, failing_processor)
-    
+
+    # Inject the test's session factory so process_job uses the in-memory DB,
+    # not the app-level SessionLocal which points to a different file.
+    await process_job(job.id, failing_processor, _session_factory=SessionLocal)
+
     db.refresh(job)
     assert job.status == "failed"
     assert "Simulated failure" in job.error_message
+
 
 @pytest.mark.anyio
 @patch("app.services.jobs.epic_processor.get_adapter")

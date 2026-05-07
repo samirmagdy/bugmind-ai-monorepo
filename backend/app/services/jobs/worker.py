@@ -10,19 +10,22 @@ from app.core.database import SessionLocal
 logger = logging.getLogger(__name__)
 
 
-async def process_job(job_id: str, processor_func, *args, **kwargs):
+async def process_job(job_id: str, processor_func, *args, _session_factory=None, **kwargs):
     """
     Background job runner that owns its own database session.
 
-    Each background task gets a fresh SessionLocal() that is independent of
-    the request-scoped session. This prevents 'Session already closed' errors
-    on long-running bulk jobs (Epic test generation, BRD comparison, etc.)
-    that outlive the originating HTTP request.
+    Each background task gets a fresh session independent of the request-scoped
+    session. This prevents 'Session already closed' errors on long-running bulk
+    jobs (Epic test generation, BRD comparison, etc.) that outlive the HTTP request.
 
     processor_func must be an async callable with signature:
         processor_func(job_id: str, db: Session, *args, **kwargs)
+
+    _session_factory: optional callable returning a Session (default: SessionLocal).
+        Override in tests to inject a controlled in-memory session.
     """
-    db: Session = SessionLocal()
+    factory = _session_factory or SessionLocal
+    db: Session = factory()
     try:
         job = db.query(Job).filter(Job.id == job_id).first()
         if not job:
@@ -49,6 +52,7 @@ async def process_job(job_id: str, processor_func, *args, **kwargs):
             logger.exception("Failed to persist error state for job %s.", job_id)
     finally:
         db.close()
+
 
 
 def create_job(
