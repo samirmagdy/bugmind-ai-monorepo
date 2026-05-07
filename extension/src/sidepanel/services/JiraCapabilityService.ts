@@ -947,12 +947,25 @@ export function buildXrayTargetDefaults(profile: JiraCapabilityProfile | null | 
   };
 }
 
+export function resolveProfileTargetProject(
+  profile: JiraCapabilityProfile | null | undefined,
+  requestedProjectId?: string | null
+): JiraProject | null {
+  if (!profile) return null;
+  if (requestedProjectId) {
+    const requestedProject = profile.projects.find(project => project.id === requestedProjectId);
+    if (requestedProject) return requestedProject;
+  }
+  return profile.selectedProject || null;
+}
+
 export function buildXrayPayloadPreview(profile: JiraCapabilityProfile | null | undefined, session: Pick<TabSession, 'issueData' | 'xrayTargetProjectKey' | 'xrayTargetProjectId' | 'xrayTestIssueTypeName' | 'xrayLinkType' | 'xrayFolderPath' | 'xrayFieldDefaults'>) {
   if (!profile || !session.issueData) return null;
+  const targetProject = resolveProfileTargetProject(profile, session.xrayTargetProjectId);
   return {
-    project: session.xrayTargetProjectKey || profile.selectedProject?.key || session.xrayTargetProjectId,
-    issuetype: profile.issueTypes.test?.id || session.xrayTestIssueTypeName,
-    linkType: profile.linking.preferredLinkType || session.xrayLinkType,
+    project: targetProject?.key || targetProject?.id,
+    issuetype: profile.issueTypes.test?.id || profile.issueTypes.test?.name || session.xrayTestIssueTypeName,
+    linkType: profile.linking.preferredLinkType || 'Tests',
     folderPath: session.xrayFolderPath || session.issueData.key,
     xrayMode: profile.xray.mode,
     fallback: profile.syncStrategy.fallbackWhenNativeStepsFail,
@@ -1074,6 +1087,7 @@ export function dryRunXrayPayload(
   session: Pick<TabSession, 'issueData' | 'testCases' | 'xrayTargetProjectId' | 'xrayFieldDefaults' | 'xrayTestIssueTypeName'>
 ): PayloadDryRunResult {
   const issues: QAInsightItem[] = [];
+  const targetProject = resolveProfileTargetProject(profile, session.xrayTargetProjectId);
   if (!profile) {
     issues.push({ key: 'profile', label: 'Capability profile', ok: false, severity: 'danger', detail: 'Run Jira discovery before publishing.' });
   }
@@ -1089,7 +1103,7 @@ export function dryRunXrayPayload(
       detail: `Story is in ${session.issueData.key.split('-')[0]}, while the capability profile targets ${profile.selectedProject.key}.`,
     });
   }
-  if (!session.xrayTargetProjectId && !profile?.selectedProject?.id) {
+  if (!targetProject?.id) {
     issues.push({ key: 'project', label: 'Target project', ok: false, severity: 'danger', detail: 'Select an Xray target project.' });
   }
   if (!profile?.issueTypes.test && !session.xrayTestIssueTypeName) {
@@ -1229,14 +1243,15 @@ export function buildDryRunReport(
 ): Record<string, unknown> {
   const dryRun = dryRunXrayPayload(profile, session);
   const payloadPreview = buildXrayPayloadPreview(profile, session);
+  const targetProject = resolveProfileTargetProject(profile, session.xrayTargetProjectId);
   return {
     generatedAt: new Date().toISOString(),
     valid: dryRun.valid,
     issues: dryRun.issues,
-    selectedProject: profile?.selectedProject,
+    selectedProject: targetProject,
     sourceIssue: session.issueData,
     selectedIssueType: profile?.issueTypes.test || session.xrayTestIssueTypeName,
-    expectedLinkType: profile?.linking.preferredLinkType || session.xrayLinkType,
+    expectedLinkType: profile?.linking.preferredLinkType || 'Tests',
     expectedFolderPath: session.xrayFolderPath || session.issueData?.key,
     targetFieldDefaults: session.xrayFieldDefaults,
     testCount: session.testCases.filter(testCase => testCase.selected !== false).length,
@@ -1248,9 +1263,7 @@ export function buildSessionUpdatesFromJiraProfile(
   profile: JiraCapabilityProfile,
   current?: Partial<TabSession>
 ): Partial<TabSession> {
-  const selectedProject = current?.xrayTargetProjectId
-    ? profile.projects.find(project => project.id === current.xrayTargetProjectId) || profile.selectedProject
-    : profile.selectedProject;
+  const selectedProject = resolveProfileTargetProject(profile, current?.xrayTargetProjectId);
   const bugIssueType = profile.issueTypes.bug || current?.defaultBugIssueType || null;
   const testIssueType = profile.issueTypes.test || current?.defaultTestCaseIssueType || null;
   const selectedIssueType = current?.selectedIssueType || bugIssueType || testIssueType || profile.issueTypes.story || profile.issueTypes.all[0] || null;
@@ -1267,7 +1280,7 @@ export function buildSessionUpdatesFromJiraProfile(
     xrayTargetProjectId: selectedProject?.id || null,
     xrayTargetProjectKey: selectedProject?.key || null,
     xrayTestIssueTypeName: testIssueType?.name || current?.xrayTestIssueTypeName || 'Test',
-    xrayLinkType: profile.linking.preferredLinkType || current?.xrayLinkType || 'Tests',
+    xrayLinkType: profile.linking.preferredLinkType || 'Tests',
     xrayPublishSupported: profile.readiness.canSyncToXray || profile.readiness.missingRequiredFields.length === 0,
     xrayPublishMode: profile.xray.mode === 'xray-cloud' ? 'xray_cloud' : 'jira_server',
     xrayUnsupportedReason: profile.readiness.missingRequiredFields.length > 0

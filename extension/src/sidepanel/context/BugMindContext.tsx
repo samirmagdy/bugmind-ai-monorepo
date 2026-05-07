@@ -804,7 +804,7 @@ const BugMindOrchestrator: React.FC<WrapperProps & {
         const synced = await jira.saveFieldSettings({
           jiraConnectionId: sessionData.session.jiraConnectionId,
           projectKey: pKey,
-          projectId: sessionData.session.jiraMetadata?.project_id || profileProject.projectId || sessionData.session.issueData?.projectId,
+          projectId: profileProject.projectId || sessionData.session.jiraMetadata?.project_id || sessionData.session.issueData?.projectId,
           issueTypeId: sessionData.session.selectedIssueType.id,
           visibleFields: nf || sessionData.session.visibleFields,
           aiMapping: nm || sessionData.session.aiMapping,

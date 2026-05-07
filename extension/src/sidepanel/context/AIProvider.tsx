@@ -26,7 +26,7 @@ import {
   DuplicateLinkRequestPayload,
 } from '../services/contracts';
 import { AIContext } from './ai-context';
-import { buildJiraReadinessItems, buildXrayTargetDefaults, getBlockingReadinessFailures, getMissingRequiredTargetFieldKeys, getProfileProjectParams } from '../services/JiraCapabilityService';
+import { buildJiraReadinessItems, buildXrayTargetDefaults, getBlockingReadinessFailures, getMissingRequiredTargetFieldKeys, getProfileProjectParams, resolveProfileTargetProject } from '../services/JiraCapabilityService';
 
 export const AIProvider: React.FC<{
   children: React.ReactNode,
@@ -373,6 +373,12 @@ export const AIProvider: React.FC<{
   const getProjectRequestParams = useCallback(() => {
     const { project_key, project_id } = buildProjectRequestParams(session.issueData);
     const profileProject = getProfileProjectParams(session.jiraCapabilityProfile);
+    if (session.jiraCapabilityProfile) {
+      return {
+        projectKey: profileProject.projectKey || project_key,
+        projectId: profileProject.projectId || project_id
+      };
+    }
     return {
       projectKey: session.jiraMetadata?.project_key || profileProject.projectKey || project_key,
       projectId: session.jiraMetadata?.project_id || profileProject.projectId || project_id
@@ -779,15 +785,19 @@ export const AIProvider: React.FC<{
     if (publishXrayInFlightRef.current) return;
     if (!currentTabId || !session.issueData || !session.jiraConnectionId || !session.testCases.length) return;
     const profile = session.jiraCapabilityProfile;
-    const targetProjectId = session.xrayTargetProjectId || profile?.selectedProject?.id || null;
-    const targetProjectKey = session.xrayTargetProjectKey || profile?.selectedProject?.key || null;
+    const profileTargetProject = resolveProfileTargetProject(profile, session.xrayTargetProjectId);
+    const targetProjectId = profile ? profileTargetProject?.id || null : session.xrayTargetProjectId || null;
+    const targetProjectKey = profile ? profileTargetProject?.key || null : session.xrayTargetProjectKey || null;
     const testIssueType =
+      profile?.issueTypes.test ||
       session.issueTypes.find(issueType => issueType.name.trim().toLowerCase() === session.xrayTestIssueTypeName.trim().toLowerCase()) ||
       session.issueTypes.find(issueType => issueType.id === session.xrayTestIssueTypeName) ||
-      profile?.issueTypes.test ||
       null;
-    const linkType = profile?.linking.preferredLinkType || session.xrayLinkType || 'Tests';
+    const linkType = profile ? profile.linking.preferredLinkType || 'Tests' : session.xrayLinkType || 'Tests';
     const activeConn = session.connections?.find((c) => c.id === session.jiraConnectionId);
+    const requiresXrayCloudCredentials = profile
+      ? profile.xray.mode === 'xray-cloud'
+      : session.xrayPublishMode === 'xray_cloud';
     const readinessFailures = profile
       ? getBlockingReadinessFailures(buildJiraReadinessItems(profile, session.xrayFieldDefaults, Boolean(activeConn?.has_xray_cloud_credentials)))
       : [];
@@ -820,7 +830,7 @@ export const AIProvider: React.FC<{
       return;
     }
 
-    if (session.xrayPublishMode === 'xray_cloud' && !activeConn?.has_xray_cloud_credentials) {
+    if (requiresXrayCloudCredentials && !activeConn?.has_xray_cloud_credentials) {
       updateSession({ showXrayCloudWizard: true, xrayCloudWizardMode: 'publish' }, currentTabId);
       return;
     }

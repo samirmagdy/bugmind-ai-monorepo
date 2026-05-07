@@ -146,7 +146,9 @@ const PreviewView: React.FC = () => {
   const totalBugs = session.bugs.length;
   const resolved = session.resolvedPayload?.fields;
   const profileProject = getProfileProjectParams(session.jiraCapabilityProfile);
-  const projectKey = session.jiraMetadata?.project_key || profileProject.projectKey || session.issueData?.key.split('-')[0];
+  const projectKey = session.jiraCapabilityProfile
+    ? profileProject.projectKey || session.issueData?.key.split('-')[0]
+    : session.jiraMetadata?.project_key || profileProject.projectKey || session.issueData?.key.split('-')[0];
   const resolvedSummary = hasResolvedField(resolved, 'summary')
     ? resolvePreviewFieldValue(
         'summary',

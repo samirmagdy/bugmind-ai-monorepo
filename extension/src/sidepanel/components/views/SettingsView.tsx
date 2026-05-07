@@ -607,7 +607,7 @@ const SettingsView: React.FC = () => {
         instanceUrl: session.instanceUrl,
         issueKey: session.issueData.key,
         projectKey,
-        projectId: session.jiraMetadata?.project_id || profileProject.projectId || session.issueData.projectId,
+        projectId: profileProject.projectId || session.jiraMetadata?.project_id || session.issueData.projectId,
         issueTypeId,
         tabId: currentTabId,
         force

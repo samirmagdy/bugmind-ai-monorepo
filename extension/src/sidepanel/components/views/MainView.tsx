@@ -27,6 +27,7 @@ import {
   getMissingRequiredTargetFieldKeys,
   getProfileProjectParams,
   jiraCapabilityService,
+  resolveProfileTargetProject,
   sanitizeJiraCapabilityProfile,
   suggestTestType
 } from '../../services/JiraCapabilityService';
@@ -674,7 +675,7 @@ const MainView: React.FC = () => {
         instanceUrl: session.instanceUrl,
         issueKey: session.issueData.key,
         projectKey,
-        projectId: session.jiraMetadata?.project_id || profileProject.projectId || session.issueData.projectId,
+        projectId: profileProject.projectId || session.jiraMetadata?.project_id || session.issueData.projectId,
         issueTypeId,
         tabId: currentTabId,
         force
@@ -739,16 +740,15 @@ const MainView: React.FC = () => {
     if (!session.testCases.length || !session.jiraConnectionId) return;
     const profile = session.jiraCapabilityProfile;
     if (profile) {
-      const selectedProject = session.xrayTargetProjectId
-        ? profile.projects.find(project => project.id === session.xrayTargetProjectId)
-        : profile.selectedProject;
+      const selectedProject = resolveProfileTargetProject(profile, session.xrayTargetProjectId);
+      const profileFolder = profile.workflow?.defaultFolderByProject?.[selectedProject?.key || ''] || issueKey || '';
       updateSession({
         xrayProjects: profile.projects,
         xrayTargetProjectId: selectedProject?.id || null,
         xrayTargetProjectKey: selectedProject?.key || null,
-        xrayFolderPath: session.xrayFolderPath || issueKey || '',
-        xrayTestIssueTypeName: profile.issueTypes.test?.name || session.xrayTestIssueTypeName || 'Test',
-        xrayLinkType: profile.linking.preferredLinkType || session.xrayLinkType || 'Tests',
+        xrayFolderPath: session.xrayFolderPath || profileFolder,
+        xrayTestIssueTypeName: profile.issueTypes.test?.name || 'Test',
+        xrayLinkType: profile.linking.preferredLinkType || 'Tests',
         xrayPublishSupported: profile.readiness.canSyncToXray || profile.readiness.missingRequiredFields.length === 0,
         xrayPublishMode: profile.xray.mode === 'xray-cloud' ? 'xray_cloud' : 'jira_server',
         xrayUnsupportedReason: profile.readiness.missingRequiredFields.length > 0
@@ -760,6 +760,7 @@ const MainView: React.FC = () => {
     if (session.xrayProjects.length > 0 && session.xrayFolderPath === issueKey) return;
 
     let cancelled = false;
+    // Compatibility path for connections that have not completed capability discovery yet.
     jira.fetchXrayDefaults(session.jiraConnectionId, issueKey || undefined).then(defaults => {
       if (cancelled || !defaults) return;
       updateSession({
