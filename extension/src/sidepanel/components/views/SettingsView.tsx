@@ -1,12 +1,23 @@
-import { useEffect, useState, useRef } from 'react';
-import { X, ChevronDown, Loader2, AlertCircle, RefreshCw, Pencil, FolderOpen, Save, User, Search, Plus, Zap, Check, Moon, Sun, Users, Layout, Shield, ChevronRight, HelpCircle, Languages } from 'lucide-react';
+import { useEffect, useState, useRef, type ChangeEvent } from 'react';
+import { X, ChevronDown, Loader2, AlertCircle, RefreshCw, Pencil, FolderOpen, Save, User, Search, Plus, Zap, Check, Moon, Sun, Users, Layout, Shield, ChevronRight, HelpCircle, Languages, Download, Upload, ClipboardList } from 'lucide-react';
 import { useBugMind } from '../../hooks/useBugMind';
-import { IssueType, JiraConnection, JiraField, JiraProject, JiraUser } from '../../types';
+import { IssueType, JiraCapabilityProfile, JiraConnection, JiraField, JiraProject, JiraUser } from '../../types';
 import { ActionButton, StatusBadge, StatusPanel, SurfaceCard } from '../common/DesignSystem';
 import LuxurySearchableSelect, { SelectOption, SelectValue } from '../common/LuxurySearchableSelect';
 import { apiRequest, readJsonResponse, throwApiErrorResponse } from '../../services/api';
 import { useI18n } from '../../i18n';
-import { getProfileProjectParams } from '../../services/JiraCapabilityService';
+import {
+  buildAdminDiagnosticReport,
+  buildCapabilityFeatures,
+  buildDryRunReport,
+  buildJiraReadinessItems,
+  getJiraReadinessScore,
+  getMappedSourceStoryFields,
+  getMissingRequiredTargetFieldKeys,
+  getProfileProjectParams,
+  jiraCapabilityService,
+  sanitizeJiraCapabilityProfile
+} from '../../services/JiraCapabilityService';
 
 const HIDDEN_SYSTEM_FIELD_KEYS = new Set([
   'summary',
@@ -148,7 +159,7 @@ const FieldRow: React.FC<{
         </div>
 
         {/* Custom Luxury Toggle */}
-        <button 
+        <button
           onClick={(e) => { e.stopPropagation(); onToggleVisibility(); }}
           disabled={field.required}
           className={`relative w-9 h-5 rounded-full transition-all duration-300 border ${
@@ -486,7 +497,24 @@ const SettingsView: React.FC = () => {
     verify_ssl: jira.verifySsl
   });
   const [isCreatingConnection, setIsCreatingConnection] = useState(false);
+  const profileImportInputRef = useRef<HTMLInputElement | null>(null);
   const editableJiraFields = (session.jiraMetadata?.fields || []).filter((field: JiraField) => !isSystemManagedField(field));
+  const activeJiraConnection = session.connections?.find(connection => connection.id === session.jiraConnectionId);
+  const readinessChecks = buildJiraReadinessItems(
+    session.jiraCapabilityProfile,
+    session.xrayFieldDefaults,
+    Boolean(activeJiraConnection?.has_xray_cloud_credentials)
+  );
+  const capabilityReadinessScore = getJiraReadinessScore(readinessChecks) ?? 0;
+  const capabilityFeatures = buildCapabilityFeatures(session.jiraCapabilityProfile, Boolean(activeJiraConnection?.has_xray_cloud_credentials));
+  const mappedSourceStoryFields = getMappedSourceStoryFields(session.jiraCapabilityProfile);
+  const missingXrayRequiredDefaults = getMissingRequiredTargetFieldKeys(session.jiraCapabilityProfile, session.xrayFieldDefaults);
+  const targetTestFieldEntries = session.jiraCapabilityProfile
+    ? Object.entries(session.jiraCapabilityProfile.targetTestCreateFields.fieldSchemas)
+      .filter(([fieldKey]) => !['project', 'issuetype', 'summary', 'description'].includes(fieldKey))
+      .map(([key, schema]) => ({ key, schema, required: session.jiraCapabilityProfile?.targetTestCreateFields.requiredFields.includes(key) || false }))
+      .sort((a, b) => Number(b.required) - Number(a.required) || a.schema.name.localeCompare(b.schema.name))
+    : [];
 
   const request = (url: string, options: RequestInit = {}) => apiRequest(url, {
     ...options,
@@ -508,6 +536,124 @@ const SettingsView: React.FC = () => {
     }
 
     saveFieldSettings(undefined, undefined, nextDefaults);
+  };
+
+  const downloadJson = (data: unknown, filename: string) => {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const saveProfile = async (profile: JiraCapabilityProfile, success?: string) => {
+    await jiraCapabilityService.save(profile);
+    updateSession({ jiraCapabilityProfile: profile, success: success || null });
+  };
+
+  const saveXrayDefault = (fieldKey: string, value: unknown) => {
+    const isEmptyValue = value == null || value === '' || (Array.isArray(value) && value.length === 0);
+    const nextDefaults = { ...(session.xrayFieldDefaults || {}) };
+    if (isEmptyValue) {
+      delete nextDefaults[fieldKey];
+    } else {
+      nextDefaults[fieldKey] = value;
+    }
+    updateSession({ xrayFieldDefaults: nextDefaults });
+    if (session.jiraCapabilityProfile) {
+      void jiraCapabilityService.saveXrayFieldDefaults(session.jiraCapabilityProfile, nextDefaults).then((profile) => {
+        updateSession({ jiraCapabilityProfile: profile });
+      });
+    }
+  };
+
+  const saveSyncStrategy = (updates: Partial<NonNullable<typeof session.jiraCapabilityProfile>['syncStrategy']>) => {
+    const profile = session.jiraCapabilityProfile;
+    if (!profile) return;
+    const nextSyncStrategy = { ...profile.syncStrategy, ...updates };
+    const updatedProfile = { ...profile, syncStrategy: nextSyncStrategy };
+    updateSession({ jiraCapabilityProfile: updatedProfile });
+    void jiraCapabilityService.saveSyncStrategy(profile, nextSyncStrategy).then((savedProfile) => {
+      updateSession({ jiraCapabilityProfile: savedProfile });
+    });
+  };
+
+  const saveWorkflowSettings = (updates: Partial<NonNullable<JiraCapabilityProfile['workflow']>>) => {
+    const profile = session.jiraCapabilityProfile;
+    if (!profile?.workflow) return;
+    const nextWorkflow = { ...profile.workflow, ...updates };
+    const updatedProfile = { ...profile, workflow: nextWorkflow };
+    updateSession({ jiraCapabilityProfile: updatedProfile });
+    void jiraCapabilityService.saveWorkflowSettings(profile, nextWorkflow).then((savedProfile) => {
+      updateSession({ jiraCapabilityProfile: savedProfile });
+    });
+  };
+
+  const saveSourceStoryMapping = (updates: Partial<JiraCapabilityProfile['sourceStoryMapping']>) => {
+    const profile = session.jiraCapabilityProfile;
+    if (!profile) return;
+    const nextMapping = { ...profile.sourceStoryMapping, ...updates };
+    const updatedProfile = { ...profile, sourceStoryMapping: nextMapping };
+    updateSession({ jiraCapabilityProfile: updatedProfile });
+    void jiraCapabilityService.saveSourceStoryMapping(profile, nextMapping).then((savedProfile) => {
+      updateSession({ jiraCapabilityProfile: savedProfile });
+    });
+  };
+
+  const savePrivacySettings = (updates: Partial<NonNullable<JiraCapabilityProfile['privacy']>>) => {
+    const profile = session.jiraCapabilityProfile;
+    if (!profile?.privacy) return;
+    const nextPrivacy = { ...profile.privacy, ...updates };
+    void saveProfile({ ...profile, privacy: nextPrivacy }, 'Privacy settings saved.');
+  };
+
+  const exportCapabilityProfile = () => {
+    const profile = session.jiraCapabilityProfile;
+    if (!profile) return;
+    downloadJson(sanitizeJiraCapabilityProfile(profile), `jira-capability-profile-${profile.selectedProject?.key || 'global'}.json`);
+    updateSession({ success: 'Sanitized Jira capability profile exported.' });
+  };
+
+  const exportAdminDiagnostic = () => {
+    const profile = session.jiraCapabilityProfile;
+    if (!profile) return;
+    downloadJson(buildAdminDiagnosticReport(profile, readinessChecks), `jira-admin-diagnostic-${profile.selectedProject?.key || 'global'}.json`);
+    updateSession({ success: 'Admin diagnostic report exported.' });
+  };
+
+  const exportDryRun = () => {
+    const projectKey = session.jiraCapabilityProfile?.selectedProject?.key || session.issueData?.key?.split('-')[0] || 'global';
+    downloadJson(buildDryRunReport(session.jiraCapabilityProfile, session), `jira-dry-run-${projectKey}.json`);
+    updateSession({ success: 'Dry-run report exported.' });
+  };
+
+  const importCapabilityProfile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    try {
+      const parsed = JSON.parse(await file.text()) as JiraCapabilityProfile;
+      if (!parsed?.connection || !parsed?.issueTypes) {
+        updateSession({ error: 'The selected file is not a Jira capability profile.' });
+        return;
+      }
+      const importedProfile = await jiraCapabilityService.importProfile(parsed);
+      updateSession({ jiraCapabilityProfile: importedProfile, success: 'Jira capability profile imported.' });
+    } catch {
+      updateSession({ error: 'Could not import the Jira capability profile JSON.' });
+    }
+  };
+
+  const clearCapabilityProfile = async () => {
+    await jiraCapabilityService.clear();
+    updateSession({
+      jiraCapabilityProfile: null,
+      xrayFieldDefaults: {},
+      xrayWarnings: [],
+      success: 'Saved Jira capability profile cleared from this browser.'
+    });
   };
 
   // Auto-refetch when entering Jira tab if empty
@@ -672,20 +818,26 @@ const SettingsView: React.FC = () => {
         </div>
       </SurfaceCard>
 
-      <div className="grid grid-cols-4 gap-1.5 rounded-[1.4rem] border border-[var(--card-border)] bg-[var(--surface-soft)] p-1.5">
-        <button 
+      <div className="grid grid-cols-5 gap-1.5 rounded-[1.4rem] border border-[var(--card-border)] bg-[var(--surface-soft)] p-1.5">
+        <button
           onClick={() => updateSession({ settingsTab: 'ai' })}
           className={`py-2.5 text-[10px] font-bold rounded-[1rem] transition-all tracking-[0.14em] uppercase ${session.settingsTab === 'ai' ? 'bg-[var(--bg-elevated)] text-[var(--primary-blue)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
         >
           AI
         </button>
-        <button 
+        <button
           onClick={() => updateSession({ settingsTab: 'jira' })}
           className={`py-2.5 text-[10px] font-bold rounded-[1rem] transition-all tracking-[0.14em] uppercase ${session.settingsTab === 'jira' ? 'bg-[var(--bg-elevated)] text-[var(--primary-blue)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
         >
           Map
         </button>
-        <button 
+        <button
+          onClick={() => updateSession({ settingsTab: 'capability' })}
+          className={`py-2.5 text-[10px] font-bold rounded-[1rem] transition-all tracking-[0.14em] uppercase ${session.settingsTab === 'capability' ? 'bg-[var(--bg-elevated)] text-[var(--primary-blue)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
+        >
+          Xray
+        </button>
+        <button
           onClick={() => updateSession({ settingsTab: 'connections' })}
           className={`py-2.5 text-[10px] font-bold rounded-[1rem] transition-all tracking-[0.14em] uppercase ${session.settingsTab === 'connections' ? 'bg-[var(--bg-elevated)] text-[var(--primary-blue)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
         >
@@ -846,6 +998,350 @@ const SettingsView: React.FC = () => {
               </ActionButton>
             </form>
           </SurfaceCard>
+        </div>
+      ) : session.settingsTab === 'capability' ? (
+        <div className="space-y-4 animate-in slide-in-from-bottom-4 duration-500">
+          <input
+            ref={profileImportInputRef}
+            type="file"
+            accept="application/json,.json"
+            className="hidden"
+            onChange={importCapabilityProfile}
+          />
+
+          {!session.jiraCapabilityProfile ? (
+            <StatusPanel
+              icon={AlertCircle}
+              tone="warning"
+              title="No Jira Capability Profile"
+              description="Add or refresh a Jira connection to discover permissions, projects, issue types, Xray support, and sync readiness."
+              action={(
+                <div className="flex gap-2">
+                  <ActionButton onClick={() => updateSession({ settingsTab: 'connections' })} variant="secondary" className="h-10 text-[11px]">
+                    Manage Connections
+                  </ActionButton>
+                  <ActionButton onClick={() => profileImportInputRef.current?.click()} variant="secondary" className="h-10 text-[11px]">
+                    <Upload size={12} />
+                    Import
+                  </ActionButton>
+                </div>
+              )}
+            />
+          ) : (
+            <>
+              <SurfaceCard className="space-y-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--text-muted)]">Jira Capability Profile</p>
+                    <h3 className="text-sm font-bold text-[var(--text-primary)]">
+                      {session.jiraCapabilityProfile.selectedProject?.key || 'Global'} setup
+                    </h3>
+                    <p className="mt-1 text-[11px] leading-relaxed text-[var(--text-secondary)]">
+                      {session.jiraCapabilityProfile.connection.deploymentType} API v{session.jiraCapabilityProfile.connection.apiVersion} · {session.jiraCapabilityProfile.user.displayName || session.jiraCapabilityProfile.user.emailAddress || 'Connected user'}
+                    </p>
+                  </div>
+                  <StatusBadge tone={capabilityReadinessScore >= 80 ? 'success' : capabilityReadinessScore >= 50 ? 'warning' : 'danger'}>
+                    {capabilityReadinessScore}% Ready
+                  </StatusBadge>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {readinessChecks.map(item => (
+                    <div key={item.key} className="rounded-xl border border-[var(--border-soft)] bg-[var(--surface-soft)] p-2.5">
+                      <div className="flex items-center gap-2">
+                        <div className={`h-1.5 w-1.5 rounded-full ${item.ok ? 'bg-[var(--status-success)]' : item.blocking ? 'bg-[var(--status-danger)]' : 'bg-[var(--status-warning)]'}`} />
+                        <div className="text-[10px] font-bold text-[var(--text-primary)]">{item.label}</div>
+                      </div>
+                      <div className="mt-1 text-[10px] leading-snug text-[var(--text-muted)]">{item.detail || (item.ok ? 'Available' : 'Needs attention')}</div>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <ActionButton type="button" onClick={exportCapabilityProfile} variant="secondary" className="h-9 px-3 text-[10px]">
+                    <Download size={12} />
+                    Profile
+                  </ActionButton>
+                  <ActionButton type="button" onClick={exportAdminDiagnostic} variant="secondary" className="h-9 px-3 text-[10px]">
+                    <ClipboardList size={12} />
+                    Admin Report
+                  </ActionButton>
+                  <ActionButton type="button" onClick={exportDryRun} variant="secondary" className="h-9 px-3 text-[10px]">
+                    <Download size={12} />
+                    Dry Run
+                  </ActionButton>
+                  <ActionButton type="button" onClick={() => profileImportInputRef.current?.click()} variant="secondary" className="h-9 px-3 text-[10px]">
+                    <Upload size={12} />
+                    Import
+                  </ActionButton>
+                  <ActionButton type="button" onClick={clearCapabilityProfile} variant="ghost" className="h-9 px-3 text-[10px]">
+                    Clear
+                  </ActionButton>
+                </div>
+              </SurfaceCard>
+
+              <SurfaceCard className="space-y-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--text-muted)]">Project & Xray Target</p>
+                    <h3 className="text-sm font-bold text-[var(--text-primary)]">Default test destination</h3>
+                  </div>
+                  <StatusBadge tone={missingXrayRequiredDefaults.length ? 'warning' : 'success'}>
+                    {missingXrayRequiredDefaults.length ? `${missingXrayRequiredDefaults.length} Missing` : 'Complete'}
+                  </StatusBadge>
+                </div>
+                <div className="space-y-2">
+                  <label className="context-label uppercase tracking-wider block ml-1">Default Project</label>
+                  <LuxurySearchableSelect
+                    options={session.jiraCapabilityProfile.projects.map(project => ({ id: project.id, name: `${project.key} - ${project.name}` }))}
+                    value={session.xrayTargetProjectId ? { id: session.xrayTargetProjectId } : undefined}
+                    placeholder="Select target project..."
+                    onChange={(next) => {
+                      if (!isSelectOption(next) || !session.jiraCapabilityProfile) return;
+                      const project = session.jiraCapabilityProfile.projects.find(item => item.id === String(next.id ?? ''));
+                      if (!project) return;
+                      void saveProfile({
+                        ...session.jiraCapabilityProfile,
+                        selectedProject: project,
+                        privacy: session.jiraCapabilityProfile.privacy ? {
+                          ...session.jiraCapabilityProfile.privacy,
+                          projectAllowlist: Array.from(new Set([...(session.jiraCapabilityProfile.privacy.projectAllowlist || []), project.key])),
+                        } : session.jiraCapabilityProfile.privacy,
+                      });
+                      updateSession({ xrayTargetProjectId: project.id, xrayTargetProjectKey: project.key });
+                    }}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="context-label uppercase tracking-wider block ml-1">Xray Test Issue Type</label>
+                  <LuxurySearchableSelect
+                    options={session.jiraCapabilityProfile.issueTypes.all.map(type => ({ id: type.id, name: type.name, avatar: type.icon_url || type.iconUrl }))}
+                    value={session.jiraCapabilityProfile.issueTypes.test || undefined}
+                    placeholder="Select Test issue type..."
+                    onChange={(next) => {
+                      if (!isSelectOption(next) || !session.jiraCapabilityProfile) return;
+                      const issueType = session.jiraCapabilityProfile.issueTypes.all.find(type => type.id === String(next.id ?? ''));
+                      if (!issueType) return;
+                      updateSession({ xrayTestIssueTypeName: issueType.name });
+                      void jiraCapabilityService.saveTestIssueType(session.jiraCapabilityProfile, issueType).then(profile => {
+                        updateSession({ jiraCapabilityProfile: profile });
+                      });
+                    }}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-[10px] text-[var(--text-secondary)]">
+                  {capabilityFeatures.map(feature => (
+                    <div key={feature.key} className="rounded-xl border border-[var(--border-soft)] bg-[var(--surface-soft)] p-2.5">
+                      <div className="font-bold text-[var(--text-primary)]">{feature.label}</div>
+                      <div className="mt-1">{feature.detail}</div>
+                    </div>
+                  ))}
+                </div>
+              </SurfaceCard>
+
+              <SurfaceCard className="space-y-4">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--text-muted)]">Required Xray Fields</p>
+                  <h3 className="text-sm font-bold text-[var(--text-primary)]">Target create defaults</h3>
+                </div>
+                {targetTestFieldEntries.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-[var(--border-main)] p-4 text-center text-[11px] text-[var(--text-muted)]">
+                    No target create fields were discovered for the selected Test issue type.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {targetTestFieldEntries.map(({ key, schema, required }) => {
+                      const savedValue = session.xrayFieldDefaults[key];
+                      const label = `${schema.name}${required ? ' *' : ''}`;
+                      if (schema.allowedValues?.length) {
+                        return (
+                          <div key={key} className="space-y-1.5">
+                            <label className="context-label uppercase tracking-wider block ml-1">{label}</label>
+                            <LuxurySearchableSelect
+                              options={schema.allowedValues.map(option => ({ id: option.id || option.value || option.name, name: option.name || option.value || option.id }))}
+                              value={typeof savedValue === 'object' && savedValue !== null ? savedValue as SelectOption : undefined}
+                              placeholder="Select default value..."
+                              onChange={(next) => {
+                                if (!isSelectOption(next)) return;
+                                saveXrayDefault(key, { id: String(next.id ?? ''), name: next.name });
+                              }}
+                            />
+                          </div>
+                        );
+                      }
+                      if (schema.type === 'boolean') {
+                        return (
+                          <label key={key} className="flex items-center justify-between rounded-xl border border-[var(--border-soft)] bg-[var(--surface-soft)] px-3 py-2.5 text-[11px]">
+                            <span className="font-bold text-[var(--text-primary)]">{label}</span>
+                            <input type="checkbox" checked={Boolean(savedValue)} onChange={(event) => saveXrayDefault(key, event.target.checked)} />
+                          </label>
+                        );
+                      }
+                      return (
+                        <div key={key} className="space-y-1.5">
+                          <label className="context-label uppercase tracking-wider block ml-1">{label}</label>
+                          <input
+                            type={schema.type === 'number' ? 'number' : schema.type === 'date' ? 'date' : 'text'}
+                            value={savedValue == null || typeof savedValue === 'object' ? '' : String(savedValue)}
+                            onChange={(event) => saveXrayDefault(key, schema.type === 'number' && event.target.value !== '' ? Number(event.target.value) : event.target.value)}
+                            className="w-full rounded-2xl border border-[var(--border-main)] bg-[var(--bg-input)] px-3.5 py-2.5 text-[11px] text-[var(--text-main)] outline-none focus:border-[var(--primary-blue)]"
+                            placeholder={`Default ${schema.name}`}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </SurfaceCard>
+
+              <SurfaceCard className="space-y-4">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--text-muted)]">Sync Strategy</p>
+                  <h3 className="text-sm font-bold text-[var(--text-primary)]">Publish behavior</h3>
+                </div>
+                <div className="grid grid-cols-1 gap-2">
+                  {[
+                    { key: 'createInSourceProject', label: 'Create tests in source project' },
+                    { key: 'inheritLabels', label: 'Inherit labels from source story' },
+                    { key: 'inheritComponents', label: 'Inherit components from source story' },
+                    { key: 'inheritVersions', label: 'Inherit fix versions from source story' },
+                    { key: 'transitionAfterCreate', label: 'Transition Test after creation' },
+                  ].map(item => (
+                    <label key={item.key} className="flex items-center justify-between rounded-xl border border-[var(--border-soft)] bg-[var(--surface-soft)] px-3 py-2.5 text-[11px]">
+                      <span className="font-bold text-[var(--text-primary)]">{item.label}</span>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(session.jiraCapabilityProfile?.syncStrategy[item.key as keyof typeof session.jiraCapabilityProfile.syncStrategy])}
+                        onChange={(event) => saveSyncStrategy({ [item.key]: event.target.checked } as Partial<NonNullable<typeof session.jiraCapabilityProfile>['syncStrategy']>)}
+                      />
+                    </label>
+                  ))}
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1.5">
+                    <label className="context-label uppercase tracking-wider block ml-1">Fallback Mode</label>
+                    <select
+                      value={session.jiraCapabilityProfile.syncStrategy.fallbackWhenNativeStepsFail}
+                      onChange={(event) => saveSyncStrategy({ fallbackWhenNativeStepsFail: event.target.value as 'manualStepsField' | 'description' })}
+                      className="w-full rounded-2xl border border-[var(--border-main)] bg-[var(--bg-input)] px-3 py-2.5 text-[11px] text-[var(--text-primary)]"
+                    >
+                      <option value="manualStepsField">Manual Steps Field</option>
+                      <option value="description">Description</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="context-label uppercase tracking-wider block ml-1">Workflow Mode</label>
+                    <select
+                      value={session.jiraCapabilityProfile.workflow?.mode || 'sync_enabled'}
+                      onChange={(event) => saveWorkflowSettings({ mode: event.target.value as NonNullable<JiraCapabilityProfile['workflow']>['mode'] })}
+                      className="w-full rounded-2xl border border-[var(--border-main)] bg-[var(--bg-input)] px-3 py-2.5 text-[11px] text-[var(--text-primary)]"
+                    >
+                      <option value="generate_only">Generate only</option>
+                      <option value="sync_enabled">Sync enabled</option>
+                      <option value="admin_diagnostic">Admin diagnostic</option>
+                      <option value="safe_mode">Safe mode</option>
+                    </select>
+                  </div>
+                </div>
+                <label className="flex items-center justify-between rounded-xl border border-[var(--border-soft)] bg-[var(--surface-soft)] px-3 py-2.5 text-[11px]">
+                  <span className="font-bold text-[var(--text-primary)]">Add comment to source story after sync</span>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(session.jiraCapabilityProfile.workflow?.addCommentAfterSync)}
+                    onChange={(event) => saveWorkflowSettings({ addCommentAfterSync: event.target.checked })}
+                  />
+                </label>
+                <div className="space-y-1.5">
+                  <label className="context-label uppercase tracking-wider block ml-1">Default Folder</label>
+                  <input
+                    type="text"
+                    value={session.jiraCapabilityProfile.workflow?.defaultFolderByProject?.[session.jiraCapabilityProfile.selectedProject?.key || ''] || ''}
+                    onChange={(event) => {
+                      const projectKey = session.jiraCapabilityProfile?.selectedProject?.key || 'GLOBAL';
+                      saveWorkflowSettings({
+                        defaultFolderByProject: {
+                          ...(session.jiraCapabilityProfile?.workflow?.defaultFolderByProject || {}),
+                          [projectKey]: event.target.value,
+                        },
+                      });
+                      updateSession({ xrayFolderPath: event.target.value });
+                    }}
+                    className="w-full rounded-2xl border border-[var(--border-main)] bg-[var(--bg-input)] px-3.5 py-2.5 text-[11px] text-[var(--text-main)]"
+                    placeholder="Xray repository folder path"
+                  />
+                </div>
+              </SurfaceCard>
+
+              <SurfaceCard className="space-y-4">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--text-muted)]">Source Story Mapping</p>
+                  <h3 className="text-sm font-bold text-[var(--text-primary)]">Fields sent into generation</h3>
+                </div>
+                <div className="grid grid-cols-1 gap-2">
+                  {mappedSourceStoryFields.map(item => (
+                    <div key={item.key} className="space-y-1.5">
+                      <label className="context-label uppercase tracking-wider block ml-1">{item.label}</label>
+                      <input
+                        type="text"
+                        value={item.fieldId || ''}
+                        onChange={(event) => saveSourceStoryMapping({ [item.key]: event.target.value } as Partial<JiraCapabilityProfile['sourceStoryMapping']>)}
+                        className="w-full rounded-2xl border border-[var(--border-main)] bg-[var(--bg-input)] px-3.5 py-2.5 text-[11px] text-[var(--text-main)]"
+                        placeholder="Jira field id, e.g. customfield_12345"
+                      />
+                    </div>
+                  ))}
+                </div>
+                <div className="text-[10px] text-[var(--text-muted)]">
+                  Confidence score: {session.jiraCapabilityProfile.sourceStoryMapping.confidenceScore ?? 0}%
+                </div>
+              </SurfaceCard>
+
+              {session.jiraCapabilityProfile.privacy && (
+                <SurfaceCard className="space-y-4">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--text-muted)]">Security & Privacy</p>
+                    <h3 className="text-sm font-bold text-[var(--text-primary)]">AI data controls</h3>
+                  </div>
+                  <div className="grid grid-cols-1 gap-2">
+                    {[
+                      { key: 'maskSensitiveData', label: 'Mask sensitive data before AI' },
+                      { key: 'disableCommentsExtraction', label: 'Disable comments extraction' },
+                      { key: 'disableAttachmentMetadataExtraction', label: 'Disable attachment metadata extraction' },
+                      { key: 'externalAiDisabled', label: 'Disable external AI mode' },
+                      { key: 'minimalDataAiMode', label: 'Minimal-data AI mode' },
+                    ].map(item => (
+                      <label key={item.key} className="flex items-center justify-between rounded-xl border border-[var(--border-soft)] bg-[var(--surface-soft)] px-3 py-2.5 text-[11px]">
+                        <span className="font-bold text-[var(--text-primary)]">{item.label}</span>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(session.jiraCapabilityProfile?.privacy?.[item.key as keyof NonNullable<JiraCapabilityProfile['privacy']>])}
+                          onChange={(event) => savePrivacySettings({ [item.key]: event.target.checked } as Partial<NonNullable<JiraCapabilityProfile['privacy']>>)}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1.5">
+                      <label className="context-label uppercase tracking-wider block ml-1">Domain Allowlist</label>
+                      <input
+                        type="text"
+                        value={session.jiraCapabilityProfile.privacy.domainAllowlist.join(', ')}
+                        onChange={(event) => savePrivacySettings({ domainAllowlist: event.target.value.split(',').map(item => item.trim()).filter(Boolean) })}
+                        className="w-full rounded-2xl border border-[var(--border-main)] bg-[var(--bg-input)] px-3.5 py-2.5 text-[11px] text-[var(--text-main)]"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="context-label uppercase tracking-wider block ml-1">Project Allowlist</label>
+                      <input
+                        type="text"
+                        value={session.jiraCapabilityProfile.privacy.projectAllowlist.join(', ')}
+                        onChange={(event) => savePrivacySettings({ projectAllowlist: event.target.value.split(',').map(item => item.trim()).filter(Boolean) })}
+                        className="w-full rounded-2xl border border-[var(--border-main)] bg-[var(--bg-input)] px-3.5 py-2.5 text-[11px] text-[var(--text-main)]"
+                      />
+                    </div>
+                  </div>
+                </SurfaceCard>
+              )}
+            </>
+          )}
         </div>
       ) : session.settingsTab === 'connections' ? (
         <div className="space-y-4 animate-in fade-in duration-300">

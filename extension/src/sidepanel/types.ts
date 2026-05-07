@@ -200,7 +200,7 @@ export interface TabSession {
   visibleFields: string[];
   aiMapping: Record<string, string>;
   fieldDefaults: Record<string, unknown>;
-  settingsTab: 'ai' | 'jira' | 'connections' | 'workspaces';
+  settingsTab: 'ai' | 'jira' | 'capability' | 'connections' | 'workspaces';
   createdIssues: CreatedIssue[];
   theme: 'light' | 'dark';
   themeSource: 'auto' | 'manual';
