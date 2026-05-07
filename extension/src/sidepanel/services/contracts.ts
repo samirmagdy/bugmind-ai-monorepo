@@ -15,6 +15,7 @@ import {
   Usage,
   XrayDefaultsResponse,
   XrayPublishResult,
+  XraySyncHistoryItem,
 } from '../types';
 
 export interface ProjectRequestParams {
@@ -148,7 +149,14 @@ export interface XrayPublishRequestPayload {
   folder_path?: string;
   link_type?: string;
   target_field_defaults?: Record<string, unknown>;
+  transition_after_create?: boolean;
+  transition_name?: string;
+  add_comment_to_story?: boolean;
+  story_comment?: string;
+  update_existing?: boolean;
 }
+
+export type XraySyncHistoryResponsePayload = XraySyncHistoryItem[];
 
 export interface BulkFetchRequestPayload {
   jiraConnectionId: number;

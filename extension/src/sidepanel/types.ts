@@ -54,6 +54,7 @@ export interface CreatedIssue {
   key: string;
   self: string;
   linkedToStory?: boolean;
+  updated?: boolean;
 }
 
 export interface TestCase {
@@ -75,6 +76,7 @@ export interface TestCase {
   risk_level?: string;
   category?: string;
   coverage_notes?: string;
+  existing_issue_key?: string;
 }
 
 export interface XrayPublishResult {
@@ -82,7 +84,23 @@ export interface XrayPublishResult {
   folder_path: string;
   repository_path_field_id?: string | null;
   link_type_used?: string | null;
+  transitioned_tests?: string[];
+  commented_story?: boolean;
   warnings: string[];
+}
+
+export interface XraySyncHistoryItem {
+  id: number;
+  story_issue_key: string;
+  project_id?: string | null;
+  project_key?: string | null;
+  operation: string;
+  status: string;
+  created_test_keys: string[];
+  updated_test_keys: string[];
+  warnings: string[];
+  error_detail?: unknown;
+  created_at?: string | null;
 }
 
 export interface IssueContextPayload {
@@ -200,6 +218,7 @@ export interface TabSession {
   xrayLinkType: string;
   xrayFieldDefaults: Record<string, unknown>;
   xrayWarnings: string[];
+  xraySyncHistory: XraySyncHistoryItem[];
   xrayPublishSupported: boolean;
   xrayPublishMode: 'jira_server' | 'xray_cloud';
   xrayUnsupportedReason: string | null;
@@ -295,6 +314,79 @@ export interface JiraCapabilityFieldSchema {
   allowedValues?: JiraFieldOption[];
 }
 
+export type JiraCapabilitySupportStatus = 'supported' | 'partial' | 'blocked' | 'planned';
+
+export interface JiraCapabilityFeatureStatus {
+  key: string;
+  label: string;
+  status: JiraCapabilitySupportStatus;
+  detail: string;
+}
+
+export interface JiraCapabilityFeatureGroup {
+  key: string;
+  label: string;
+  status: JiraCapabilitySupportStatus;
+  features: JiraCapabilityFeatureStatus[];
+}
+
+export interface JiraCapabilityDiagnostics {
+  lastSuccessfulDiscoveryAt?: string;
+  lastDiscoveryWarnings: string[];
+  health: 'connected' | 'degraded' | 'blocked';
+  healthReasons: string[];
+}
+
+export interface JiraNamedEntity {
+  id: string;
+  name: string;
+  archived?: boolean;
+  released?: boolean;
+}
+
+export interface JiraWorkflowStatus {
+  id: string;
+  name: string;
+  category?: string;
+}
+
+export interface JiraIssueLinkTypeProfile {
+  id?: string;
+  name: string;
+  inward: string;
+  outward: string;
+}
+
+export interface JiraProjectCapabilityDetails {
+  components: JiraNamedEntity[];
+  versions: JiraNamedEntity[];
+  statuses: JiraWorkflowStatus[];
+  issueLinkTypes: JiraIssueLinkTypeProfile[];
+}
+
+export interface JiraCapabilityPrivacySettings {
+  fieldsSentToAi: string[];
+  excludedFieldsFromAi: string[];
+  maskSensitiveData: boolean;
+  disableCommentsExtraction: boolean;
+  disableAttachmentMetadataExtraction: boolean;
+  externalAiDisabled: boolean;
+  minimalDataAiMode: boolean;
+  domainAllowlist: string[];
+  projectAllowlist: string[];
+}
+
+export interface JiraCapabilityWorkflowSettings {
+  mode: 'generate_only' | 'sync_enabled' | 'admin_diagnostic' | 'safe_mode';
+  defaultFolderByProject: Record<string, string>;
+  defaultFolderByComponent: Record<string, string>;
+  preferredComponents: string[];
+  preferredFixVersions: string[];
+  defaultPriority?: string;
+  addCommentAfterSync: boolean;
+  transitionAfterCreate: boolean;
+}
+
 export interface JiraCapabilityProfile {
   jiraProfileVersion: 1;
   connection: {
@@ -315,6 +407,7 @@ export interface JiraCapabilityProfile {
   };
   projects: JiraProject[];
   selectedProject: JiraProject | null;
+  projectDetails?: JiraProjectCapabilityDetails;
   permissions: {
     canBrowse: boolean;
     canCreateIssues: boolean;
@@ -335,6 +428,12 @@ export interface JiraCapabilityProfile {
     mainFlow?: string;
     alternativeFlow?: string;
     businessRules?: string;
+    expectedBehavior?: string;
+    outOfScope?: string;
+    assumptions?: string;
+    dependencies?: string;
+    testNotes?: string;
+    confidenceScore?: number;
   };
   targetTestCreateFields: {
     requiredFields: string[];
@@ -370,6 +469,10 @@ export interface JiraCapabilityProfile {
     missingRequiredFields: string[];
     warnings: string[];
   };
+  diagnostics?: JiraCapabilityDiagnostics;
+  featureGroups?: JiraCapabilityFeatureGroup[];
+  privacy?: JiraCapabilityPrivacySettings;
+  workflow?: JiraCapabilityWorkflowSettings;
 }
 
 export interface JiraBootstrapContext {
@@ -530,6 +633,7 @@ export const INITIAL_SESSION: TabSession = {
   xrayLinkType: 'Tests',
   xrayFieldDefaults: {},
   xrayWarnings: [],
+  xraySyncHistory: [],
   xrayPublishSupported: true,
   xrayPublishMode: 'jira_server',
   xrayUnsupportedReason: null,

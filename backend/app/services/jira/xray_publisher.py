@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session
 from app.core.audit import log_audit
 from app.core.config import settings
 from app.core.idempotency import idempotency_store
-from app.models.jira import JiraConnection
 from app.models.user import User
 from app.schemas.bug import XrayPublishedTest, XrayTestSuitePublishRequest, XrayTestSuitePublishResponse
 from app.services.jira.adapters.server import JiraServerAdapter
@@ -103,6 +102,41 @@ def format_test_issue_description(story_issue_key: str, test_case: dict) -> str:
     if components:
         lines.extend(["", "Components:", ", ".join(str(component) for component in components)])
     return "\n".join(lines).strip()
+
+
+def format_story_sync_comment(created_tests: list[XrayPublishedTest], folder_path: str, custom_comment: Optional[str] = None) -> str:
+    issue_keys = [test.key for test in created_tests]
+    lines = [
+        custom_comment.strip() if custom_comment and custom_comment.strip() else "BugMind created Xray Test coverage for this story.",
+        "",
+        f"Created Tests: {', '.join(issue_keys) if issue_keys else 'None'}",
+        f"Xray Folder: {folder_path}",
+    ]
+    return "\n".join(lines).strip()
+
+
+def issue_already_linked(adapter, source_issue_key: str, target_issue_key: str) -> bool:
+    try:
+        issue = adapter.fetch_issue(source_issue_key)
+    except HTTPException:
+        return False
+    fields = issue.get("fields") if isinstance(issue, dict) else {}
+    links = fields.get("issuelinks") if isinstance(fields, dict) else []
+    if not isinstance(links, list):
+        return False
+    for link in links:
+        if not isinstance(link, dict):
+            continue
+        inward = link.get("inwardIssue")
+        outward = link.get("outwardIssue")
+        linked_keys = []
+        if isinstance(inward, dict):
+            linked_keys.append(str(inward.get("key") or ""))
+        if isinstance(outward, dict):
+            linked_keys.append(str(outward.get("key") or ""))
+        if target_issue_key in linked_keys:
+            return True
+    return False
 
 
 def _folder_id(folder: dict[str, Any]) -> Optional[str]:
@@ -387,6 +421,7 @@ class XrayServerPublisher:
 
         link_candidates = resolve_link_type_candidates(req.link_type, available_link_types)
         created_tests: list[XrayPublishedTest] = []
+        transitioned_tests: list[str] = []
         warnings: list[str] = []
         link_type_used: Optional[str] = None
 
@@ -404,8 +439,18 @@ class XrayServerPublisher:
                 if repository_path_field_id:
                     fields[repository_path_field_id] = folder_path
 
-                issue_key = adapter.create_issue({"fields": fields})
-                created_tests.append(XrayPublishedTest(id=issue_key, key=issue_key, self=""))
+                existing_issue_key = str(test_case_payload.get("existing_issue_key") or "").strip()
+                updated_existing = bool(req.update_existing and existing_issue_key)
+                if updated_existing:
+                    issue_key = existing_issue_key
+                    update_fields = {
+                        key: value for key, value in fields.items()
+                        if key not in {"project", "issuetype"}
+                    }
+                    adapter.update_issue(issue_key, {"fields": update_fields})
+                else:
+                    issue_key = adapter.create_issue({"fields": fields})
+                created_tests.append(XrayPublishedTest(id=issue_key, key=issue_key, self="", updated=updated_existing))
                 if isinstance(adapter, JiraServerAdapter):
                     add_xray_manual_steps(adapter, issue_key, test_case_payload)
                     if xray_project_key and xray_folder_id:
@@ -423,10 +468,26 @@ class XrayServerPublisher:
                         continue
 
                 if not linked:
-                    warnings.append(f"Created {issue_key} but could not link it to {req.story_issue_key}")
+                    if issue_already_linked(adapter, req.story_issue_key, issue_key):
+                        linked = True
+                        warnings.append(f"Skipped duplicate link for {issue_key}; it is already linked to {req.story_issue_key}")
+                    else:
+                        warnings.append(f"Created {issue_key} but could not link it to {req.story_issue_key}")
+
+                if req.transition_after_create:
+                    try:
+                        transition_used = adapter.transition_issue(issue_key, req.transition_name)
+                        if transition_used:
+                            transitioned_tests.append(issue_key)
+                        else:
+                            warnings.append(f"Created {issue_key} but no Jira transition was available")
+                    except HTTPException as exc:
+                        warnings.append(f"Created {issue_key} but could not transition it: {exc.detail}")
         except HTTPException as exc:
             rollback_failed_keys: list[str] = []
             for created_test in reversed(created_tests):
+                if created_test.updated:
+                    continue
                 try:
                     adapter.delete_issue(created_test.key)
                 except HTTPException:
@@ -443,11 +504,21 @@ class XrayServerPublisher:
         if not repository_path_field_id and not uses_raven_repository:
             warnings.append("Created tests without setting an Xray repository path because no repository path field was detected")
 
+        commented_story = False
+        if req.add_comment_to_story and created_tests:
+            try:
+                adapter.add_comment(req.story_issue_key, format_story_sync_comment(created_tests, folder_path, req.story_comment))
+                commented_story = True
+            except HTTPException as exc:
+                warnings.append(f"Created tests but could not comment on {req.story_issue_key}: {exc.detail}")
+
         response = XrayTestSuitePublishResponse(
             created_tests=created_tests,
             folder_path=folder_path,
             repository_path_field_id=repository_path_field_id,
             link_type_used=link_type_used,
+            transitioned_tests=transitioned_tests,
+            commented_story=commented_story,
             warnings=warnings,
         )
         idempotency_store.store_response(
@@ -465,6 +536,8 @@ class XrayServerPublisher:
             project_id=req.xray_project_id,
             request_path=str(self.request.url.path),
             created_test_keys=[test.key for test in created_tests],
+            transitioned_test_keys=transitioned_tests,
+            commented_story=commented_story,
             warnings=warnings,
         )
         return response
@@ -486,7 +559,6 @@ class XrayCloudPublisher:
         test_fields = engine.get_field_schema(req.xray_project_id, test_issue_type_id)
         
         # Xray Cloud doesn't use standard Jira custom fields for repository path, it uses GraphQL folders
-        xray_project_key = req.xray_project_key or str(project_metadata.get("project_key") or "").strip()
         folder_path = normalize_folder_path(req.folder_path, req.story_issue_key)
         
         from app.services.jira.xray_cloud import XrayCloudClient
@@ -531,6 +603,7 @@ class XrayCloudPublisher:
 
         link_candidates = resolve_link_type_candidates(req.link_type, available_link_types)
         created_tests: list[XrayPublishedTest] = []
+        transitioned_tests: list[str] = []
         warnings: list[str] = []
         link_type_used: Optional[str] = None
 
@@ -547,13 +620,23 @@ class XrayCloudPublisher:
                 apply_target_field_defaults(fields, test_fields, req.target_field_defaults)
 
                 # Create the Jira issue
-                issue_key = adapter.create_issue({"fields": fields})
+                existing_issue_key = str(test_case_payload.get("existing_issue_key") or "").strip()
+                updated_existing = bool(req.update_existing and existing_issue_key)
+                if updated_existing:
+                    issue_key = existing_issue_key
+                    update_fields = {
+                        key: value for key, value in fields.items()
+                        if key not in {"project", "issuetype"}
+                    }
+                    adapter.update_issue(issue_key, {"fields": update_fields})
+                else:
+                    issue_key = adapter.create_issue({"fields": fields})
                 
                 # Fetch issue ID required by GraphQL
                 issue = adapter.get_issue(issue_key)
                 issue_id = issue["id"]
                 
-                created_tests.append(XrayPublishedTest(id=issue_key, key=issue_key, self=""))
+                created_tests.append(XrayPublishedTest(id=issue_key, key=issue_key, self="", updated=updated_existing))
                 
                 # Add steps via GraphQL
                 steps_data = []
@@ -588,10 +671,26 @@ class XrayCloudPublisher:
                         continue
 
                 if not linked:
-                    warnings.append(f"Created {issue_key} but could not link it to {req.story_issue_key}")
+                    if issue_already_linked(adapter, req.story_issue_key, issue_key):
+                        linked = True
+                        warnings.append(f"Skipped duplicate link for {issue_key}; it is already linked to {req.story_issue_key}")
+                    else:
+                        warnings.append(f"Created {issue_key} but could not link it to {req.story_issue_key}")
+
+                if req.transition_after_create:
+                    try:
+                        transition_used = adapter.transition_issue(issue_key, req.transition_name)
+                        if transition_used:
+                            transitioned_tests.append(issue_key)
+                        else:
+                            warnings.append(f"Created {issue_key} but no Jira transition was available")
+                    except HTTPException as exc:
+                        warnings.append(f"Created {issue_key} but could not transition it: {exc.detail}")
         except HTTPException as exc:
             rollback_failed_keys: list[str] = []
             for created_test in reversed(created_tests):
+                if created_test.updated:
+                    continue
                 try:
                     adapter.delete_issue(created_test.key)
                 except HTTPException:
@@ -605,11 +704,21 @@ class XrayCloudPublisher:
                 }
             raise HTTPException(status_code=exc.status_code, detail=detail) from exc
 
+        commented_story = False
+        if req.add_comment_to_story and created_tests:
+            try:
+                adapter.add_comment(req.story_issue_key, format_story_sync_comment(created_tests, folder_path, req.story_comment))
+                commented_story = True
+            except HTTPException as exc:
+                warnings.append(f"Created tests but could not comment on {req.story_issue_key}: {exc.detail}")
+
         response = XrayTestSuitePublishResponse(
             created_tests=created_tests,
             folder_path=folder_path,
             repository_path_field_id=None,
             link_type_used=link_type_used,
+            transitioned_tests=transitioned_tests,
+            commented_story=commented_story,
             warnings=warnings,
         )
         
@@ -628,6 +737,8 @@ class XrayCloudPublisher:
             project_id=req.xray_project_id,
             request_path=str(self.request.url.path),
             created_test_keys=[test.key for test in created_tests],
+            transitioned_test_keys=transitioned_tests,
+            commented_story=commented_story,
             warnings=warnings,
         )
         return response

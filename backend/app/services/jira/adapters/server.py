@@ -311,6 +311,11 @@ class JiraServerAdapter(JiraAdapter):
             raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to create Jira issue"))
         return response.json().get("key")
 
+    def update_issue(self, issue_key: str, issue_data: Dict[str, Any]) -> None:
+        response = self._request("PUT", f"/rest/api/2/issue/{issue_key}", json=issue_data, retry_on_transient=False)
+        if response.status_code not in [200, 201, 204]:
+            raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to update Jira issue"))
+
     def delete_issue(self, issue_key: str) -> None:
         response = self._request("DELETE", f"/rest/api/2/issue/{issue_key}", retry_on_transient=False)
         if response.status_code not in [200, 202, 204]:
@@ -325,6 +330,41 @@ class JiraServerAdapter(JiraAdapter):
         response = self._request("POST", "/rest/api/2/issueLink", json=payload, retry_on_transient=False)
         if response.status_code not in [200, 201]:
             raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to link Jira issues"))
+
+    def add_comment(self, issue_key: str, body: str) -> None:
+        response = self._request("POST", f"/rest/api/2/issue/{issue_key}/comment", json={"body": body}, retry_on_transient=False)
+        if response.status_code not in [200, 201]:
+            raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to add Jira comment"))
+
+    def transition_issue(self, issue_key: str, transition_name: Optional[str] = None) -> Optional[str]:
+        response = self._request("GET", f"/rest/api/2/issue/{issue_key}/transitions")
+        if response.status_code != 200:
+            raise HTTPException(status_code=400, detail=self._extract_error_message(response, "Failed to fetch Jira transitions"))
+
+        transitions = response.json().get("transitions", [])
+        if not isinstance(transitions, list) or not transitions:
+            return None
+        desired = (transition_name or "").strip().lower()
+        selected = None
+        if desired:
+            selected = next((item for item in transitions if str(item.get("name", "")).strip().lower() == desired), None)
+        if selected is None:
+            selected = next((item for item in transitions if str(item.get("name", "")).strip().lower() in {"done", "complete", "completed", "close", "closed", "ready"}), None)
+        if selected is None:
+            selected = transitions[0]
+
+        transition_id = selected.get("id")
+        if not transition_id:
+            return None
+        post_response = self._request(
+            "POST",
+            f"/rest/api/2/issue/{issue_key}/transitions",
+            json={"transition": {"id": str(transition_id)}},
+            retry_on_transient=False,
+        )
+        if post_response.status_code not in [200, 201, 204]:
+            raise HTTPException(status_code=400, detail=self._extract_error_message(post_response, "Failed to transition Jira issue"))
+        return str(selected.get("name") or transition_id)
 
     def add_xray_step(
         self,

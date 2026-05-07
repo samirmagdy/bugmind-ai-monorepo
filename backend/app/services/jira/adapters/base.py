@@ -56,12 +56,27 @@ class JiraAdapter(ABC):
         pass
 
     @abstractmethod
+    def update_issue(self, issue_key: str, issue_data: Dict[str, Any]) -> None:
+        """Updates an existing Jira issue."""
+        pass
+
+    @abstractmethod
     def delete_issue(self, issue_key: str) -> None:
         """Deletes a previously created issue."""
         pass
         
     @abstractmethod
     def link_issues(self, inpatient_key: str, link_type: str, outward_issue_key: str):
+        pass
+
+    @abstractmethod
+    def add_comment(self, issue_key: str, body: str) -> None:
+        """Adds a comment to a Jira issue."""
+        pass
+
+    @abstractmethod
+    def transition_issue(self, issue_key: str, transition_name: Optional[str] = None) -> Optional[str]:
+        """Transitions a Jira issue and returns the transition name used, when applied."""
         pass
 
     @abstractmethod

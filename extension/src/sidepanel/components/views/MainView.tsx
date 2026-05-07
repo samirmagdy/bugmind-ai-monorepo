@@ -4,7 +4,7 @@ import {
   Plus, ChevronDown, Bug,
   Loader2, Send, AlertCircle, Zap, RefreshCw,
   Compass, ArrowRight, Check, Layout, AlertTriangle, BrainCircuit, Paperclip, X, ClipboardList,
-  Trash2, Copy, ArrowUp, ArrowDown, Square, CheckSquare, FileText, RotateCcw, RotateCw, History, HelpCircle
+  Trash2, Copy, ArrowUp, ArrowDown, Square, CheckSquare, FileText, RotateCcw, RotateCw, History, HelpCircle, Download, Upload
 } from 'lucide-react';
 import { BugReport, JiraField, JiraFieldOption, JiraUser, SupportingArtifact, TestCase, ManualBugInput, AnalysisCoverageItem, MainWorkflow, TEST_CATEGORIES } from '../../types';
 import AutoResizeTextarea from '../common/AutoResizeTextarea';
@@ -14,7 +14,9 @@ import { TIMEOUTS } from '../../constants';
 import { useI18n } from '../../i18n';
 import {
   buildCapabilityFeatures,
+  buildAdminDiagnosticReport,
   buildCoverageMatrix,
+  buildDryRunReport,
   buildJiraReadinessItems,
   buildStoryQualityProfile,
   buildSyncRepairSuggestions,
@@ -170,6 +172,7 @@ const MainView: React.FC = () => {
   const isRecoveringStalePage = session.error === 'STALE_PAGE' && !session.issueData;
   const staleRecoveryAttemptsRef = useRef(0);
   const artifactInputRef = useRef<HTMLInputElement | null>(null);
+  const profileImportInputRef = useRef<HTMLInputElement | null>(null);
   const manualInputs = session.manualInputs?.length ? session.manualInputs : [{ text: '', supportingContext: '', supportingArtifacts: [] }];
   const requiresIssueType = !session.issueData || !session.selectedIssueType?.id || session.issueTypes.length === 0;
   const acceptanceCriteria = session.issueData?.acceptanceCriteria?.trim() || '';
@@ -220,6 +223,22 @@ const MainView: React.FC = () => {
     };
     updateSession({ jiraCapabilityProfile: updatedProfile });
     void jiraCapabilityService.saveSyncStrategy(profile, nextSyncStrategy).then((savedProfile) => {
+      updateSession({ jiraCapabilityProfile: savedProfile });
+    });
+  };
+  const saveWorkflowSettings = (updates: Partial<NonNullable<typeof session.jiraCapabilityProfile>['workflow']>) => {
+    const profile = session.jiraCapabilityProfile;
+    if (!profile?.workflow) return;
+    const nextWorkflow = {
+      ...profile.workflow,
+      ...updates
+    };
+    const updatedProfile = {
+      ...profile,
+      workflow: nextWorkflow
+    };
+    updateSession({ jiraCapabilityProfile: updatedProfile });
+    void jiraCapabilityService.saveWorkflowSettings(profile, nextWorkflow).then((savedProfile) => {
       updateSession({ jiraCapabilityProfile: savedProfile });
     });
   };
@@ -289,6 +308,63 @@ const MainView: React.FC = () => {
     } catch {
       updateSession({ error: 'Could not copy the sanitized profile.' });
     }
+  };
+
+  const downloadJson = (payload: unknown, filename: string) => {
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportSanitizedProfile = () => {
+    if (!session.jiraCapabilityProfile) return;
+    const projectKey = session.jiraCapabilityProfile.selectedProject?.key || 'global';
+    downloadJson(sanitizeJiraCapabilityProfile(session.jiraCapabilityProfile), `jira-capability-profile-${projectKey}.json`);
+    updateSession({ success: 'Sanitized Jira capability profile exported.' });
+  };
+
+  const exportAdminDiagnosticReport = () => {
+    if (!session.jiraCapabilityProfile) return;
+    const projectKey = session.jiraCapabilityProfile.selectedProject?.key || 'global';
+    downloadJson(buildAdminDiagnosticReport(session.jiraCapabilityProfile, readinessChecks), `jira-admin-diagnostic-${projectKey}.json`);
+    updateSession({ success: 'Admin diagnostic report exported.' });
+  };
+
+  const exportDryRunReport = () => {
+    const projectKey = session.jiraCapabilityProfile?.selectedProject?.key || session.issueData?.key?.split('-')[0] || 'global';
+    downloadJson(buildDryRunReport(session.jiraCapabilityProfile, session), `jira-dry-run-${projectKey}.json`);
+    updateSession({ success: 'Dry-run report exported.' });
+  };
+
+  const importCapabilityProfile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    try {
+      const parsed = JSON.parse(await file.text());
+      if (!parsed || parsed.jiraProfileVersion !== 1 || !parsed.connection || !parsed.targetTestCreateFields) {
+        updateSession({ error: 'The selected file is not a Jira capability profile.' });
+        return;
+      }
+      const importedProfile = await jiraCapabilityService.importProfile(parsed);
+      updateSession({ jiraCapabilityProfile: importedProfile, success: 'Jira capability profile imported.' });
+    } catch {
+      updateSession({ error: 'Could not import the Jira capability profile JSON.' });
+    }
+  };
+
+  const clearCapabilityProfile = async () => {
+    await jiraCapabilityService.clear();
+    updateSession({
+      jiraCapabilityProfile: null,
+      xrayFieldDefaults: {},
+      xrayWarnings: [],
+      success: 'Saved Jira capability profile cleared from this browser.'
+    });
   };
 
   const applySuggestedTestType = () => {
@@ -1538,6 +1614,13 @@ const MainView: React.FC = () => {
                     </div>
                   </div>
 
+                  <input
+                    ref={profileImportInputRef}
+                    type="file"
+                    accept="application/json"
+                    className="hidden"
+                    onChange={importCapabilityProfile}
+                  />
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                     <ActionButton type="button" variant="secondary" onClick={applySuggestedTestType} disabled={!session.testCases.length}>
                       <Check size={14} />
@@ -1551,7 +1634,99 @@ const MainView: React.FC = () => {
                       <Copy size={14} />
                       Copy Profile
                     </ActionButton>
+                    <ActionButton type="button" variant="secondary" onClick={exportSanitizedProfile} disabled={!session.jiraCapabilityProfile}>
+                      <Download size={14} />
+                      Export Profile
+                    </ActionButton>
+                    <ActionButton type="button" variant="secondary" onClick={exportAdminDiagnosticReport} disabled={!session.jiraCapabilityProfile}>
+                      <FileText size={14} />
+                      Admin Report
+                    </ActionButton>
+                    <ActionButton type="button" variant="secondary" onClick={exportDryRunReport} disabled={!session.issueData}>
+                      <ClipboardList size={14} />
+                      Dry-Run Report
+                    </ActionButton>
+                    <ActionButton type="button" variant="secondary" onClick={() => profileImportInputRef.current?.click()}>
+                      <Upload size={14} />
+                      Import Profile
+                    </ActionButton>
+                    <ActionButton type="button" variant="secondary" onClick={clearCapabilityProfile} disabled={!session.jiraCapabilityProfile}>
+                      <Trash2 size={14} />
+                      Clear Profile
+                    </ActionButton>
                   </div>
+
+                  {session.jiraCapabilityProfile?.featureGroups && (
+                    <SurfaceCard className="space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <div className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Full Capability Matrix</div>
+                          <div className="text-[11px] text-[var(--text-secondary)]">Every requested feature area is tracked as supported, partial, blocked, or planned.</div>
+                        </div>
+                        <StatusBadge tone="info">
+                          {session.jiraCapabilityProfile.featureGroups.filter(group => group.status === 'supported').length}/{session.jiraCapabilityProfile.featureGroups.length} Complete
+                        </StatusBadge>
+                      </div>
+                      {session.jiraCapabilityProfile.projectDetails && (
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="rounded-[0.85rem] border border-[var(--border-soft)] bg-[var(--bg-input)] px-3 py-2">
+                            <div className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Components</div>
+                            <div className="text-[11px] text-[var(--text-secondary)] truncate">
+                              {session.jiraCapabilityProfile.projectDetails.components.slice(0, 4).map(item => item.name).join(', ') || 'None detected'}
+                            </div>
+                          </div>
+                          <div className="rounded-[0.85rem] border border-[var(--border-soft)] bg-[var(--bg-input)] px-3 py-2">
+                            <div className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Versions</div>
+                            <div className="text-[11px] text-[var(--text-secondary)] truncate">
+                              {session.jiraCapabilityProfile.projectDetails.versions.slice(0, 4).map(item => item.name).join(', ') || 'None detected'}
+                            </div>
+                          </div>
+                          <div className="rounded-[0.85rem] border border-[var(--border-soft)] bg-[var(--bg-input)] px-3 py-2">
+                            <div className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Workflow Statuses</div>
+                            <div className="text-[11px] text-[var(--text-secondary)] truncate">
+                              {session.jiraCapabilityProfile.projectDetails.statuses.slice(0, 4).map(item => item.name).join(', ') || 'None detected'}
+                            </div>
+                          </div>
+                          <div className="rounded-[0.85rem] border border-[var(--border-soft)] bg-[var(--bg-input)] px-3 py-2">
+                            <div className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Link Types</div>
+                            <div className="text-[11px] text-[var(--text-secondary)] truncate">
+                              {session.jiraCapabilityProfile.projectDetails.issueLinkTypes.slice(0, 4).map(item => item.name).join(', ') || 'None detected'}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      <div className="grid grid-cols-1 gap-2">
+                        {session.jiraCapabilityProfile.featureGroups.map(group => (
+                          <details key={group.key} className="rounded-[0.85rem] border border-[var(--border-soft)] bg-[var(--surface-soft)] px-3 py-2">
+                            <summary className="cursor-pointer list-none">
+                              <div className="flex items-center justify-between gap-3">
+                                <div>
+                                  <div className="text-[11px] font-bold text-[var(--text-primary)]">{group.label}</div>
+                                  <div className="text-[10px] text-[var(--text-muted)]">{group.features.filter(feature => feature.status === 'supported').length}/{group.features.length} supported</div>
+                                </div>
+                                <StatusBadge tone={group.status === 'supported' ? 'success' : group.status === 'blocked' ? 'danger' : group.status === 'partial' ? 'warning' : 'info'}>
+                                  {group.status}
+                                </StatusBadge>
+                              </div>
+                            </summary>
+                            <div className="mt-3 space-y-2">
+                              {group.features.map(feature => (
+                                <div key={feature.key} className="flex items-start justify-between gap-3 border-t border-[var(--border-soft)] pt-2">
+                                  <div>
+                                    <div className="text-[11px] font-semibold text-[var(--text-primary)]">{feature.label}</div>
+                                    <div className="text-[10px] text-[var(--text-muted)]">{feature.detail}</div>
+                                  </div>
+                                  <StatusBadge tone={feature.status === 'supported' ? 'success' : feature.status === 'blocked' ? 'danger' : feature.status === 'partial' ? 'warning' : 'info'}>
+                                    {feature.status}
+                                  </StatusBadge>
+                                </div>
+                              ))}
+                            </div>
+                          </details>
+                        ))}
+                      </div>
+                    </SurfaceCard>
+                  )}
 
                   {session.issueData?.linkedTestKeys && session.issueData.linkedTestKeys.length > 0 && (
                     <StatusPanel
@@ -1684,6 +1859,12 @@ const MainView: React.FC = () => {
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                         <input
+                          value={testCase.existing_issue_key || ''}
+                          onChange={e => handleUpdateTestCase(idx, { existing_issue_key: e.target.value.trim().toUpperCase() || undefined })}
+                          className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-[0.9rem] px-2.5 py-2 text-xs text-[var(--text-secondary)] outline-none"
+                          placeholder="Existing Xray key"
+                        />
+                        <input
                           value={(testCase.acceptance_criteria_refs || []).join(', ')}
                           onChange={e => handleUpdateTestCase(idx, { acceptance_criteria_refs: splitListInput(e.target.value) })}
                           className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-[0.9rem] px-2.5 py-2 text-xs text-[var(--text-secondary)] outline-none"
@@ -1809,10 +1990,24 @@ const MainView: React.FC = () => {
                             />
                             Inherit versions
                           </label>
-                          <div className="rounded-[0.85rem] border border-[var(--border-soft)] bg-[var(--bg-input)] px-3 py-2 text-[11px] text-[var(--text-secondary)]">
-                            <div className="font-bold text-[var(--text-primary)]">Transition permission</div>
-                            <div>{session.jiraCapabilityProfile.permissions.canTransitionIssues ? 'Available when workflow automation is enabled' : 'Not available for this user'}</div>
-                          </div>
+                          <label className="flex items-center gap-2 rounded-[0.85rem] border border-[var(--border-soft)] bg-[var(--bg-input)] px-3 py-2 text-[11px] text-[var(--text-secondary)]">
+                            <input
+                              type="checkbox"
+                              disabled={!session.jiraCapabilityProfile.permissions.canTransitionIssues}
+                              checked={session.jiraCapabilityProfile.syncStrategy.transitionAfterCreate}
+                              onChange={event => saveSyncStrategy({ transitionAfterCreate: event.target.checked })}
+                            />
+                            Transition after create
+                          </label>
+                          <label className="flex items-center gap-2 rounded-[0.85rem] border border-[var(--border-soft)] bg-[var(--bg-input)] px-3 py-2 text-[11px] text-[var(--text-secondary)]">
+                            <input
+                              type="checkbox"
+                              disabled={!session.jiraCapabilityProfile.permissions.canAddComments}
+                              checked={Boolean(session.jiraCapabilityProfile.workflow?.addCommentAfterSync)}
+                              onChange={event => saveWorkflowSettings({ addCommentAfterSync: event.target.checked })}
+                            />
+                            Comment on story
+                          </label>
                         </div>
 
                         <div className="grid grid-cols-1 gap-2">
@@ -1964,11 +2159,39 @@ const MainView: React.FC = () => {
                       <div className="flex flex-wrap gap-2">
                         {session.createdIssues.map(issue => (
                           <span key={issue.key} className="px-2 py-1 rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-soft)] text-[11px] font-bold text-[var(--text-primary)]">
-                            {issue.key}
+                            {issue.key}{issue.updated ? ' updated' : ''}
                           </span>
                         ))}
                       </div>
                     </div>
+                  )}
+
+                  {session.xraySyncHistory.length > 0 && (
+                    <SurfaceCard className="space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <div className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Sync History</div>
+                          <div className="text-[11px] text-[var(--text-secondary)]">Recent Xray publish attempts for this Jira connection.</div>
+                        </div>
+                        <StatusBadge tone="info">{session.xraySyncHistory.length}</StatusBadge>
+                      </div>
+                      <div className="space-y-2">
+                        {session.xraySyncHistory.slice(0, 5).map(item => (
+                          <div key={item.id} className="rounded-[0.85rem] border border-[var(--border-soft)] bg-[var(--bg-input)] px-3 py-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="text-[11px] font-bold text-[var(--text-primary)]">{item.story_issue_key}</div>
+                              <StatusBadge tone={item.status === 'success' ? 'success' : 'danger'}>{item.status}</StatusBadge>
+                            </div>
+                            <div className="text-[10px] text-[var(--text-muted)]">
+                              Created: {item.created_test_keys.join(', ') || 'none'} · Updated: {item.updated_test_keys.join(', ') || 'none'}
+                            </div>
+                            {item.warnings.length > 0 && (
+                              <div className="text-[10px] text-[var(--warning)]">{item.warnings.slice(0, 2).join(' ')}</div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </SurfaceCard>
                   )}
 
                   {session.xrayWarnings.length > 0 && (

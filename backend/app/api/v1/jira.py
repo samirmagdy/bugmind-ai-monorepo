@@ -8,7 +8,7 @@ import xml.etree.ElementTree as ET
 from pypdf import PdfReader
 from app.api import deps
 from app.models.user import User
-from app.models.jira import JiraConnection, JiraAuthType, JiraFieldMapping
+from app.models.jira import JiraConnection, JiraAuthType, JiraSyncHistory
 from app.schemas.jira import (
     JiraBootstrapContextRequest,
     JiraBootstrapContextResponse,
@@ -20,9 +20,7 @@ from app.schemas.jira import (
     JiraConnectionCreate,
     JiraConnectionResponse,
     JiraConnectionUpdate,
-    JiraFieldResponse,
     JiraIssueTypeResponse,
-    JiraMetadataResponse,
     JiraProjectResponse,
     JiraUserSearchRequest,
     XrayDefaultsResponse,
@@ -30,23 +28,18 @@ from app.schemas.jira import (
 from app.schemas.bug import (
     XrayTestSuitePublishRequest,
     XrayTestSuitePublishResponse,
-    XrayPublishedTest,
     DuplicateCheckRequest,
     DuplicateCheckResponse,
     DuplicateMatchResponse,
     DuplicateLinkRequest,
     DuplicateLinkResponse,
 )
-from app.core import security
-from app.services.jira.adapters.cloud import JiraCloudAdapter
 from app.services.jira.adapters.server import JiraServerAdapter
-from app.services.jira.metadata_engine import JiraMetadataEngine
-from urllib.parse import quote, urlparse
+from urllib.parse import quote
 from io import BytesIO
 from app.core.audit import log_audit
 from app.core.idempotency import idempotency_store
 from app.core.rate_limit import rate_limiter
-from app.core.request_security import enforce_secure_jira_ssl, validate_connection_host
 from app.core.config import settings
 from app.services.jira.bulk_epic_service import fetch_epic_children
 from app.services.jira.bootstrap_service import (
@@ -72,13 +65,15 @@ from app.services.jira.xray_publisher import (
     XrayServerPublisher,
     resolve_link_type_candidates as service_resolve_link_type_candidates,
 )
+from app.services.jira.duplicate_detector import (
+    DuplicateCandidate,
+    find_duplicates,
+)
 
 router = APIRouter()
 MAX_BRD_ATTACHMENT_BYTES = 10 * 1024 * 1024
 MAX_BRD_ATTACHMENT_TEXT_CHARS = 120_000
 MAX_BRD_PDF_PAGES = 50
-
-from cryptography.fernet import InvalidToken
 
 def get_adapter(connection: JiraConnection):
     return build_jira_adapter(connection)
@@ -815,6 +810,34 @@ def _publish_xray_server_test_suite(
 ) -> XrayTestSuitePublishResponse:
     return XrayServerPublisher(db, current_user, request).publish(conn_id, req)
 
+
+def _record_xray_sync_history(
+    db: Session,
+    current_user: User,
+    req: XrayTestSuitePublishRequest,
+    status: str,
+    response: Optional[XrayTestSuitePublishResponse] = None,
+    error_detail: Optional[Any] = None,
+) -> None:
+    created_tests = response.created_tests if response else []
+    record = JiraSyncHistory(
+        user_id=current_user.id,
+        jira_connection_id=req.jira_connection_id,
+        story_issue_key=req.story_issue_key,
+        project_id=req.xray_project_id,
+        project_key=req.xray_project_key,
+        operation="xray_publish",
+        status=status,
+        created_test_keys=[test.key for test in created_tests if not getattr(test, "updated", False)],
+        updated_test_keys=[test.key for test in created_tests if getattr(test, "updated", False)],
+        warnings=response.warnings if response else [],
+        request_payload=req.model_dump(),
+        response_payload=response.model_dump() if response else {},
+        error_detail=error_detail,
+    )
+    db.add(record)
+    db.commit()
+
 @router.post("/connections/{conn_id}/xray/test-suite", response_model=XrayTestSuitePublishResponse)
 def publish_xray_test_suite(
     conn_id: int,
@@ -843,17 +866,60 @@ def publish_xray_test_suite(
         conn = get_owned_connection(db, current_user.id, conn_id)
 
         if conn.auth_type == JiraAuthType.CLOUD:
-            return _publish_xray_cloud_test_suite(req, current_user, db, request)
+            response = _publish_xray_cloud_test_suite(req, current_user, db, request)
+            _record_xray_sync_history(db, current_user, req, "success", response=response)
+            return response
 
-        return _publish_xray_server_test_suite(conn_id, req, current_user, db, request)
-    except Exception:
+        response = _publish_xray_server_test_suite(conn_id, req, current_user, db, request)
+        _record_xray_sync_history(db, current_user, req, "success", response=response)
+        return response
+    except Exception as exc:
         idempotency_store.clear_reservation(
             "jira.xray_publish",
             str(current_user.id),
             idem_key,
             req.model_dump(),
         )
+        if isinstance(exc, HTTPException):
+            _record_xray_sync_history(db, current_user, req, "failed", error_detail=exc.detail)
         raise
+
+
+@router.get("/connections/{conn_id}/xray/sync-history")
+def list_xray_sync_history(
+    conn_id: int,
+    limit: int = 25,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    get_owned_connection(db, current_user.id, conn_id)
+    safe_limit = min(max(limit, 1), 100)
+    rows = (
+        db.query(JiraSyncHistory)
+        .filter(
+            JiraSyncHistory.user_id == current_user.id,
+            JiraSyncHistory.jira_connection_id == conn_id,
+        )
+        .order_by(JiraSyncHistory.created_at.desc(), JiraSyncHistory.id.desc())
+        .limit(safe_limit)
+        .all()
+    )
+    return [
+        {
+            "id": row.id,
+            "story_issue_key": row.story_issue_key,
+            "project_id": row.project_id,
+            "project_key": row.project_key,
+            "operation": row.operation,
+            "status": row.status,
+            "created_test_keys": row.created_test_keys or [],
+            "updated_test_keys": row.updated_test_keys or [],
+            "warnings": row.warnings or [],
+            "error_detail": row.error_detail,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+        }
+        for row in rows
+    ]
 
 @router.post("/connections/{conn_id}/xray/test-connection")
 def test_xray_cloud_connection(
@@ -873,16 +939,6 @@ def test_xray_cloud_connection(
         raise e
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Phase 2: Duplicate Detection
-# ═══════════════════════════════════════════════════════════════════════════
-
-from app.services.jira.duplicate_detector import (
-    DuplicateCandidate,
-    find_duplicates,
-)
 
 
 @router.post("/duplicates/check", response_model=DuplicateCheckResponse)

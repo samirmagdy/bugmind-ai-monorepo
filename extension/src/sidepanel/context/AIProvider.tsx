@@ -17,6 +17,7 @@ import {
   UsageResponsePayload,
   XrayPublishRequestPayload,
   XrayPublishResponsePayload,
+  XraySyncHistoryResponsePayload,
   GeneratedFindingResponsePayload,
   BulkWorkerResponsePayload,
   buildIssueContextPayload,
@@ -318,7 +319,8 @@ export const AIProvider: React.FC<{
     review_notes: testCase.review_notes || undefined,
     acceptance_criteria_refs: Array.isArray(testCase.acceptance_criteria_refs) ? testCase.acceptance_criteria_refs : [],
     labels: Array.isArray(testCase.labels) ? testCase.labels : [],
-    components: Array.isArray(testCase.components) ? testCase.components : []
+    components: Array.isArray(testCase.components) ? testCase.components : [],
+    existing_issue_key: testCase.existing_issue_key || undefined
   }), []);
 
   const normalizeGapAnalysisSummary = useCallback((summary: GapAnalysisSummary | null | undefined): GapAnalysisSummary | null => {
@@ -854,7 +856,11 @@ export const AIProvider: React.FC<{
         repository_path_field_id: session.xrayRepositoryPathFieldId || undefined,
         folder_path: session.xrayFolderPath || session.issueData.key,
         link_type: linkType,
-        target_field_defaults: targetFieldDefaults
+        target_field_defaults: targetFieldDefaults,
+        transition_after_create: Boolean(profile?.syncStrategy.transitionAfterCreate && profile.permissions.canTransitionIssues),
+        add_comment_to_story: Boolean(profile?.workflow?.addCommentAfterSync && profile.permissions.canAddComments),
+        story_comment: `BugMind published ${selectedTestCases.length} Xray Test case${selectedTestCases.length === 1 ? '' : 's'} from this story.`,
+        update_existing: selectedTestCases.some(testCase => Boolean(testCase.existing_issue_key?.trim()))
       };
       const res = await apiRequest(`${apiBase}/jira/connections/${session.jiraConnectionId}/xray/test-suite`, {
         method: 'POST',
@@ -869,9 +875,22 @@ export const AIProvider: React.FC<{
       }
 
       const data = await readJsonResponse<XrayPublishResponsePayload>(res);
+      let xraySyncHistory = session.xraySyncHistory;
+      try {
+        const historyRes = await apiRequest(`${apiBase}/jira/connections/${session.jiraConnectionId}/xray/sync-history?limit=10`, {
+          token: authToken,
+          onUnauthorized: refreshAuthToken,
+        });
+        if (historyRes.ok) {
+          xraySyncHistory = await readJsonResponse<XraySyncHistoryResponsePayload>(historyRes);
+        }
+      } catch {
+        xraySyncHistory = session.xraySyncHistory;
+      }
       updateSession({
         createdIssues: data.created_tests || [],
         xrayWarnings: data.warnings || [],
+        xraySyncHistory,
         success: `Published ${(data.created_tests || []).length} test cases to Xray folder ${data.folder_path}.`
       }, currentTabId);
     } catch (err) {
@@ -880,7 +899,7 @@ export const AIProvider: React.FC<{
       publishXrayInFlightRef.current = false;
       updateSession({ loading: false }, currentTabId);
     }
-  }, [apiBase, authToken, buildIdempotencyKey, currentTabId, normalizeFrontendTestCase, refreshAuthToken, session.connections, session.issueData, session.issueTypes, session.jiraCapabilityProfile, session.jiraConnectionId, session.testCases, session.xrayFieldDefaults, session.xrayFolderPath, session.xrayLinkType, session.xrayPublishMode, session.xrayPublishSupported, session.xrayRepositoryPathFieldId, session.xrayTargetProjectId, session.xrayTargetProjectKey, session.xrayTestIssueTypeName, session.xrayUnsupportedReason, updateSession]);
+  }, [apiBase, authToken, buildIdempotencyKey, currentTabId, normalizeFrontendTestCase, refreshAuthToken, session.connections, session.issueData, session.issueTypes, session.jiraCapabilityProfile, session.jiraConnectionId, session.testCases, session.xrayFieldDefaults, session.xrayFolderPath, session.xrayLinkType, session.xrayPublishMode, session.xrayPublishSupported, session.xrayRepositoryPathFieldId, session.xraySyncHistory, session.xrayTargetProjectId, session.xrayTargetProjectKey, session.xrayTestIssueTypeName, session.xrayUnsupportedReason, updateSession]);
 
   const handleManualGenerate = useCallback(async () => {
     if (manualGenerateInFlightRef.current) return;

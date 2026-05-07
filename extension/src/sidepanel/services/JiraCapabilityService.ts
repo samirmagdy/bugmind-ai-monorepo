@@ -1,4 +1,4 @@
-import { IssueData, IssueType, JiraCapabilityFieldSchema, JiraCapabilityProfile, JiraFieldOption, JiraProject, TabSession } from '../types';
+import { IssueData, IssueType, JiraCapabilityFeatureGroup, JiraCapabilityFeatureStatus, JiraCapabilityFieldSchema, JiraCapabilityProfile, JiraFieldOption, JiraIssueLinkTypeProfile, JiraNamedEntity, JiraProject, JiraProjectCapabilityDetails, JiraWorkflowStatus, TabSession } from '../types';
 
 type JiraAuthType = 'cloud' | 'server';
 
@@ -19,6 +19,12 @@ type RawField = {
   required?: boolean;
   schema?: { type?: string; system?: string; custom?: string };
   allowedValues?: unknown[];
+};
+
+type FeatureInput = Omit<JiraCapabilityFeatureStatus, 'status'> & {
+  supported?: boolean;
+  partial?: boolean;
+  blocked?: boolean;
 };
 
 export type JiraReadinessItem = {
@@ -141,6 +147,38 @@ function normalizeIssueType(raw: Record<string, unknown>): IssueType {
   };
 }
 
+function normalizeNamedEntity(raw: Record<string, unknown>): JiraNamedEntity {
+  return {
+    id: String(raw.id ?? raw.name ?? ''),
+    name: String(raw.name ?? ''),
+    archived: typeof raw.archived === 'boolean' ? raw.archived : undefined,
+    released: typeof raw.released === 'boolean' ? raw.released : undefined,
+  };
+}
+
+function normalizeWorkflowStatus(raw: Record<string, unknown>): JiraWorkflowStatus {
+  const category = raw.statusCategory && typeof raw.statusCategory === 'object'
+    ? String((raw.statusCategory as Record<string, unknown>).name || '')
+    : undefined;
+  return {
+    id: String(raw.id ?? raw.name ?? ''),
+    name: String(raw.name ?? ''),
+    category,
+  };
+}
+
+function normalizeIssueLinkTypes(payload: Record<string, unknown> | null): JiraIssueLinkTypeProfile[] {
+  const types = Array.isArray(payload?.issueLinkTypes) ? payload.issueLinkTypes as Record<string, unknown>[] : [];
+  return types
+    .map(type => ({
+      id: type.id ? String(type.id) : undefined,
+      name: String(type.name || ''),
+      inward: String(type.inward || ''),
+      outward: String(type.outward || ''),
+    }))
+    .filter(type => type.name);
+}
+
 function findByNames(issueTypes: IssueType[], names: string[]): IssueType | null {
   const normalized = names.map(name => name.toLowerCase());
   return issueTypes.find(item => normalized.includes(item.name.trim().toLowerCase())) ||
@@ -150,12 +188,192 @@ function findByNames(issueTypes: IssueType[], names: string[]): IssueType | null
 
 function pickSourceMapping(fields: Array<{ id: string; name: string; type: string }>): JiraCapabilityProfile['sourceStoryMapping'] {
   const find = (patterns: RegExp[]) => fields.find(field => patterns.some(pattern => pattern.test(field.name)));
-  return {
+  const mapping = {
     acceptanceCriteria: find([/acceptance\s*criteria/i, /\bAC\b/i])?.id,
     mainFlow: find([/main\s*flow/i, /happy\s*path/i])?.id,
     alternativeFlow: find([/alternative\s*flow/i, /alternate\s*flow/i, /exception\s*flow/i])?.id,
     businessRules: find([/business\s*rules?/i])?.id,
+    expectedBehavior: find([/expected\s*behaviou?r/i, /expected\s*result/i])?.id,
+    outOfScope: find([/out\s*of\s*scope/i, /not\s*in\s*scope/i])?.id,
+    assumptions: find([/assumptions?/i])?.id,
+    dependencies: find([/dependencies|dependency/i])?.id,
+    testNotes: find([/test\s*notes?|qa\s*notes?|testing\s*notes?/i])?.id,
   };
+  const detectedCount = Object.values(mapping).filter(Boolean).length;
+  return {
+    ...mapping,
+    confidenceScore: Math.round((detectedCount / 9) * 100),
+  };
+}
+
+function featureStatus(feature: FeatureInput): JiraCapabilityFeatureStatus {
+  return {
+    key: feature.key,
+    label: feature.label,
+    detail: feature.detail,
+    status: feature.blocked ? 'blocked' : feature.supported ? 'supported' : feature.partial ? 'partial' : 'planned',
+  };
+}
+
+function groupStatus(features: JiraCapabilityFeatureStatus[]): JiraCapabilityFeatureGroup['status'] {
+  if (features.every(feature => feature.status === 'supported')) return 'supported';
+  if (features.some(feature => feature.status === 'blocked')) return 'blocked';
+  if (features.some(feature => feature.status === 'supported' || feature.status === 'partial')) return 'partial';
+  return 'planned';
+}
+
+function featureGroup(key: string, label: string, features: FeatureInput[]): JiraCapabilityFeatureGroup {
+  const resolvedFeatures = features.map(featureStatus);
+  return {
+    key,
+    label,
+    status: groupStatus(resolvedFeatures),
+    features: resolvedFeatures,
+  };
+}
+
+function buildFeatureGroups(profile: JiraCapabilityProfile, hasCreateFields: boolean): JiraCapabilityFeatureGroup[] {
+  const mappedSourceFields = Object.values(profile.sourceStoryMapping).filter(Boolean).length;
+  const hasXray = profile.xray.installed || profile.xray.mode !== 'unknown';
+  const hasRequiredDefaults = profile.readiness.missingRequiredFields.length === 0;
+  const canSync = profile.permissions.canCreateIssues && Boolean(profile.issueTypes.test) && hasRequiredDefaults;
+  const projectDetails = profile.projectDetails;
+
+  return [
+    featureGroup('jira_connection', 'Jira Connection', [
+      { key: 'base_url_email_token', label: 'Base URL + user + token connection', supported: profile.connection.connected, detail: profile.connection.baseUrl },
+      { key: 'validate_token', label: 'Validate Jira token', supported: profile.connection.connected, detail: 'Validated through Jira /myself.' },
+      { key: 'cloud_server_detection', label: 'Detect Cloud vs Server/DC', supported: true, detail: profile.connection.deploymentType },
+      { key: 'api_version_detection', label: 'Detect Jira API version', supported: true, detail: `REST API v${profile.connection.apiVersion}` },
+      { key: 'user_profile', label: 'Connected user profile', supported: Boolean(profile.user.displayName || profile.user.accountId), detail: profile.user.displayName || profile.user.accountId || 'No user details returned.' },
+      { key: 'health_status', label: 'Connection health status', supported: true, detail: profile.diagnostics?.health || 'connected' },
+      { key: 'manual_discovery_refresh', label: 'Manual discovery refresh', partial: true, detail: 'Reconnect & Discover reruns discovery; direct tokenless refresh is limited.' },
+      { key: 'save_profile', label: 'Save capability profile', supported: true, detail: 'Stored per base URL/project in extension storage.' },
+      { key: 'profile_import_export', label: 'Import/export profile', supported: true, detail: 'Sanitized JSON import/export is available in the sidepanel.' },
+      { key: 'multiple_environments', label: 'Multiple Jira environments', supported: true, detail: `${profile.projects.length} accessible project(s) discovered.` },
+      { key: 'read_only_full_sync_modes', label: 'Read-only/full-sync modes', partial: true, detail: canSync ? 'Sync enabled.' : 'Read-only/generate-only behavior enforced by readiness.' },
+      { key: 'clear_token_profile', label: 'Clear token/session/profile', partial: true, detail: 'Profile can be cleared locally; server-side connection deletion clears saved token.' },
+    ]),
+    featureGroup('project_discovery', 'Project Discovery', [
+      { key: 'active_project', label: 'Active project from issue', supported: Boolean(profile.selectedProject), detail: profile.selectedProject?.key || 'No selected project.' },
+      { key: 'accessible_projects', label: 'List accessible projects', supported: profile.projects.length > 0, detail: `${profile.projects.length} project(s).` },
+      { key: 'project_identity', label: 'Detect project ID/key/name/type', supported: Boolean(profile.selectedProject?.id && profile.selectedProject?.key), detail: profile.selectedProject ? `${profile.selectedProject.key} - ${profile.selectedProject.name}` : 'No project.' },
+      { key: 'team_managed_detection', label: 'Company/team-managed detection', partial: typeof profile.selectedProject?.simplified === 'boolean', detail: typeof profile.selectedProject?.simplified === 'boolean' ? (profile.selectedProject.simplified ? 'Team-managed' : 'Company-managed') : 'Jira did not return simplified flag.' },
+      { key: 'central_qa_project', label: 'Central QA project selection', supported: true, detail: 'Xray target project can differ from source story project.' },
+      { key: 'project_settings', label: 'Project-specific settings/mappings', partial: true, detail: 'Capability profiles and field mappings are project-scoped; advanced per-component/release templates are planned.' },
+      { key: 'components_versions_workflows', label: 'Components, versions, workflows', supported: Boolean(projectDetails), detail: `${projectDetails?.components.length || 0} component(s), ${projectDetails?.versions.length || 0} version(s), ${projectDetails?.statuses.length || 0} workflow status(es).` },
+    ]),
+    featureGroup('permissions', 'Permission-Based Modes', [
+      { key: 'browse', label: 'Browse Projects', supported: profile.permissions.canBrowse, blocked: !profile.permissions.canBrowse, detail: profile.permissions.canBrowse ? 'Available' : 'Generation from Jira is blocked.' },
+      { key: 'create', label: 'Create Issues', supported: profile.permissions.canCreateIssues, blocked: !profile.permissions.canCreateIssues, detail: profile.permissions.canCreateIssues ? 'Available' : 'Xray sync is disabled.' },
+      { key: 'edit_link_transition_comment', label: 'Edit/link/transition/comment permissions', partial: true, detail: `Edit ${profile.permissions.canEditIssues ? 'yes' : 'no'}, link ${profile.permissions.canLinkIssues ? 'yes' : 'no'}, transition ${profile.permissions.canTransitionIssues ? 'yes' : 'no'}, comment ${profile.permissions.canAddComments ? 'yes' : 'no'}.` },
+      { key: 'blocked_reasoning', label: 'Blocked feature reasons/checklist', supported: true, detail: 'Readiness cards explain blocking checks.' },
+      { key: 'admin_diagnostic_mode', label: 'Admin diagnostic/report mode', partial: true, detail: 'Sanitized profile export exists; full admin report is planned.' },
+    ]),
+    featureGroup('issue_types', 'Issue Types', [
+      { key: 'available_types', label: 'Available issue types', supported: profile.issueTypes.all.length > 0, detail: `${profile.issueTypes.all.length} type(s).` },
+      { key: 'story_bug_test', label: 'Story/Bug/Test detection', partial: true, detail: `Story ${profile.issueTypes.story?.name || 'missing'}, Bug ${profile.issueTypes.bug?.name || 'missing'}, Test ${profile.issueTypes.test?.name || 'missing'}.` },
+      { key: 'test_type_id_truth', label: 'Use Test issue type ID', supported: Boolean(profile.issueTypes.test?.id), detail: profile.issueTypes.test?.id || 'No Test type selected.' },
+      { key: 'manual_test_type', label: 'Manual renamed Test selection', supported: true, detail: 'User can select and save the Test issue type.' },
+      { key: 'create_metadata', label: 'Issue type create metadata', supported: hasCreateFields, detail: `${Object.keys(profile.targetTestCreateFields.fieldSchemas).length} create field(s).` },
+    ]),
+    featureGroup('source_mapping', 'Source Story Mapping', [
+      { key: 'core_sections', label: 'AC/Main/Alternative/Business Rules', supported: mappedSourceFields >= 4, partial: mappedSourceFields > 0, detail: `${mappedSourceFields} mapped field(s), ${profile.sourceStoryMapping.confidenceScore || 0}% confidence.` },
+      { key: 'manual_mapping', label: 'Manual source field mapping', partial: true, detail: 'Source mapping can be persisted in the profile; full UI editor is limited.' },
+      { key: 'preview_extraction', label: 'Extracted story preview', supported: true, detail: 'Issue preview uses active Jira context.' },
+      { key: 'extended_sections', label: 'Expected behavior/out-of-scope/assumptions/dependencies/test notes', partial: Boolean(profile.sourceStoryMapping.expectedBehavior || profile.sourceStoryMapping.outOfScope || profile.sourceStoryMapping.assumptions || profile.sourceStoryMapping.dependencies || profile.sourceStoryMapping.testNotes), detail: 'Extended source fields are auto-detected and stored when matching Jira fields exist.' },
+    ]),
+    featureGroup('active_issue', 'Active Jira Issue', [
+      { key: 'active_issue_fetch', label: 'Detect and fetch active issue', supported: true, detail: 'Content script and bootstrap context resolve the current Jira issue.' },
+      { key: 'core_issue_fields', label: 'Summary/description/AC/status/priority/labels/components/versions', partial: true, detail: 'Core issue fields are modeled; availability depends on Jira response and mappings.' },
+      { key: 'links_and_duplicates', label: 'Linked tests duplicate signal', partial: true, detail: 'Linked Test keys can warn before publish.' },
+      { key: 'comments_attachments_subtasks', label: 'Comments, attachments, subtasks', partial: true, detail: 'Bulk attachment metadata/BRD extraction exists; active issue extraction is limited.' },
+    ]),
+    featureGroup('target_fields', 'Target Test Create Fields', [
+      { key: 'required_optional_fields', label: 'Required/optional fields', supported: hasCreateFields, detail: `${profile.targetTestCreateFields.requiredFields.length} required field(s).` },
+      { key: 'allowed_values', label: 'Allowed values/dropdowns', partial: hasCreateFields, detail: 'Allowed values are used when Jira returns them.' },
+      { key: 'field_defaults', label: 'Default values and mappings', supported: true, detail: 'Defaults are saved and applied before sync.' },
+      { key: 'payload_preview', label: 'Payload preview/validation', supported: true, detail: 'Dry-run preview validates blockers before publish.' },
+    ]),
+    featureGroup('xray', 'Xray Detection and Sync', [
+      { key: 'xray_mode', label: 'Xray mode detection/fallback', partial: hasXray, detail: profile.xray.mode },
+      { key: 'native_steps', label: 'Native Xray steps', partial: profile.xray.supportsNativeSteps, detail: profile.xray.supportsNativeSteps ? 'Detected' : 'Backend can attempt steps; browser discovery is conservative.' },
+      { key: 'manual_steps_description', label: 'Manual steps/description fallback', supported: true, detail: profile.syncStrategy.fallbackWhenNativeStepsFail },
+      { key: 'folders', label: 'Repository folders', partial: profile.xray.supportsRepositoryFolders, detail: profile.xray.supportsRepositoryFolders ? 'Server/DC folder API detected.' : 'Folder path can still be sent as metadata/fallback.' },
+      { key: 'cloud_credentials', label: 'Xray Cloud credentials', partial: profile.xray.mode === 'xray-cloud', detail: 'Cloud wizard stores credentials on the backend connection.' },
+    ]),
+    featureGroup('linking_sync', 'Linking and Sync Strategy', [
+      { key: 'link_types', label: 'Detect/select link type', supported: Boolean(projectDetails?.issueLinkTypes.length), detail: `${projectDetails?.issueLinkTypes.length || 0} link type(s); preferred ${profile.linking.preferredLinkType} (${profile.linking.outward}/${profile.linking.inward})` },
+      { key: 'link_created_tests', label: 'Link Test to Story', partial: profile.permissions.canLinkIssues, detail: profile.permissions.canLinkIssues ? 'Linking attempted during publish.' : 'Permission missing; publish can continue with warning.' },
+      { key: 'inheritance', label: 'Inherit labels/components/fix versions/priority', supported: true, detail: 'Configured in sync strategy and publish payload.' },
+      { key: 'transition_comment', label: 'Transition/comment after creation', partial: false, detail: 'Permissions are detected; automation is planned.' },
+    ]),
+    featureGroup('readiness_dry_run', 'Readiness and Dry Run', [
+      { key: 'setup_readiness', label: 'Setup readiness score', supported: true, detail: profile.readiness.canSyncToXray ? 'Sync-ready' : 'Blockers or warnings present.' },
+      { key: 'blocking_warnings', label: 'Blocking/warning issues', supported: true, detail: profile.readiness.warnings.join(', ') || 'No discovery warnings.' },
+      { key: 'dry_run_payload', label: 'Dry-run payload preview', supported: true, detail: 'Payload preview and blocking validation run before publish.' },
+      { key: 'bulk_dry_run_history', label: 'Bulk dry-run history/reporting', partial: false, detail: 'Planned.' },
+    ]),
+    featureGroup('ai_quality_coverage', 'AI, Quality, Coverage', [
+      { key: 'test_generation_categories', label: 'Manual tests by category', supported: true, detail: 'Positive, negative, boundary, regression, permission, validation, API, UI, mobile, accessibility, performance.' },
+      { key: 'prompt_from_jira', label: 'Prompt from mapped Jira fields', partial: true, detail: 'Uses issue context and selected mappings; advanced templates are planned.' },
+      { key: 'privacy_redaction', label: 'Sensitive data masking before AI', supported: true, detail: 'Server-side redaction handles common emails, tokens, long IDs, phones, auth/cookies.' },
+      { key: 'requirement_analysis', label: 'Requirement analysis and clarification', partial: true, detail: 'Gap analysis exists; full PO/BA checklists are planned.' },
+      { key: 'quality_coverage', label: 'Test quality and coverage signals', partial: true, detail: 'Coverage matrix and story quality cards exist; advanced scoring is planned.' },
+    ]),
+    featureGroup('bulk_reporting_admin', 'Bulk, Reporting, Enterprise', [
+      { key: 'bulk_epic', label: 'Bulk Epic workflows', partial: true, detail: 'Epic child fetch, bulk generation, audit, and BRD comparison exist.' },
+      { key: 'exports', label: 'Reports and exports', partial: true, detail: 'Profile export exists; CSV/Excel/PDF/report packages are planned.' },
+      { key: 'dashboard_cards', label: 'Dashboard cards', partial: true, detail: 'Readiness, capability, story quality, dry-run and sync cards exist.' },
+      { key: 'security_admin', label: 'Security/admin controls', partial: true, detail: 'Workspaces, roles, shared connections/templates and audit views exist; locked policies/approvals are planned.' },
+      { key: 'automation', label: 'Automation and recommendations', partial: true, detail: 'Discovery, issue detection, inheritance, fallback, and suggestions are partially automated.' },
+    ]),
+  ];
+}
+
+function normalizeProfileShape(profile: JiraCapabilityProfile, reason: string): JiraCapabilityProfile {
+  const sourceFields = Object.values(profile.sourceStoryMapping || {}).filter((value): value is string => typeof value === 'string' && value.length > 0);
+  const projectKey = profile.selectedProject?.key || '';
+  const normalized: JiraCapabilityProfile = {
+    ...profile,
+    projectDetails: profile.projectDetails || {
+      components: [],
+      versions: [],
+      statuses: [],
+      issueLinkTypes: [],
+    },
+    sourceStoryMapping: {
+      ...profile.sourceStoryMapping,
+      confidenceScore: profile.sourceStoryMapping?.confidenceScore ?? Math.round((sourceFields.length / 9) * 100),
+    },
+    diagnostics: profile.diagnostics || {
+      lastSuccessfulDiscoveryAt: profile.connection.lastCheckedAt,
+      lastDiscoveryWarnings: profile.readiness.warnings || [],
+      health: profile.connection.connected ? 'connected' : 'blocked',
+      healthReasons: profile.readiness.warnings?.length ? profile.readiness.warnings : [reason],
+    },
+    privacy: profile.privacy || {
+      fieldsSentToAi: sourceFields,
+      excludedFieldsFromAi: [],
+      maskSensitiveData: true,
+      disableCommentsExtraction: true,
+      disableAttachmentMetadataExtraction: false,
+      externalAiDisabled: false,
+      minimalDataAiMode: false,
+      domainAllowlist: [profile.connection.baseUrl],
+      projectAllowlist: projectKey ? [projectKey] : [],
+    },
+    workflow: profile.workflow || {
+      mode: profile.permissions.canCreateIssues ? 'sync_enabled' : profile.permissions.canBrowse ? 'generate_only' : 'safe_mode',
+      defaultFolderByProject: projectKey ? { [projectKey]: projectKey } : {},
+      defaultFolderByComponent: {},
+      preferredComponents: [],
+      preferredFixVersions: [],
+      addCommentAfterSync: false,
+      transitionAfterCreate: false,
+    },
+  };
+  return normalized;
 }
 
 export class JiraCapabilityService {
@@ -223,11 +441,14 @@ export class JiraCapabilityService {
     const xrayFields = this.detectXrayFields(createFields, visibleFields);
     const xrayProbe = selectedProject ? await this.probeXray(selectedProject.key, options.xrayMode, warnings) : { supportsNativeSteps: false, supportsRepositoryFolders: false };
     const linking = this.detectLinking(issueLinkTypes);
+    const projectDetails = selectedProject
+      ? await this.fetchProjectDetails(selectedProject, apiVersion, issueLinkTypes, warnings)
+      : { components: [], versions: [], statuses: [], issueLinkTypes: normalizeIssueLinkTypes(issueLinkTypes) };
     const missingRequiredFields = Object.entries(createFields)
       .filter(([key, field]) => field.required && !['project', 'issuetype', 'summary'].includes(key))
       .map(([, field]) => field.name);
 
-    return {
+    const profile: JiraCapabilityProfile = {
       jiraProfileVersion: 1,
       connection: {
         baseUrl: this.baseUrl,
@@ -247,6 +468,7 @@ export class JiraCapabilityService {
       },
       projects,
       selectedProject,
+      projectDetails,
       permissions,
       issueTypes: { story: storyIssueType, test: testIssueType, bug: bugIssueType, all: issueTypes },
       sourceStoryMapping,
@@ -280,7 +502,35 @@ export class JiraCapabilityService {
         missingRequiredFields,
         warnings,
       },
+      diagnostics: {
+        lastSuccessfulDiscoveryAt: new Date().toISOString(),
+        lastDiscoveryWarnings: warnings,
+        health: warnings.length > 0 ? 'degraded' : 'connected',
+        healthReasons: warnings.length > 0 ? warnings : ['Discovery completed successfully.'],
+      },
+      privacy: {
+        fieldsSentToAi: Object.values(sourceStoryMapping).filter((value): value is string => typeof value === 'string' && value.length > 0),
+        excludedFieldsFromAi: [],
+        maskSensitiveData: true,
+        disableCommentsExtraction: true,
+        disableAttachmentMetadataExtraction: false,
+        externalAiDisabled: false,
+        minimalDataAiMode: false,
+        domainAllowlist: [this.baseUrl],
+        projectAllowlist: selectedProject?.key ? [selectedProject.key] : [],
+      },
+      workflow: {
+        mode: permissions.canCreateIssues ? 'sync_enabled' : permissions.canBrowse ? 'generate_only' : 'safe_mode',
+        defaultFolderByProject: selectedProject?.key ? { [selectedProject.key]: selectedProject.key } : {},
+        defaultFolderByComponent: {},
+        preferredComponents: [],
+        preferredFixVersions: [],
+        addCommentAfterSync: false,
+        transitionAfterCreate: false,
+      },
     };
+    profile.featureGroups = buildFeatureGroups(profile, Object.keys(createFields).length > 0);
+    return profile;
   }
 
   async save(profile: JiraCapabilityProfile): Promise<void> {
@@ -299,24 +549,39 @@ export class JiraCapabilityService {
     return new Promise(resolve => {
       chrome.storage.local.get(['jiraCapabilityProfile', 'jiraCapabilityProfiles'], result => {
         const profiles = (result.jiraCapabilityProfiles as Record<string, JiraCapabilityProfile> | undefined) || {};
+        const normalizeLoaded = (profile: JiraCapabilityProfile | undefined): JiraCapabilityProfile | null => {
+          if (!profile) return null;
+          const normalized = normalizeProfileShape(profile, 'Loaded saved profile.');
+          return {
+            ...normalized,
+            featureGroups: normalized.featureGroups || buildFeatureGroups(normalized, Object.keys(normalized.targetTestCreateFields.fieldSchemas).length > 0),
+          };
+        };
         const normalizedBase = params?.baseUrl ? normalizeBaseUrl(params.baseUrl) : '';
         const normalizedProject = params?.projectKey?.trim().toUpperCase() || '';
         if (normalizedBase && normalizedProject) {
           const direct = profiles[`${normalizedBase}::${normalizedProject}`];
           if (direct) {
-            resolve(direct);
+            resolve(normalizeLoaded(direct));
             return;
           }
           resolve(null);
           return;
         }
-        resolve((result.jiraCapabilityProfile as JiraCapabilityProfile | undefined) || null);
+        resolve(normalizeLoaded(result.jiraCapabilityProfile as JiraCapabilityProfile | undefined));
       });
     });
   }
 
   async clear(): Promise<void> {
     await chrome.storage.local.remove(['jiraCapabilityProfile', 'jiraCapabilityProfiles']);
+  }
+
+  async importProfile(profile: JiraCapabilityProfile): Promise<JiraCapabilityProfile> {
+    const normalizedProfile = normalizeProfileShape(profile, 'Imported profile.');
+    normalizedProfile.featureGroups = normalizedProfile.featureGroups || buildFeatureGroups(normalizedProfile, Object.keys(normalizedProfile.targetTestCreateFields.fieldSchemas).length > 0);
+    await this.save(normalizedProfile);
+    return normalizedProfile;
   }
 
   private async loadAll(): Promise<Record<string, JiraCapabilityProfile>> {
@@ -361,6 +626,19 @@ export class JiraCapabilityService {
     const updated: JiraCapabilityProfile = {
       ...profile,
       syncStrategy,
+      workflow: profile.workflow ? {
+        ...profile.workflow,
+        transitionAfterCreate: syncStrategy.transitionAfterCreate,
+      } : profile.workflow,
+    };
+    await this.save(updated);
+    return updated;
+  }
+
+  async saveWorkflowSettings(profile: JiraCapabilityProfile, workflow: NonNullable<JiraCapabilityProfile['workflow']>): Promise<JiraCapabilityProfile> {
+    const updated: JiraCapabilityProfile = {
+      ...profile,
+      workflow,
     };
     await this.save(updated);
     return updated;
@@ -417,6 +695,36 @@ export class JiraCapabilityService {
     const legacy = await this.optionalJson<unknown>(`/rest/api/${apiVersion}/issue/createmeta?${param}&issuetypeIds=${issueTypeId}&expand=projects.issuetypes.fields`, warnings, 'Legacy create field metadata unavailable');
     fields = normalizeCreateFields(legacy);
     return fields;
+  }
+
+  private async fetchProjectDetails(
+    project: JiraProject,
+    apiVersion: '2' | '3',
+    issueLinkTypes: Record<string, unknown> | null,
+    warnings: string[]
+  ): Promise<JiraProjectCapabilityDetails> {
+    const projectRef = encodeURIComponent(project.id || project.key);
+    const projectKey = encodeURIComponent(project.key);
+    const [componentsRaw, versionsRaw, statusesRaw] = await Promise.all([
+      this.optionalJson<Record<string, unknown>[] | Record<string, unknown>>(`/rest/api/${apiVersion}/project/${projectRef}/components`, warnings, 'Project components unavailable'),
+      this.optionalJson<Record<string, unknown>[] | Record<string, unknown>>(`/rest/api/${apiVersion}/project/${projectRef}/versions`, warnings, 'Project versions unavailable'),
+      this.optionalJson<Record<string, unknown>[] | Record<string, unknown>>(`/rest/api/${apiVersion}/project/${projectKey}/statuses`, warnings, 'Project statuses unavailable'),
+    ]);
+    const toValues = (raw: Record<string, unknown>[] | Record<string, unknown> | null): Record<string, unknown>[] => {
+      if (Array.isArray(raw)) return raw;
+      if (Array.isArray(raw?.values)) return raw.values as Record<string, unknown>[];
+      return [];
+    };
+    const statuses = toValues(statusesRaw)
+      .flatMap(item => Array.isArray(item.statuses) ? item.statuses as Record<string, unknown>[] : [item])
+      .map(normalizeWorkflowStatus)
+      .filter(status => status.id && status.name);
+    return {
+      components: toValues(componentsRaw).map(normalizeNamedEntity).filter(item => item.id && item.name),
+      versions: toValues(versionsRaw).map(normalizeNamedEntity).filter(item => item.id && item.name),
+      statuses,
+      issueLinkTypes: normalizeIssueLinkTypes(issueLinkTypes),
+    };
   }
 
   private async fetchPermissions(projectKey: string, apiVersion: '2' | '3', warnings: string[]): Promise<JiraCapabilityProfile['permissions']> {
@@ -525,6 +833,11 @@ export function getMappedSourceStoryFields(profile: JiraCapabilityProfile | null
     { key: 'mainFlow', label: 'Main Flow', fieldId: profile.sourceStoryMapping.mainFlow },
     { key: 'alternativeFlow', label: 'Alternative Flow', fieldId: profile.sourceStoryMapping.alternativeFlow },
     { key: 'businessRules', label: 'Business Rules', fieldId: profile.sourceStoryMapping.businessRules },
+    { key: 'expectedBehavior', label: 'Expected Behavior', fieldId: profile.sourceStoryMapping.expectedBehavior },
+    { key: 'outOfScope', label: 'Out of Scope', fieldId: profile.sourceStoryMapping.outOfScope },
+    { key: 'assumptions', label: 'Assumptions', fieldId: profile.sourceStoryMapping.assumptions },
+    { key: 'dependencies', label: 'Dependencies', fieldId: profile.sourceStoryMapping.dependencies },
+    { key: 'testNotes', label: 'Test Notes', fieldId: profile.sourceStoryMapping.testNotes },
   ];
 }
 
@@ -867,6 +1180,67 @@ export function sanitizeJiraCapabilityProfile(profile: JiraCapabilityProfile): R
       timeZone: profile.user.timeZone,
       active: profile.user.active,
     },
+  };
+}
+
+export function buildAdminDiagnosticReport(profile: JiraCapabilityProfile, readinessItems: JiraReadinessItem[] = []): Record<string, unknown> {
+  return {
+    generatedAt: new Date().toISOString(),
+    connection: profile.connection,
+    selectedProject: profile.selectedProject,
+    user: sanitizeJiraCapabilityProfile(profile).user,
+    permissions: profile.permissions,
+    recommendedPermissions: [
+      'BROWSE_PROJECTS',
+      'CREATE_ISSUES',
+      'EDIT_ISSUES',
+      'LINK_ISSUES',
+      'TRANSITION_ISSUES',
+      'ADD_COMMENTS',
+    ],
+    missingPermissions: [
+      !profile.permissions.canBrowse ? 'BROWSE_PROJECTS' : null,
+      !profile.permissions.canCreateIssues ? 'CREATE_ISSUES' : null,
+      !profile.permissions.canEditIssues ? 'EDIT_ISSUES' : null,
+      !profile.permissions.canLinkIssues ? 'LINK_ISSUES' : null,
+      !profile.permissions.canTransitionIssues ? 'TRANSITION_ISSUES' : null,
+      !profile.permissions.canAddComments ? 'ADD_COMMENTS' : null,
+    ].filter(Boolean),
+    issueTypes: profile.issueTypes,
+    projectDetails: profile.projectDetails,
+    sourceStoryMapping: profile.sourceStoryMapping,
+    targetTestCreateFields: profile.targetTestCreateFields,
+    xray: profile.xray,
+    linking: profile.linking,
+    workflow: profile.workflow,
+    privacy: profile.privacy,
+    readiness: {
+      ...profile.readiness,
+      checklist: readinessItems,
+    },
+    diagnostics: profile.diagnostics,
+    featureGroups: profile.featureGroups,
+  };
+}
+
+export function buildDryRunReport(
+  profile: JiraCapabilityProfile | null | undefined,
+  session: Pick<TabSession, 'issueData' | 'testCases' | 'xrayTargetProjectId' | 'xrayTargetProjectKey' | 'xrayFieldDefaults' | 'xrayTestIssueTypeName' | 'xrayLinkType' | 'xrayFolderPath'>
+): Record<string, unknown> {
+  const dryRun = dryRunXrayPayload(profile, session);
+  const payloadPreview = buildXrayPayloadPreview(profile, session);
+  return {
+    generatedAt: new Date().toISOString(),
+    valid: dryRun.valid,
+    issues: dryRun.issues,
+    selectedProject: profile?.selectedProject,
+    sourceIssue: session.issueData,
+    selectedIssueType: profile?.issueTypes.test || session.xrayTestIssueTypeName,
+    expectedLinkType: profile?.linking.preferredLinkType || session.xrayLinkType,
+    expectedFolderPath: session.xrayFolderPath || session.issueData?.key,
+    targetFieldDefaults: session.xrayFieldDefaults,
+    testCount: session.testCases.filter(testCase => testCase.selected !== false).length,
+    payloadPreview,
   };
 }
 

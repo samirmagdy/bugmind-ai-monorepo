@@ -204,6 +204,7 @@ class TestCase(BaseModel):
     risk_level: Optional[str] = None
     category: Optional[str] = None
     coverage_notes: Optional[str] = None
+    existing_issue_key: Optional[str] = None
 
 class TestSuiteResponse(BaseModel):
     test_cases: List[TestCase]
@@ -278,12 +279,18 @@ class XrayTestSuitePublishRequest(BaseModel):
     folder_path: Optional[str] = None
     link_type: Optional[str] = "Tests"
     target_field_defaults: Dict[str, Any] = Field(default_factory=dict)
+    transition_after_create: bool = False
+    transition_name: Optional[str] = None
+    add_comment_to_story: bool = False
+    story_comment: Optional[str] = None
+    update_existing: bool = False
 
 
 class XrayPublishedTest(BaseModel):
     id: str
     key: str
     self: str = ""
+    updated: bool = False
 
 
 class SubmitBugsResponse(BaseModel):
@@ -300,6 +307,8 @@ class XrayTestSuitePublishResponse(BaseModel):
     folder_path: str
     repository_path_field_id: Optional[str] = None
     link_type_used: Optional[str] = None
+    transitioned_tests: List[str] = []
+    commented_story: bool = False
     warnings: List[str] = []
 
 
