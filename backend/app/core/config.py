@@ -7,7 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=str(Path(__file__).resolve().parents[3] / ".env"),
+        env_file=str(Path(__file__).resolve().parents[2] / ".env"),
         extra="ignore",
     )
 
@@ -71,7 +71,7 @@ class Settings(BaseSettings):
         
         # Raise error if DATABASE_URL is empty (all environments)
         if not v:
-            raise ValueError("DATABASE_URL is mandatory. Please provide a valid PostgreSQL connection string via environment variables.")
+            raise ValueError("DATABASE_URL is mandatory. Please provide a valid database connection string (PostgreSQL or SQLite) via environment variables.")
         return v
 
     @property
