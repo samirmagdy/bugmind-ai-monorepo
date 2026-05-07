@@ -8,10 +8,14 @@ import sys
 import re
 from pathlib import Path
 
-# Add parent directory to path to import config
-sys.path.insert(0, str(Path(__file__).parent / "backend"))
+# Add backend directory to sys.path so 'app' can be imported
+BACKEND_DIR = Path(__file__).resolve().parent / "backend"
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
 
-from app.core.config import settings
+# Import settings from the backend app
+# We use # type: ignore because the linter sometimes fails to see the dynamic sys.path addition
+from app.core.config import settings  # type: ignore
 
 SENSITIVE_VARS = {
     "DATABASE_URL",
@@ -87,7 +91,7 @@ def main():
     
     checks = [
         ("ENVIRONMENT", True, None),
-        ("DATABASE_URL", True, r"^(sqlite|postgresql|postgres|supabase)"),
+        ("DATABASE_URL", True, r"^(sqlite|postgresql|postgres)"),
         ("SECRET_KEY", True, r"^.{20,}$"),
         ("ENCRYPTION_KEY", True, r"^.{20,}$"),
         ("OPENROUTER_API_KEY", False, r"^sk-or-v1-"),
@@ -106,9 +110,7 @@ def main():
     if not settings.DATABASE_URL.startswith("sqlite"):
         db_url_lower = settings.DATABASE_URL.lower()
         print("Note: Using PostgreSQL database")
-        if "supabase" in db_url_lower:
-            print("✓ Using Supabase database")
-        elif "render.com" in db_url_lower or "dpg-" in db_url_lower:
+        if "render.com" in db_url_lower or "dpg-" in db_url_lower:
             print("✓ Using Render managed database")
         elif "localhost" in db_url_lower or "127.0.0.1" in db_url_lower:
             print("⚠ Using local database - ensure PostgreSQL is running")
