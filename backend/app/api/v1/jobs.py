@@ -29,7 +29,6 @@ def create_epic_test_generation_job(
     
     background_tasks.add_task(
         process_job,
-        db,
         job.id,
         epic_test_generation_processor,
         current_user,
@@ -56,7 +55,6 @@ def create_epic_audit_job(
     )
     background_tasks.add_task(
         process_job,
-        db,
         job.id,
         epic_audit_processor,
         current_user,
@@ -96,7 +94,6 @@ def create_brd_coverage_job(
     )
     background_tasks.add_task(
         process_job,
-        db,
         job.id,
         brd_coverage_processor,
         current_user,

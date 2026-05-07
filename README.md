@@ -5,9 +5,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Version](https://img.shields.io/github/v/release/samirmagdy/bugmind-ai-monorepo)](https://github.com/samirmagdy/bugmind-ai-monorepo/releases)
 
-**Intelligent Bug Generator from Jira User Stories**
+**AI-Powered Jira & Xray QA Orchestration Platform**
 
-BugMind AI is a production-grade SaaS system that analyzes Jira User Stories and Acceptance Criteria to automatically generate high-quality QA bug reports using AI (OpenRouter/GPT-4o).
+BugMind AI is a production-grade SaaS platform for generating, reviewing, syncing, auditing, and managing test and bug intelligence directly from your Jira & Xray workflows. It combines a Chrome extension with a FastAPI backend and OpenRouter AI to automate the full QA lifecycle — from single story bug generation to bulk Epic test suites, BRD coverage analysis, and Xray publishing.
 
 ---
 
@@ -33,7 +33,7 @@ BugMind AI is a production-grade SaaS system that analyzes Jira User Stories and
 The API will be available at `http://localhost:8000`.
 
 ### 1.1 Backend Deploy on Render
-This repo now includes a Render Blueprint at [render.yaml](/Users/samirmagdy/JBG%203/render.yaml) for the backend.
+This repo now includes a Render Blueprint at [render.yaml](./render.yaml) for the backend.
 
 What it provisions:
 - one Python web service for FastAPI
@@ -121,10 +121,30 @@ If you keep Render's own repo auto-deploy enabled, GitHub Actions will still wor
 
 ## 🧠 Features
 
-- **Auto-Detection**: Scrapes Jira Cloud & Server issues automatically.
-- **Direct Submission**: Create bug tickets in Jira with one click.
-- **Self-Healing**: AI output validation and API retry logic.
-- **Usage Tracking**: SaaS-ready with subscription enforcement hooks.
+**Bug & Test Generation**
+- **Auto-Detection**: Scrapes Jira Cloud & Server/DC issues automatically from the active page.
+- **Bug Generation**: AI-generated bug reports with structured fields, severity, and reproduction steps.
+- **Test Case Generation**: Selectable test categories (Positive, Negative, Boundary, Regression).
+- **Duplicate Detection**: Deterministic pre-publish duplicate check — no AI dependency.
+- **Xray Publishing**: Publish test cases to Xray Cloud and Xray Server/DC (Raven API), including manual steps, issue links, and repository folders.
+- **Direct Submission**: Create bug tickets in Jira Cloud or Server/DC with one click, with field mapping and idempotency.
+
+**Bulk & Epic Workflows**
+- **Bulk Epic Screen**: Fetch all child stories from an Epic and process them in batch.
+- **Epic Test Generation Job**: Background AI test generation across all stories in an Epic.
+- **Cross-Story Risk Audit**: Identify overlapping risks, missing coverage, and cross-story dependencies.
+- **BRD Comparison**: Extract BRD text (DOCX, text PDF, plain text) from Jira attachments and compare against story coverage.
+- **Job Dashboard**: Monitor running, completed, and failed background jobs with progress tracking and cancellation.
+
+**Workspace & Collaboration**
+- **Team Workspaces**: Workspace membership, roles, shared Jira/Xray connections, and workspace switching.
+- **Templates**: Create, update, and delete workspace-level QA templates.
+- **Audit Logs**: Workspace audit-log views and usage tracking.
+
+**Platform**
+- **Self-Healing**: AI output validation and API retry logic with rate-limit handling.
+- **Usage Tracking**: SaaS-ready with Stripe subscription enforcement hooks.
+- **Security**: PII redaction before AI processing, encrypted credential storage, production CORS/ALLOWED_HOSTS enforcement.
 
 ## ⚙️ Development
 
