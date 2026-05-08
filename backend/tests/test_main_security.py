@@ -16,7 +16,7 @@ os.environ.setdefault("SECRET_KEY", "test-secret-key-for-main-security")
 os.environ.setdefault("ENCRYPTION_KEY", Fernet.generate_key().decode())
 os.environ.setdefault("RATE_LIMITS_ENABLED", "false")
 
-from app.main import MAX_REQUEST_BODY_SIZE, _internal_error_detail, _validate_content_length  # noqa: E402
+from app.core.middleware import MAX_REQUEST_BODY_SIZE, _internal_error_detail, _validate_content_length  # noqa: E402
 
 
 def test_invalid_content_length_rejected():
@@ -43,9 +43,9 @@ def test_large_content_length_rejected():
 
 
 def test_internal_error_detail_masks_production_message(monkeypatch):
-    from app import main
+    from app.core import middleware
 
-    monkeypatch.setattr(main.settings, "ENVIRONMENT", "production")
+    monkeypatch.setattr(middleware.settings, "ENVIRONMENT", "production")
 
     detail = _internal_error_detail(RuntimeError("database password leaked in stack"))
 
@@ -54,9 +54,9 @@ def test_internal_error_detail_masks_production_message(monkeypatch):
 
 
 def test_internal_error_detail_keeps_development_message(monkeypatch):
-    from app import main
+    from app.core import middleware
 
-    monkeypatch.setattr(main.settings, "ENVIRONMENT", "development")
+    monkeypatch.setattr(middleware.settings, "ENVIRONMENT", "development")
 
     detail = _internal_error_detail(RuntimeError("useful local debug message"))
 
