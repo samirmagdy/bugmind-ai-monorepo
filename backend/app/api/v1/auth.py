@@ -347,7 +347,7 @@ def bootstrap_authenticated_session(
         # Check shared connections
         has_connections = db.query(JiraConnection).join(WorkspaceMember, JiraConnection.workspace_id == WorkspaceMember.workspace_id).filter(
             WorkspaceMember.user_id == current_user.id,
-            JiraConnection.is_shared == True
+            JiraConnection.is_shared
         ).count() > 0
 
     if not has_connections:

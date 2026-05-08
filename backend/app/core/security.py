@@ -10,24 +10,21 @@ from app.core.config import settings
 
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
-# Base64-encoded 32-byte key is needed for Fernet
-_placeholders = [
-    "32-byte-base64-encryption-key-for-jira-tokens",
-    "CHANGE_THIS_IN_PRODUCTION_MUST_BE_32_BYTES_!"
-]
-if not settings.ENCRYPTION_KEY or settings.ENCRYPTION_KEY in _placeholders:
-    raise ValueError("CRITICAL: ENCRYPTION_KEY is missing or using a placeholder value in .env. Please set a valid Fernet key.")
+class EncryptionError(Exception):
+    """Raised when encryption/decryption fails due to missing key."""
+    pass
 
-try:
-    cipher_suite = Fernet(settings.ENCRYPTION_KEY.encode())
-except Exception as e:
-    raise ValueError(f"CRITICAL: Invalid ENCRYPTION_KEY format. Must be a valid Fernet key. Error: {str(e)}")
-
-_secret_placeholders = [
-    "CHANGE_THIS_IN_PRODUCTION_b8m9k2n3m4n5b6g7v8a9c0d1e2f3a4b"
-]
-if not settings.SECRET_KEY or settings.SECRET_KEY in _secret_placeholders:
-    raise ValueError("CRITICAL: SECRET_KEY is missing or using a placeholder value in .env. Please set a secure application secret.")
+def _get_cipher() -> Fernet:
+    """Get Fernet cipher suite from settings - validates key exists at runtime."""
+    encryption_key = settings.ENCRYPTION_KEY
+    if not encryption_key:
+        raise EncryptionError("ENCRYPTION_KEY environment variable is not set.")
+    if encryption_key.startswith("CHANGE_THIS") or len(encryption_key) < 32:
+        raise EncryptionError("ENCRYPTION_KEY is using placeholder or too short.")
+    try:
+        return Fernet(encryption_key.encode())
+    except Exception as e:
+        raise EncryptionError(f"Invalid ENCRYPTION_KEY format: {str(e)}")
 
 ALGORITHM = settings.ALGORITHM
 
@@ -95,10 +92,10 @@ def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
 
 def encrypt_credential(credential: str) -> str:
-    return cipher_suite.encrypt(credential.encode()).decode()
+    return _get_cipher().encrypt(credential.encode()).decode()
 
 def decrypt_credential(encrypted_credential: str) -> str:
-    return cipher_suite.decrypt(encrypted_credential.encode()).decode()
+    return _get_cipher().decrypt(encrypted_credential.encode()).decode()
 
 
 def hash_password_reset_code(email: str, code: str) -> str:

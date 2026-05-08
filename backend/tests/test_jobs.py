@@ -14,7 +14,6 @@ if str(ROOT) not in sys.path:
 
 from unittest.mock import patch, MagicMock
 import app.models # Registers metadata
-from app.models.job import Job
 from app.services.jobs.worker import create_job, update_job_progress, check_cancelled, process_job
 from app.services.jobs.epic_processor import epic_test_generation_processor
 from fastapi.testclient import TestClient

@@ -1,9 +1,5 @@
-from typing import List, Optional
-from fastapi import Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from app.api.deps import get_db, get_current_user
-from app.models.user import User
-from app.models.workspace import Workspace, WorkspaceMember, WorkspaceRole
+from app.models.workspace import WorkspaceMember, WorkspaceRole
 
 # Permission actions
 class Action:

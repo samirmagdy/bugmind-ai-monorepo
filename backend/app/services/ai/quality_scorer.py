@@ -5,7 +5,7 @@ Scores bug input quality from 0-100 without AI calls.
 Returns missing sections and improvement hints.
 """
 import re
-from typing import List, Optional
+from typing import List
 
 from pydantic import BaseModel
 

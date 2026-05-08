@@ -7,7 +7,6 @@ Covers:
 - Partial input with missing sections
 - Keyword detection for environment, impact, evidence
 """
-import pytest
 from app.services.ai.quality_scorer import score_bug_input
 
 

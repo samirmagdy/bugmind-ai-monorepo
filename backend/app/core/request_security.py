@@ -106,7 +106,6 @@ def enforce_secure_jira_ssl(verify_ssl: bool) -> None:
                     detail="Disabling Jira SSL verification is not allowed in production for security reasons."
                 )
             # Log a security warning that we are bypassing SSL verification
-            from app.core.audit import log_audit
             import logging
             logger = logging.getLogger("bugmind.security")
             logger.warning("security_risk insecure_jira_ssl_bypass_detected verify_ssl=False")

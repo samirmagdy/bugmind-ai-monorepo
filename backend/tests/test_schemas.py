@@ -4,7 +4,6 @@ Tests for Phase 1 schema changes.
 Validates backward compatibility and new field defaults
 for the updated bug and test case schemas.
 """
-import pytest
 from app.schemas.bug import (
     GeneratedFindingResponse,
     BugDraft,

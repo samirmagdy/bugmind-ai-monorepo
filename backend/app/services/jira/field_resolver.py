@@ -152,7 +152,7 @@ class BugJiraPayloadResolver:
             try:
                 # If "today", "tomorrow", etc. (placeholder logic for now, usually AI outputs strings like "2023-10-27")
                 return str(raw_value)
-            except:
+            except Exception:
                 return None
 
         # 6. Array handling (generic arrays)

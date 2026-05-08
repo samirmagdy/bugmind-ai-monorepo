@@ -12,7 +12,6 @@ Covers:
 - JQL query building
 - Edge cases
 """
-import pytest
 from app.services.jira.duplicate_detector import (
     normalize_text,
     extract_tokens,
@@ -21,7 +20,6 @@ from app.services.jira.duplicate_detector import (
     summary_hash,
     score_duplicate,
     build_search_queries,
-    find_duplicates,
     resolve_duplicate_scope_work_items,
     DuplicateCandidate,
     DuplicateMatch,

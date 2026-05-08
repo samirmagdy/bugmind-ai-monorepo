@@ -110,7 +110,7 @@ async def epic_test_generation_processor(job_id: str, db: Session, user: User, c
                 "warnings": warnings
             })
             
-    except Exception as e:
+    except Exception:
         logger.exception(f"Epic job {job_id} failed catastrophically.")
         raise
 

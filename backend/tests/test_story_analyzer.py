@@ -7,7 +7,6 @@ Covers:
 - Content warnings for sparse input
 - Edge cases with empty input
 """
-import pytest
 from app.services.ai.story_analyzer import analyze_story_context, _count_acceptance_criteria
 
 

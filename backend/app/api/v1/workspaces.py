@@ -416,7 +416,7 @@ def list_workspace_connections(
         raise HTTPException(status_code=403, detail="Not enough permissions")
     return db.query(JiraConnection).filter(
         JiraConnection.workspace_id == workspace_id,
-        JiraConnection.is_shared == True,
+        JiraConnection.is_shared,
     ).order_by(JiraConnection.id.asc()).all()
 
 
@@ -456,7 +456,7 @@ def unshare_connection_from_workspace(
     conn = db.query(JiraConnection).filter(
         JiraConnection.id == conn_id,
         JiraConnection.workspace_id == workspace_id,
-        JiraConnection.is_shared == True,
+        JiraConnection.is_shared,
     ).first()
     if not conn:
         raise HTTPException(status_code=404, detail="Shared Jira connection not found")
@@ -505,7 +505,7 @@ def get_workspace_usage(
         workspace_id=workspace_id,
         members_count=db.query(WorkspaceMember).filter(WorkspaceMember.workspace_id == workspace_id).count(),
         templates_count=db.query(WorkspaceTemplate).filter(WorkspaceTemplate.workspace_id == workspace_id).count(),
-        shared_connections_count=db.query(JiraConnection).filter(JiraConnection.workspace_id == workspace_id, JiraConnection.is_shared == True).count(),
+        shared_connections_count=db.query(JiraConnection).filter(JiraConnection.workspace_id == workspace_id, JiraConnection.is_shared).count(),
         jobs_count=db.query(Job).filter(Job.workspace_id == workspace_id).count(),
         audit_events_count=db.query(AuditLog).filter(AuditLog.workspace_id == workspace_id).count(),
     )

@@ -1,11 +1,5 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
-
-from fastapi import HTTPException, Request
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
-
 from app.core.context import get_trace_id
 from app.schemas.error import APIErrorResponse
 

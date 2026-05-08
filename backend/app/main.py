@@ -12,7 +12,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 from sqlalchemy import text, inspect
-from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.api_errors import http_exception_handler, validation_exception_handler, build_error_response
 from app.core.config import settings

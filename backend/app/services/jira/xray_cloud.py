@@ -4,7 +4,6 @@ from fastapi import HTTPException
 from app.core.config import settings
 from app.core import security
 from app.models.jira import JiraConnection
-import json
 
 class XrayCloudClient:
     def __init__(self, connection: JiraConnection):
