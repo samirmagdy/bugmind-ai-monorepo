@@ -13,7 +13,7 @@ const BlockingLoader: React.FC<BlockingLoaderProps> = ({ message, percent = 0, e
   const { t } = useI18n();
   const safePercent = Math.max(0, Math.min(100, Math.round(percent || 0)));
   return (
-    <div className="fixed inset-0 z-[1000] bg-[var(--bg-overlay)] backdrop-blur-[12px] flex flex-col items-center justify-center">
+    <div className="fixed inset-0 z-[1000] bg-[var(--bg-overlay)] backdrop-blur-[12px] flex flex-col items-center justify-center" role="status" aria-live="polite" aria-busy="true">
       <div className="relative group mb-8">
         <SurfaceCard className="relative z-10 p-8 rounded-[8px] border border-[var(--card-border)] shadow-[var(--shadow-card)]">
           <Loader2 className="w-14 h-14 text-[var(--status-info)] animate-spin" />

@@ -121,12 +121,13 @@ const AuthView: React.FC = () => {
 
           <form onSubmit={submitHandler} className="space-y-6">
             <div className="space-y-1.5">
-              <label className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider ml-1">Email Address</label>
+              <label htmlFor="auth-email" className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider ml-1">Email Address</label>
               <div className="relative group">
                 <div className="absolute inset-y-0 left-4 flex items-center text-[var(--text-muted)] group-focus-within:text-[var(--primary-blue)] transition-colors">
                   <Mail size={16} />
                 </div>
                 <input
+                  id="auth-email"
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
@@ -140,7 +141,7 @@ const AuthView: React.FC = () => {
             {!isForgot && (
               <div className="space-y-1.5">
                 <div className="flex justify-between items-center px-1">
-                  <label className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider">
+                  <label htmlFor="auth-password" className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider">
                     {isReset ? 'New Password' : 'Password'}
                   </label>
                   {isLogin && (
@@ -164,6 +165,7 @@ const AuthView: React.FC = () => {
                     <Lock size={16} />
                   </div>
                   <input
+                    id="auth-password"
                     type="password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
@@ -177,12 +179,13 @@ const AuthView: React.FC = () => {
 
             {isReset && (
               <div className="space-y-1.5 animate-in slide-in-from-top-2">
-                <label className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider ml-1">Reset Code</label>
+                <label htmlFor="auth-reset-code" className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider ml-1">Reset Code</label>
                 <div className="relative group">
                   <div className="absolute inset-y-0 left-4 flex items-center text-[var(--text-muted)] group-focus-within:text-[var(--primary-blue)] transition-colors">
                     <KeyRound size={16} />
                   </div>
                   <input
+                    id="auth-reset-code"
                     type="text"
                     inputMode="numeric"
                     value={resetCode}
@@ -198,12 +201,13 @@ const AuthView: React.FC = () => {
             {(isRegister || isReset) && (
               <div className="space-y-4 animate-in slide-in-from-top-2">
                 <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider ml-1">Confirm Password</label>
+                  <label htmlFor="auth-confirm-password" className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider ml-1">Confirm Password</label>
                   <div className="relative group">
                     <div className="absolute inset-y-0 left-4 flex items-center text-[var(--text-muted)] group-focus-within:text-[var(--primary-blue)] transition-colors">
                       <ShieldCheck size={16} />
                     </div>
                     <input
+                      id="auth-confirm-password"
                       type="password"
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}

@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useBugMind } from '../../hooks/useBugMind';
-import { Activity, Clock, CheckCircle2, AlertTriangle, Loader2, X } from 'lucide-react';
+import { Activity, Clock, CheckCircle2, AlertTriangle, Loader2, X, Copy, RefreshCw } from 'lucide-react';
 import { ActionButton, SurfaceCard } from '../common/DesignSystem';
 import { apiRequest, readJsonResponse, throwApiErrorResponse } from '../../services/api';
+import { addActivity } from '../../utils/productivity';
 
 export interface Job {
   id: string;
@@ -17,7 +18,7 @@ export interface Job {
 }
 
 export const JobDashboardView: React.FC = () => {
-  const { updateSession, auth: { apiBase, authToken, refreshSession } } = useBugMind();
+  const { session, updateSession, auth: { apiBase, authToken, refreshSession } } = useBugMind();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -55,6 +56,32 @@ export const JobDashboardView: React.FC = () => {
     fetchJobs();
   };
 
+  const copyJobError = async (job: Job) => {
+    await navigator.clipboard.writeText(job.error_message || JSON.stringify(job, null, 2));
+    updateSession({
+      success: 'Job error copied.',
+      activityFeed: addActivity(session, {
+        kind: 'job',
+        title: 'Copied job diagnostics',
+        detail: `${job.target_key} ${job.job_type}`,
+        actionView: 'jobs'
+      })
+    });
+  };
+
+  const viewJobResult = (job: Job) => {
+    updateSession({
+      view: 'success',
+      success: `${job.target_key} job completed successfully.`,
+      activityFeed: addActivity(session, {
+        kind: 'job',
+        title: 'Opened job result',
+        detail: `${job.target_key} ${job.job_type.replace(/_/g, ' ')}`,
+        actionView: 'success'
+      })
+    });
+  };
+
   return (
     <div className="view-shell animate-in fade-in slide-in-from-bottom-2 duration-300">
       <SurfaceCard className="view-header">
@@ -69,10 +96,11 @@ export const JobDashboardView: React.FC = () => {
           </div>
         </div>
         <button
-          onClick={() => updateSession({ view: 'main' })}
+          onClick={() => { setLoading(true); fetchJobs(); }}
           className="rounded-[8px] border border-[var(--card-border)] bg-[var(--surface-soft)] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--text-muted)] hover:text-[var(--text-main)]"
+          aria-label="Refresh jobs"
         >
-          Back
+          <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
         </button>
       </SurfaceCard>
 
@@ -147,6 +175,12 @@ export const JobDashboardView: React.FC = () => {
               )}
 
               <div className="mt-3 flex items-center justify-end gap-2 border-t border-[var(--border-soft)] pt-2">
+                <button
+                  onClick={() => updateSession({ view: 'main' })}
+                  className="text-[10px] font-bold text-[var(--text-muted)] uppercase hover:bg-[var(--surface-soft)] px-2 py-1 rounded transition-colors"
+                >
+                  Resume Work
+                </button>
                 {(job.status === 'running' || job.status === 'queued' || job.status === 'partial_result_ready') && (
                   <button 
                     onClick={() => cancelJob(job.id)}
@@ -155,14 +189,29 @@ export const JobDashboardView: React.FC = () => {
                     Cancel
                   </button>
                 )}
+                {job.error_message && (
+                  <button
+                    onClick={() => copyJobError(job)}
+                    className="flex items-center gap-1 text-[10px] font-bold text-[var(--text-muted)] uppercase hover:bg-[var(--surface-soft)] px-2 py-1 rounded transition-colors"
+                  >
+                    <Copy size={11} />
+                    Copy Error
+                  </button>
+                )}
+                {job.status === 'failed' && (
+                  <button
+                    onClick={() => { setLoading(true); fetchJobs(); }}
+                    className="flex items-center gap-1 text-[10px] font-bold text-[var(--primary-blue)] uppercase hover:bg-[var(--surface-soft)] px-2 py-1 rounded transition-colors"
+                  >
+                    <RefreshCw size={11} />
+                    Retry Status
+                  </button>
+                )}
                 {job.status === 'completed' && job.result_payload && (
                   <ActionButton 
                     variant="primary" 
                     className="h-6 px-2 text-[10px]"
-                    onClick={() => {
-                      updateSession({ view: 'success', success: `Job generated results successfully!` });
-                      // Add logic to display results
-                    }}
+                    onClick={() => viewJobResult(job)}
                   >
                     View Results
                   </ActionButton>

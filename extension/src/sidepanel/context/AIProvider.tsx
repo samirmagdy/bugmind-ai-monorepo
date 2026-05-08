@@ -27,6 +27,7 @@ import {
 } from '../services/contracts';
 import { AIContext } from './ai-context';
 import { buildJiraReadinessItems, buildXrayTargetDefaults, getBlockingReadinessFailures, getMissingRequiredTargetFieldKeys, getProfileProjectParams, resolveProfileTargetProject } from '../services/JiraCapabilityService';
+import { addActivity } from '../utils/productivity';
 
 export const AIProvider: React.FC<{
   children: React.ReactNode,
@@ -620,6 +621,13 @@ export const AIProvider: React.FC<{
             generationProgressPercent: 100,
             generationEtaSeconds: 0,
             success: data.warnings?.length ? data.warnings.join(' ') : null,
+            activityFeed: addActivity(curr, {
+              kind: 'generation',
+              title: `${bugs.length} analysis finding${bugs.length === 1 ? '' : 's'} generated`,
+              detail: curr.issueData?.key,
+              actionView: 'main',
+              actionWorkflow: 'analysis'
+            }),
           }
         };
       });
@@ -752,7 +760,14 @@ export const AIProvider: React.FC<{
               : curr.xrayUnsupportedReason,
             generationProgressMessage: 'Test suite complete.',
             generationProgressPercent: 100,
-            generationEtaSeconds: 0
+            generationEtaSeconds: 0,
+            activityFeed: addActivity(curr, {
+              kind: 'generation',
+              title: `${testCases.length} test case${testCases.length === 1 ? '' : 's'} generated`,
+              detail: curr.issueData?.key,
+              actionView: 'main',
+              actionWorkflow: 'tests'
+            })
           }
         };
       });
@@ -901,7 +916,13 @@ export const AIProvider: React.FC<{
         createdIssues: data.created_tests || [],
         xrayWarnings: data.warnings || [],
         xraySyncHistory,
-        success: `Published ${(data.created_tests || []).length} test cases to Xray folder ${data.folder_path}.`
+        success: `Published ${(data.created_tests || []).length} test cases to Xray folder ${data.folder_path}.`,
+        activityFeed: addActivity(session, {
+          kind: 'publish',
+          title: `${(data.created_tests || []).length} Xray test case${(data.created_tests || []).length === 1 ? '' : 's'} published`,
+          detail: data.folder_path,
+          actionView: 'success'
+        })
       }, currentTabId);
     } catch (err) {
       updateSession({ error: getErrorMessage(err) }, currentTabId);
@@ -970,7 +991,14 @@ export const AIProvider: React.FC<{
         gapAnalysisSummary: null,
         manualInputs: [{ text: '', supportingContext: '', supportingArtifacts: [] }],
         mainWorkflow: 'home',
-        expandedBug: existing.length
+        expandedBug: existing.length,
+        activityFeed: addActivity(session, {
+          kind: 'generation',
+          title: `${generatedBugs.length} manual bug draft${generatedBugs.length === 1 ? '' : 's'} generated`,
+          detail: session.issueData?.key || 'Manual input',
+          actionView: 'main',
+          actionWorkflow: 'manual'
+        })
       });
       committedGeneratedBugs = true;
       fetchUsage();
@@ -981,7 +1009,14 @@ export const AIProvider: React.FC<{
           bugs: [...existing, ...generatedBugs],
           mainWorkflow: 'home',
           expandedBug: existing.length,
-          error: getErrorMessage(err)
+          error: getErrorMessage(err),
+          activityFeed: addActivity(session, {
+            kind: 'generation',
+            title: `${generatedBugs.length} partial manual draft${generatedBugs.length === 1 ? '' : 's'} recovered`,
+            detail: getErrorMessage(err),
+            actionView: 'main',
+            actionWorkflow: 'manual'
+          })
         });
         fetchUsage();
       } else {
@@ -1288,13 +1323,14 @@ export const AIProvider: React.FC<{
       }
 
       const data = await readJsonResponse<AISubmitResponsePayload>(res);
+      const createdIssues = (data.created_issues || []).map((issue) => ({
+        ...issue,
+        linkedToStory: !(data.unlinked_issue_keys || []).includes(issue.key)
+      }));
       updateSession({
         view: 'success',
         mainWorkflow: 'home',
-        createdIssues: (data.created_issues || []).map((issue) => ({
-          ...issue,
-          linkedToStory: !(data.unlinked_issue_keys || []).includes(issue.key)
-        })),
+        createdIssues,
         previewBugIndex: null,
         resolvedPayload: null,
         validationErrors: [],
@@ -1302,6 +1338,12 @@ export const AIProvider: React.FC<{
         submitIdempotencyKey: null,
         submitIdempotencyFingerprint: null,
         success: data.warnings?.length ? data.warnings.join(' ') : null,
+        activityFeed: addActivity(session, {
+          kind: 'publish',
+          title: `${createdIssues.length} bug ticket${createdIssues.length === 1 ? '' : 's'} published`,
+          detail: createdIssues.map((issue) => issue.key).join(', '),
+          actionView: 'success'
+        })
       });
     } catch (err: unknown) {
       const bulkFailure = extractBulkSubmitFailure(err);

@@ -61,14 +61,24 @@ export const WorkspaceDashboardView: React.FC = () => {
     try {
       const res = await request(`${apiBase}/workspaces/${session.activeWorkspaceId}`);
       if (!res.ok) await throwApiErrorResponse(res, 'Failed to fetch workspace');
-      setWorkspace(await readJsonResponse<Workspace>(res));
+      const nextWorkspace = await readJsonResponse<Workspace>(res);
+      setWorkspace(nextWorkspace);
+      const existingWorkspace = (session.workspaces || []).find((item) => item.id === nextWorkspace.id);
+      if (JSON.stringify(existingWorkspace) !== JSON.stringify(nextWorkspace)) {
+        updateSession({
+          workspaces: [
+            nextWorkspace,
+            ...(session.workspaces || []).filter((item) => item.id !== nextWorkspace.id)
+          ]
+        });
+      }
     } catch (err) {
       console.error('Failed to fetch workspace', err);
       showError(err, 'Failed to fetch workspace');
     } finally {
       setLoading(false);
     }
-  }, [session.activeWorkspaceId, apiBase, request]);
+  }, [session.activeWorkspaceId, session.workspaces, apiBase, request, updateSession]);
 
   useEffect(() => {
     fetchWorkspace();
@@ -295,12 +305,14 @@ export const WorkspaceDashboardView: React.FC = () => {
                       value={inviteEmail}
                       onChange={(e: React.ChangeEvent<HTMLInputElement>) => setInviteEmail(e.target.value)}
                       className="h-10 w-full min-w-0 bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-3 text-xs text-[var(--text-primary)] outline-none"
+                      aria-label="Invite member email"
                     />
                   </div>
                   <select 
                     value={inviteRole}
                     onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setInviteRole(e.target.value)}
                     className="h-10 w-full bg-[var(--bg-input)] text-[11px] border border-[var(--border-main)] rounded-xl px-2 text-[var(--text-main)] outline-none"
+                    aria-label="Invite member role"
                   >
                     <option value="viewer">Viewer</option>
                     <option value="qa_engineer">Engineer</option>
@@ -340,6 +352,7 @@ export const WorkspaceDashboardView: React.FC = () => {
                         value={member.role}
                         onChange={(e: React.ChangeEvent<HTMLSelectElement>) => changeRole(member.user_id, e.target.value)}
                         className="bg-transparent text-[10px] font-bold text-[var(--primary-blue)] border-none outline-none cursor-pointer"
+                        aria-label={`Change role for ${member.email || 'workspace member'}`}
                       >
                         <option value="viewer">Viewer</option>
                         <option value="qa_engineer">Engineer</option>
@@ -347,12 +360,14 @@ export const WorkspaceDashboardView: React.FC = () => {
                         <option value="admin">Admin</option>
                       </select>
                       <button 
+                        type="button"
                         onClick={() => setConfirmAction({
                           title: 'Remove member',
                           message: `Remove ${member.email || 'this member'} from the workspace?`,
                           onConfirm: () => removeMember(member.user_id),
                         })}
                         className="p-1.5 hover:bg-[var(--error)]/10 rounded text-[var(--error)]"
+                        aria-label={`Remove ${member.email || 'workspace member'}`}
                       >
                         <Trash2 size={12} />
                       </button>
@@ -396,7 +411,7 @@ export const WorkspaceDashboardView: React.FC = () => {
               </h3>
               <div className="flex flex-wrap gap-2">
                 {session.connections.filter(conn => !conn.is_shared).map(conn => (
-                  <button key={conn.id} onClick={() => shareConnection(conn.id)} className="rounded-lg border border-[var(--border-main)] px-2.5 py-1 text-[10px] font-bold text-[var(--text-secondary)] hover:text-[var(--primary-blue)]">
+                  <button key={conn.id} type="button" onClick={() => shareConnection(conn.id)} className="rounded-lg border border-[var(--border-main)] px-2.5 py-1 text-[10px] font-bold text-[var(--text-secondary)] hover:text-[var(--primary-blue)]">
                     {conn.host_url}
                   </button>
                 ))}
@@ -412,15 +427,15 @@ export const WorkspaceDashboardView: React.FC = () => {
            {canManageTemplates && (
             <SurfaceCard className="p-3 bg-[var(--surface-soft)] border-dashed space-y-2">
               <div className="grid grid-cols-[minmax(0,1fr)_100px] gap-2">
-                <input value={templateName} onChange={(e) => setTemplateName(e.target.value)} placeholder="Template name" className="h-9 min-w-0 bg-[var(--bg-input)] border border-[var(--border-main)] rounded-lg px-3 text-xs text-[var(--text-primary)] outline-none" />
-                <select value={templateType} onChange={(e) => setTemplateType(e.target.value as typeof templateType)} className="h-9 bg-[var(--bg-input)] text-[10px] border border-[var(--border-main)] rounded-lg px-2 text-[var(--text-main)] outline-none">
+                <input value={templateName} onChange={(e) => setTemplateName(e.target.value)} placeholder="Template name" className="h-9 min-w-0 bg-[var(--bg-input)] border border-[var(--border-main)] rounded-lg px-3 text-xs text-[var(--text-primary)] outline-none" aria-label="Template name" />
+                <select value={templateType} onChange={(e) => setTemplateType(e.target.value as typeof templateType)} className="h-9 bg-[var(--bg-input)] text-[10px] border border-[var(--border-main)] rounded-lg px-2 text-[var(--text-main)] outline-none" aria-label="Template type">
                   <option value="bug">Bug</option>
                   <option value="test">Test</option>
                   <option value="preset">Preset</option>
                   <option value="style">Style</option>
                 </select>
               </div>
-              <textarea value={templateBody} onChange={(e) => setTemplateBody(e.target.value)} placeholder="Template content or prompt preset" className="w-full min-h-16 resize-y bg-[var(--bg-input)] border border-[var(--border-main)] rounded-lg px-3 py-2 text-xs text-[var(--text-primary)] outline-none" />
+              <textarea value={templateBody} onChange={(e) => setTemplateBody(e.target.value)} placeholder="Template content or prompt preset" className="w-full min-h-16 resize-y bg-[var(--bg-input)] border border-[var(--border-main)] rounded-lg px-3 py-2 text-xs text-[var(--text-primary)] outline-none" aria-label="Template content" />
               <button
                 type="button"
                 onClick={createTemplate}

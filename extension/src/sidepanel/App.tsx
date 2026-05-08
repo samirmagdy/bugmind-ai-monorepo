@@ -18,10 +18,12 @@ import { WorkspaceDashboardView } from './components/views/WorkspaceDashboardVie
 import DebugConsole from './components/layout/DebugConsole';
 import BlockingLoader from './components/common/BlockingLoader';
 import OnboardingTour from './components/common/OnboardingTour';
+import CommandPalette from './components/common/CommandPalette';
 import { ActionButton, StatusPanel } from './components/common/DesignSystem';
 import { XrayCloudWizard } from './components/views/XrayCloudWizard';
 import { APP_VERSION } from './constants';
 import { useI18n } from './i18n';
+import { addActivity, addToast } from './utils/productivity';
 
 export default function App() {
   const { 
@@ -33,6 +35,8 @@ export default function App() {
   
   const lastEffectiveView = useRef<string | null>(null);
   const lastAuthCheckKey = useRef<string | null>(null);
+  const lastToastSignature = useRef<string>('');
+  const lastCreatedIssuesSignature = useRef<string>('');
 
   useEffect(() => {
     document.documentElement.classList.remove('theme-light', 'theme-dark');
@@ -78,6 +82,43 @@ export default function App() {
     lastEffectiveView.current = activeView;
   }, [activeView, auth.authToken, auth.globalView, debugLog, refreshIssue, session.view]);
 
+  useEffect(() => {
+    const message = session.success || session.error;
+    if (!message) return;
+    const signature = `${session.success ? 'success' : 'error'}:${message}`;
+    if (lastToastSignature.current === signature) return;
+    lastToastSignature.current = signature;
+    updateSession({
+      toastHistory: addToast(session, {
+        tone: session.success ? 'success' : 'error',
+        title: session.success ? 'Success' : 'Needs attention',
+        detail: message
+      }),
+      activityFeed: addActivity(session, {
+        kind: session.success ? 'success' : 'error',
+        title: session.success ? 'Success' : 'Error',
+        detail: message,
+        actionView: session.view,
+        actionWorkflow: session.mainWorkflow
+      })
+    });
+  }, [session, session.error, session.mainWorkflow, session.success, session.view, updateSession]);
+
+  useEffect(() => {
+    if (!session.createdIssues.length) return;
+    const signature = session.createdIssues.map(issue => issue.key).join(',');
+    if (lastCreatedIssuesSignature.current === signature) return;
+    lastCreatedIssuesSignature.current = signature;
+    updateSession({
+      activityFeed: addActivity(session, {
+        kind: 'publish',
+        title: `${session.createdIssues.length} Jira issue${session.createdIssues.length === 1 ? '' : 's'} published`,
+        detail: session.createdIssues.map(issue => issue.key).join(', '),
+        actionView: 'success'
+      })
+    });
+  }, [session, session.createdIssues, updateSession]);
+
   if (initializing) {
     return (
       <div className={`bugmind-panel relative overflow-hidden bg-[var(--bg-page)] ${themeClass}`}>
@@ -95,7 +136,7 @@ export default function App() {
           </div>
         </div>
 
-        <main className="relative z-[1] flex-1 overflow-hidden">
+        <main className="relative z-[1] flex-1 overflow-hidden" aria-busy="true">
           <div className="flex h-full items-start justify-center px-2.5 pt-4 pb-4">
             <div className="context-card w-full rounded-[1.5rem] px-5 py-6">
               <div className="flex items-start gap-4">
@@ -144,7 +185,7 @@ export default function App() {
     <div className={`bugmind-panel bg-[var(--bg-page)] ${themeClass}`}>
       <Header />
 
-      <main className="relative z-[1] flex-1 overflow-y-auto overflow-x-hidden">
+      <main className="relative z-[1] flex-1 overflow-y-auto overflow-x-hidden" aria-label={`${activeView} view`}>
         <div className="px-2.5 pt-2.5 pb-4 space-y-3">
           {(session.error && !['NOT_A_JIRA_PAGE', 'UNSUPPORTED_ISSUE_TYPE', 'NO_ISSUE_TYPES_FOUND', 'STALE_PAGE'].includes(session.error)) && (() => {
             const translated = translateError(session.error);
@@ -167,6 +208,7 @@ export default function App() {
                           Trace ID: {translated.traceId}
                         </span>
                         <button
+                          type="button"
                           onClick={() => {
                             void navigator.clipboard.writeText(translated.traceId!);
                             // Optional: show a toast or feedback
@@ -221,8 +263,9 @@ export default function App() {
         </div>
       </main>
 
-      <footer className="relative z-[1] h-12 border-t border-[var(--footer-border)] bg-[var(--footer-bg)] flex items-center justify-between px-3 shrink-0">
+      <footer className="relative z-[1] h-12 border-t border-[var(--footer-border)] bg-[var(--footer-bg)] flex items-center justify-between px-3 shrink-0" aria-label="Panel utilities">
         <button 
+          type="button"
           onClick={() => debug.setShow(!debug.show)}
           className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-[0.16em] transition-colors opacity-75 ${debug.show ? 'bg-[var(--surface-soft)] text-[var(--primary-blue)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:opacity-100'}`}
         >
@@ -230,8 +273,16 @@ export default function App() {
         </button>
         
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => updateSession({ commandPaletteOpen: true })}
+            className="hidden min-[360px]:inline-flex px-2.5 py-1 rounded-[8px] text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--text-muted)] hover:text-[var(--primary-blue)] hover:bg-[var(--surface-soft)] transition-colors"
+          >
+            Cmd K
+          </button>
           {auth.authToken && (
             <button 
+              type="button"
               onClick={handleLogout}
               className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)] hover:text-[var(--error)] hover:bg-[var(--surface-soft)] transition-colors opacity-75 hover:opacity-100"
             >
@@ -243,6 +294,7 @@ export default function App() {
       </footer>
 
       {debug.show && <DebugConsole />}
+      <CommandPalette />
       {session.showXrayCloudWizard && <XrayCloudWizard />}
       {session.loading && <BlockingLoader message={session.generationProgressMessage || t('loader.default')} percent={session.generationProgressPercent} etaSeconds={session.generationEtaSeconds} />}
       {auth.authToken && sessionHydrated && !session.onboardingCompleted && <OnboardingTour />}

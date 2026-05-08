@@ -76,7 +76,7 @@ export const XrayCloudWizard: React.FC = () => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--bg-overlay)] backdrop-blur-[12px] p-4 animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--bg-overlay)] backdrop-blur-[12px] p-4 animate-in fade-in duration-200" role="dialog" aria-modal="true" aria-labelledby="xray-cloud-title">
       <div className="w-full max-w-sm max-h-full overflow-y-auto">
         <SurfaceCard className="relative overflow-hidden flex flex-col pointer-events-auto">
           <div className="flex items-center justify-between p-4 border-b border-[var(--border-main)]">
@@ -85,7 +85,7 @@ export const XrayCloudWizard: React.FC = () => {
                 <Cloud size={16} />
               </div>
               <div>
-                <h3 className="text-sm font-bold text-[var(--text-main)] leading-tight">Xray Cloud Setup</h3>
+                <h3 id="xray-cloud-title" className="text-sm font-bold text-[var(--text-main)] leading-tight">Xray Cloud Setup</h3>
                 <p className="view-kicker mt-0.5">Configure API Credentials</p>
               </div>
             </div>
@@ -105,8 +105,9 @@ export const XrayCloudWizard: React.FC = () => {
 
             <div className="space-y-3">
               <div className="space-y-1.5">
-                <label className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)] ml-1">Client ID</label>
+                <label htmlFor="xray-client-id" className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)] ml-1">Client ID</label>
                 <input
+                  id="xray-client-id"
                   type="text"
                   value={clientId}
                   onChange={(e) => {
@@ -119,10 +120,11 @@ export const XrayCloudWizard: React.FC = () => {
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)] ml-1 flex items-center gap-1.5">
+                <label htmlFor="xray-client-secret" className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)] ml-1 flex items-center gap-1.5">
                   <Key size={10} /> Client Secret
                 </label>
                 <input
+                  id="xray-client-secret"
                   type="password"
                   value={clientSecret}
                   onChange={(e) => {
@@ -136,14 +138,14 @@ export const XrayCloudWizard: React.FC = () => {
             </div>
 
             {errorMsg && (
-              <div className="flex items-start gap-2 p-3 bg-[var(--error-bg)] border border-[var(--error)]/20 rounded-[8px] text-[var(--error)] text-xs">
+              <div className="flex items-start gap-2 p-3 bg-[var(--error-bg)] border border-[var(--error)]/20 rounded-[8px] text-[var(--error)] text-xs" role="alert">
                 <AlertTriangle size={14} className="shrink-0 mt-0.5" />
                 <span>{errorMsg}</span>
               </div>
             )}
             
             {testSuccess && (
-              <div className="flex items-center gap-2 p-3 bg-[var(--success-bg)] border border-[var(--success)]/20 rounded-[8px] text-[var(--success)] text-xs font-medium">
+              <div className="flex items-center gap-2 p-3 bg-[var(--success-bg)] border border-[var(--success)]/20 rounded-[8px] text-[var(--success)] text-xs font-medium" role="status">
                 <CheckCircle size={14} />
                 Connection verified successfully.
               </div>

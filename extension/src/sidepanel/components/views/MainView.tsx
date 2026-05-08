@@ -10,6 +10,7 @@ import type { LucideIcon } from 'lucide-react';
 import { BugReport, JiraField, JiraFieldOption, JiraUser, SupportingArtifact, TestCase, ManualBugInput, AnalysisCoverageItem, MainWorkflow, TEST_CATEGORIES } from '../../types';
 import AutoResizeTextarea from '../common/AutoResizeTextarea';
 import { ActionButton, SurfaceCard, StatusBadge, StatusPanel } from '../common/DesignSystem';
+import ProductivityPanel from '../common/ProductivityPanel';
 import LuxurySearchableSelect, { SelectOption, SelectValue } from '../common/LuxurySearchableSelect';
 import { TIMEOUTS } from '../../constants';
 import { useI18n } from '../../i18n';
@@ -344,6 +345,14 @@ const MainView: React.FC = () => {
     }))
     .sort((a, b) => b.qaRisk - a.qaRisk)
     .slice(0, 5);
+  const bulkStepIndex = !session.bulkStories.length
+    ? 0
+    : selectedBulkStoryCount === 0
+      ? 1
+      : session.bulkBrdText.trim()
+        ? 3
+        : 2;
+  const bulkSteps = ['Epic', 'Select', 'Action', 'Review'];
 
   const copySanitizedProfile = async () => {
     if (!session.jiraCapabilityProfile) return;
@@ -996,6 +1005,7 @@ const MainView: React.FC = () => {
           <div className={`transition-all duration-700 ${['UNSUPPORTED_ISSUE_TYPE', 'NO_ISSUE_TYPES_FOUND'].includes(session.error || '') ? 'blur-md grayscale opacity-30 pointer-events-none pt-4' : ''}`}>
             {(!session.bugs || session.bugs.length === 0) && (!session.testCases || session.testCases.length === 0) ? (
               <div className="space-y-4">
+                <ProductivityPanel />
                 {session.mainWorkflow === 'home' ? (
                   <SurfaceCard className="space-y-0 cursor-default hover:border-[var(--card-border)] animate-in fade-in slide-in-from-bottom-4 duration-700 overflow-hidden">
                     <div className="space-y-3 pb-4">
@@ -1227,6 +1237,21 @@ const MainView: React.FC = () => {
                           <p className="text-[12px] text-[var(--text-secondary)] leading-relaxed">
                             Start from an Epic, choose the stories to process, then run bulk test generation, cross-story audit, or BRD comparison.
                           </p>
+
+                          <div className="grid grid-cols-4 gap-1 rounded-[8px] border border-[var(--border-soft)] bg-[var(--surface-soft)] p-1">
+                            {bulkSteps.map((step, index) => (
+                              <div
+                                key={step}
+                                className={`rounded-[8px] px-2 py-2 text-center text-[9px] font-black uppercase tracking-[0.12em] ${
+                                  index <= bulkStepIndex
+                                    ? 'bg-[var(--bg-elevated)] text-[var(--primary-blue)]'
+                                    : 'text-[var(--text-muted)]'
+                                }`}
+                              >
+                                {index + 1}. {step}
+                              </div>
+                            ))}
+                          </div>
 
                           <div className="space-y-2">
                             <label className="context-label uppercase tracking-wider mb-1.5 block ml-1">Epic Key</label>
@@ -1506,6 +1531,12 @@ const MainView: React.FC = () => {
                       className="text-xs font-bold text-[var(--primary-blue)]"
                     >
                       Add
+                    </button>
+                    <button
+                      onClick={() => exportDryRunReport()}
+                      className="text-xs font-bold text-[var(--primary-blue)]"
+                    >
+                      Export
                     </button>
                     <button 
                       onClick={() => updateWorkWithHistory('Cleared test cases', { testCases: [], coverageScore: null, gapAnalysisSummary: null, error: null, createdIssues: [], xrayWarnings: [], mainWorkflow: 'home' })} 
@@ -2202,6 +2233,14 @@ const MainView: React.FC = () => {
                   >
                     <Send size={16} />
                     Publish {selectedTestCaseCount} Selected to Xray
+                  </ActionButton>
+                  <ActionButton
+                    onClick={() => downloadJson(session.testCases.filter(testCase => testCase.selected !== false), `bugmind-selected-tests-${session.issueData?.key || 'export'}.json`)}
+                    variant="secondary"
+                    className="h-10 text-[12px]"
+                  >
+                    <Download size={15} />
+                    Export Selected Tests
                   </ActionButton>
                 </div>
               </div>            ) : (

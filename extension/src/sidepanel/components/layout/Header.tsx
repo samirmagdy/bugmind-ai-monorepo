@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bug, Settings, LogOut, Moon, Sun, ClipboardList, Layout } from 'lucide-react';
+import { Bug, Settings, LogOut, Moon, Sun, ClipboardList, Layout, Search } from 'lucide-react';
 import { useBugMind } from '../../hooks/useBugMind';
 import { StatusBadge } from '../common/DesignSystem';
 
@@ -26,8 +26,8 @@ const Header: React.FC = () => {
       </div>
 
       {globalView !== 'auth' && (
-        <div className="panel-actions" aria-label="Panel navigation">
-          <nav className="panel-nav">
+        <div className="panel-actions">
+          <nav className="panel-nav" aria-label="Primary panel navigation">
             {navItems.map(({ view, label, icon: Icon }) => (
               <button
                 key={view}
@@ -54,6 +54,16 @@ const Header: React.FC = () => {
           
           <div className="flex items-center gap-1">
             <button
+              type="button"
+              onClick={() => updateSession({ commandPaletteOpen: true })}
+              className="icon-action"
+              title="Search actions"
+              aria-label="Search actions"
+            >
+              <Search size={18} />
+            </button>
+            <button
+              type="button"
               onClick={() => updateSession({
                 theme: session.theme === 'dark' ? 'light' : 'dark',
                 themeSource: 'manual'
@@ -65,6 +75,7 @@ const Header: React.FC = () => {
               {session.theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
             </button>
             <button 
+              type="button"
               onClick={() => { fetchAISettings(); updateSession({ view: 'settings' }); }} 
               className={`icon-action ${session.view === 'settings' ? 'icon-action-active' : ''}`}
               title="Settings"
@@ -74,6 +85,7 @@ const Header: React.FC = () => {
             </button>
             
             <button 
+              type="button"
               onClick={handleLogout} 
               className="icon-action icon-action-danger"
               title="Logout"

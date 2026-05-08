@@ -44,7 +44,7 @@ export const SurfaceCard: React.FC<{
   className?: string;
   onClick?: React.MouseEventHandler<HTMLDivElement>;
 }> = ({ children, className, onClick }) => (
-  <div className={cx('workflow-card', className)} onClick={onClick}>
+  <div className={cx('workflow-card', onClick && 'workflow-card-interactive', className)} onClick={onClick}>
     {children}
   </div>
 );
@@ -98,7 +98,7 @@ export const StatusPanel: React.FC<{
   
   if (tone === 'warning') {
     return (
-      <div className={cx('warning-card', className)}>
+      <div className={cx('warning-card', className)} role="alert" aria-live="polite">
         <div className="flex gap-3">
           {Icon && <Icon size={18} className="shrink-0 mt-0.5" />}
           <div>
@@ -114,7 +114,7 @@ export const StatusPanel: React.FC<{
 
   if (tone === 'danger') {
     return (
-      <div className={cx('error-card', className)}>
+      <div className={cx('error-card', className)} role="alert" aria-live="assertive">
         <div className="flex gap-3">
           {Icon && <Icon size={18} className="shrink-0 mt-0.5" />}
           <div>
@@ -129,7 +129,7 @@ export const StatusPanel: React.FC<{
   }
 
   return (
-    <div className={cx('empty-state-card', className)}>
+    <div className={cx('empty-state-card', className)} role={tone === 'success' ? 'status' : undefined} aria-live={tone === 'success' ? 'polite' : undefined}>
       <div className="flex flex-col items-center">
         {Icon && (
           <div className="empty-icon">
@@ -157,7 +157,10 @@ export const ActionButton: React.FC<{
   variant?: ButtonVariant;
   tone?: Tone;
   className?: string;
-}> = ({ children, onClick, type = 'button', disabled, variant = 'secondary', className }) => {
+  title?: string;
+  'aria-label'?: string;
+  'aria-busy'?: boolean;
+}> = ({ children, onClick, type = 'button', disabled, variant = 'secondary', className, title, 'aria-label': ariaLabel, 'aria-busy': ariaBusy }) => {
   const variantClass =
     variant === 'primary' ? 'btn-primary' :
     variant === 'ghost' ? 'btn-ghost' :
@@ -168,6 +171,9 @@ export const ActionButton: React.FC<{
       type={type}
       onClick={onClick}
       disabled={disabled}
+      title={title}
+      aria-label={ariaLabel}
+      aria-busy={ariaBusy}
       className={cx(
         variantClass,
         className

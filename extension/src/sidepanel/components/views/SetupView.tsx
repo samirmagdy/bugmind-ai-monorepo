@@ -102,12 +102,13 @@ const SetupView: React.FC = () => {
             <span className="text-sm font-bold text-[var(--text-primary)]">BugMind Engine</span>
           </div>
           <div className="space-y-1.5">
-            <label className="context-label uppercase tracking-wider block ml-1">Control Plane Endpoint</label>
+            <label htmlFor="setup-api-base" className="context-label uppercase tracking-wider block ml-1">Control Plane Endpoint</label>
             <div className="relative">
               <div className="absolute inset-y-0 left-3 flex items-center text-[var(--text-muted)]">
                 <Link size={14} />
               </div>
               <input 
+                id="setup-api-base"
                 type="url" 
                 value={apiBase} 
                 onChange={e => setApiBase(e.target.value)}
@@ -149,12 +150,13 @@ const SetupView: React.FC = () => {
         {/* Credentials */}
         <SurfaceCard className="space-y-4">
           <div className="space-y-1.5">
-            <label className="context-label uppercase tracking-wider block ml-1">Workspace URL</label>
+            <label htmlFor="setup-workspace-url" className="context-label uppercase tracking-wider block ml-1">Workspace URL</label>
             <div className="relative">
               <div className="absolute inset-y-0 left-3 flex items-center text-[var(--text-muted)]">
                 <Link size={14} />
               </div>
               <input 
+                id="setup-workspace-url"
                 type="url" 
                 value={url} 
                 onChange={e => setUrl(e.target.value)}
@@ -166,12 +168,13 @@ const SetupView: React.FC = () => {
           </div>
 
           <div className="space-y-1.5">
-            <label className="context-label uppercase tracking-wider block ml-1">Admin Email</label>
+            <label htmlFor="setup-admin-email" className="context-label uppercase tracking-wider block ml-1">Admin Email</label>
             <div className="relative">
               <div className="absolute inset-y-0 left-3 flex items-center text-[var(--text-muted)]">
                 <AtSign size={14} />
               </div>
               <input 
+                id="setup-admin-email"
                 type="text" 
                 value={username} 
                 onChange={e => setUsername(e.target.value)}
@@ -184,7 +187,7 @@ const SetupView: React.FC = () => {
 
           <div className="space-y-1.5">
             <div className="flex justify-between items-center px-1">
-              <label className="context-label uppercase tracking-wider">API Token</label>
+              <label htmlFor="setup-api-token" className="context-label uppercase tracking-wider">API Token</label>
               <a 
                 href={platform === 'cloud' ? 'https://id.atlassian.com/manage-profile/security/api-tokens' : 'https://confluence.atlassian.com/x/8Y9XN'} 
                 target="_blank" 
@@ -199,6 +202,7 @@ const SetupView: React.FC = () => {
                 <Lock size={14} />
               </div>
               <input 
+                id="setup-api-token"
                 type="password" 
                 value={token} 
                 onChange={e => setToken(e.target.value)}
@@ -211,8 +215,9 @@ const SetupView: React.FC = () => {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <label className="context-label uppercase tracking-wider block ml-1">Project Key</label>
+              <label htmlFor="setup-project-key" className="context-label uppercase tracking-wider block ml-1">Project Key</label>
               <input
+                id="setup-project-key"
                 type="text"
                 value={projectKey}
                 onChange={e => setProjectKey(e.target.value.toUpperCase())}
@@ -222,8 +227,9 @@ const SetupView: React.FC = () => {
             </div>
 
             <div className="space-y-1.5">
-              <label className="context-label uppercase tracking-wider block ml-1">Xray Mode</label>
+              <label htmlFor="setup-xray-mode" className="context-label uppercase tracking-wider block ml-1">Xray Mode</label>
               <select
+                id="setup-xray-mode"
                 value={xrayMode}
                 onChange={e => setXrayMode(e.target.value as typeof xrayMode)}
                 className="form-input px-4 py-2.5 text-sm"

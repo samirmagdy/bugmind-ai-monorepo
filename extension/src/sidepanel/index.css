@@ -175,6 +175,21 @@ html, body {
   padding: 0;
 }
 
+*:focus-visible {
+  outline: 2px solid var(--primary-blue);
+  outline-offset: 2px;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[role="button"]:focus-visible {
+  outline: 2px solid var(--primary-blue);
+  outline-offset: 2px;
+}
+
 body {
   font-family: var(--font-main);
   color: var(--text-primary);
@@ -422,11 +437,15 @@ body {
   border: 1px solid var(--card-border);
   background: linear-gradient(180deg, var(--card-surface-top), var(--card-surface-bottom));
   box-shadow: var(--shadow-soft);
-  cursor: pointer;
+  cursor: default;
   transition: all 180ms ease;
 }
 
-.workflow-card:hover {
+.workflow-card-interactive {
+  cursor: pointer;
+}
+
+.workflow-card-interactive:hover {
   transform: none;
   border-color: var(--border-active);
   box-shadow: var(--shadow-card);
@@ -712,6 +731,18 @@ body {
   cursor: not-allowed;
 }
 
+.btn-primary:focus-visible,
+.btn-secondary:focus-visible,
+.btn-ghost:focus-visible,
+.panel-nav-button:focus-visible,
+.icon-action:focus-visible,
+.icon-button:focus-visible,
+.view-tab:focus-visible,
+.workflow-choice:focus-visible {
+  outline: 2px solid var(--primary-blue);
+  outline-offset: 2px;
+}
+
 .btn-secondary {
   height: 38px;
   padding: 0 var(--space-4);
@@ -731,6 +762,13 @@ body {
 .btn-secondary:hover {
   background: var(--surface-soft-hover);
   border-color: var(--border-active);
+}
+
+.btn-secondary:disabled {
+  background: var(--disabled-bg);
+  color: var(--disabled-text);
+  border-color: var(--border-soft);
+  cursor: not-allowed;
 }
 
 .btn-ghost {

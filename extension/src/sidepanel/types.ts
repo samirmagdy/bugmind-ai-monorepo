@@ -252,6 +252,11 @@ export interface TabSession {
   workspaces: Workspace[];
   activeWorkspaceId: number | null;
   activeWorkspaceRole: string | null;
+  activityFeed: ActivityFeedItem[];
+  toastHistory: ToastHistoryItem[];
+  workflowPresets: WorkflowPreset[];
+  commandPaletteOpen: boolean;
+  selectedWorkspaceTemplateId: number | null;
 }
 
 export interface JiraConnection {
@@ -579,6 +584,38 @@ export interface RevisionEntry {
 export type View = 'auth' | 'setup' | 'main' | 'success' | 'settings' | 'preview' | 'jobs' | 'workspace';
 export type MainWorkflow = 'home' | 'manual' | 'analysis' | 'tests' | 'bulk';
 
+export interface ActivityFeedItem {
+  id: string;
+  kind: 'generation' | 'publish' | 'job' | 'draft' | 'settings' | 'error' | 'success';
+  title: string;
+  detail?: string;
+  issueKey?: string;
+  createdAt: number;
+  actionView?: View;
+  actionWorkflow?: MainWorkflow;
+}
+
+export interface ToastHistoryItem {
+  id: string;
+  tone: 'success' | 'error' | 'info';
+  title: string;
+  detail?: string;
+  createdAt: number;
+}
+
+export interface WorkflowPreset {
+  id: string;
+  name: string;
+  workflow: MainWorkflow;
+  bugGenerationCount: number;
+  testGenerationTypes: string[];
+  selectedIssueTypeId?: string | null;
+  xrayTargetProjectId?: string | null;
+  xrayFolderPath?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 // Phase 1: Test categories — must be before INITIAL_SESSION
 export const TEST_CATEGORIES = [
   'Positive', 'Negative', 'Boundary', 'Regression', 'Permission',
@@ -664,6 +701,11 @@ export const INITIAL_SESSION: TabSession = {
   workspaces: [],
   activeWorkspaceId: null,
   activeWorkspaceRole: null,
+  activityFeed: [],
+  toastHistory: [],
+  workflowPresets: [],
+  commandPaletteOpen: false,
+  selectedWorkspaceTemplateId: null,
 };
 
 
