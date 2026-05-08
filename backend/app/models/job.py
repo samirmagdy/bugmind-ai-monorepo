@@ -33,6 +33,10 @@ class Job(Base):
     trace_id = Column(String, nullable=True)
 
     result_payload = Column(JSON, nullable=True)
+    request_payload = Column(JSON, nullable=True)
+    retry_of_job_id = Column(String, ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True, index=True)
+    resume_of_job_id = Column(String, ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True, index=True)
+    retry_count = Column(Integer, default=0)
     is_cancelled = Column(Boolean, default=False)
 
     user = relationship("User")

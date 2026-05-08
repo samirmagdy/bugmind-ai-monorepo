@@ -1,6 +1,6 @@
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional
 
@@ -61,7 +61,7 @@ def get_usage_summary(db: Session, current_user: User) -> dict:
     if not sub:
         raise HTTPException(status_code=404, detail="Subscription not found")
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     first_day = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     usage_count = db.query(UsageLog).filter(
         UsageLog.user_id == current_user.id,

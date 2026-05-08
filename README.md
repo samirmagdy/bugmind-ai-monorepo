@@ -134,19 +134,32 @@ If you keep Render's own repo auto-deploy enabled, GitHub Actions will still wor
 - **Epic Test Generation Job**: Background AI test generation across all stories in an Epic.
 - **Cross-Story Risk Audit**: Identify overlapping risks, missing coverage, and cross-story dependencies.
 - **BRD Comparison**: Extract BRD text (DOCX, text PDF, plain text) from Jira attachments and compare against story coverage.
-- **Job Dashboard**: Monitor running, completed, and failed background jobs with progress tracking and cancellation.
+- **Job Dashboard**: Monitor running, completed, and failed background jobs with progress tracking, cancellation, retry, and resume.
 
 **Workspace & Collaboration**
 - **Team Workspaces**: Workspace membership, roles, shared Jira/Xray connections, and workspace switching.
-- **Templates**: Create, update, and delete workspace-level QA templates.
+- **Templates**: Create, update, and delete workspace-level QA templates with project, issue type, workflow, and default assignment rules.
 - **Audit Logs**: Workspace audit-log views and usage tracking.
 
 **Platform**
 - **Self-Healing**: AI output validation and API retry logic with rate-limit handling.
+- **Activity & Analytics Events**: Server-backed activity history and product analytics events for workflow drop-off and CTA measurement.
 - **Usage Tracking**: SaaS-ready with Stripe subscription enforcement hooks.
 - **Security**: PII redaction before AI processing, encrypted credential storage, production CORS/ALLOWED_HOSTS enforcement.
 
 ## ⚙️ Development
+
+### Production Readiness Checks
+
+Before shipping changes:
+
+```bash
+cd extension && npm run lint && npm run build
+cd backend && .venv/bin/python -m pytest -q
+cd backend && DATABASE_URL="sqlite:////tmp/bugmind-check.db" .venv/bin/alembic upgrade head
+```
+
+For production deployments, set real `SECRET_KEY`, `ENCRYPTION_KEY`, `DATABASE_URL`, `EXTENSION_ORIGINS`, and `ALLOWED_HOSTS`. The API intentionally aborts startup when required security keys or database tables are missing.
 
 - **Release Management**: This project uses [standard-version](https://github.com/conventional-changelog/standard-version) for automated versioning.
   - Patch: `npm run release`

@@ -251,6 +251,8 @@ def score_duplicate(
         total = max(total, CONFIDENCE_LOW + 0.01)
     if path_score >= 0.8:
         total = max(total, CONFIDENCE_LOW + 0.01)
+    if body_score >= 0.55:
+        total = max(total, CONFIDENCE_LOW + 0.01)
 
     if total < CONFIDENCE_LOW:
         return None

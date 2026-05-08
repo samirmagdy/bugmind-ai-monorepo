@@ -76,11 +76,23 @@ def anyio_backend():
     return 'asyncio'
 
 def test_create_job(db, test_user):
-    job = create_job(db, test_user.id, "epic_test_generation", "PROJ-123", "PROJ")
+    job = create_job(
+        db,
+        test_user.id,
+        "epic_test_generation",
+        "PROJ-123",
+        "PROJ",
+        request_payload={"epic_key": "PROJ-123"},
+        retry_of_job_id="old-job",
+        retry_count=2,
+    )
     assert job.job_type == "epic_test_generation"
     assert job.status == "queued"
     assert job.target_key == "PROJ-123"
     assert job.user_id == test_user.id
+    assert job.request_payload == {"epic_key": "PROJ-123"}
+    assert job.retry_of_job_id == "old-job"
+    assert job.retry_count == 2
 
 def test_job_status_transitions(db, test_user):
     job = create_job(db, test_user.id, "epic_test_generation", "PROJ-123", "PROJ")

@@ -7,7 +7,7 @@ from app.models.audit import AuditLog
 from app.models.jira import JiraConnection
 from app.models.job import Job
 from app.models.user import User
-from app.models.workspace import Workspace, WorkspaceMember, WorkspaceRole, WorkspaceTemplate
+from app.models.workspace import Workspace, WorkspaceMember, WorkspaceRole, WorkspaceTemplate, WorkspaceTemplateAssignment
 from app.schemas.jira import JiraConnectionResponse
 from app.schemas.workspace import (
     WorkspaceCreate, WorkspaceResponse, WorkspaceDetailResponse,
@@ -15,6 +15,9 @@ from app.schemas.workspace import (
     WorkspaceMemberResponse,
     WorkspaceMemberUpdate,
     WorkspaceTemplateCreate,
+    WorkspaceTemplateAssignmentCreate,
+    WorkspaceTemplateAssignmentResponse,
+    WorkspaceTemplateAssignmentUpdate,
     WorkspaceTemplateResponse,
     WorkspaceTemplateUpdate,
     WorkspaceUsageResponse,
@@ -100,7 +103,8 @@ def get_workspace(
         "created_at": workspace.created_at,
         "updated_at": workspace.updated_at,
         "members": members,
-        "templates": templates
+        "templates": templates,
+        "template_assignments": workspace.template_assignments if hasattr(workspace, "template_assignments") else [],
     }
 
 
@@ -296,6 +300,109 @@ def delete_workspace_template(
     db.delete(template)
     db.commit()
     log_audit("workspace.template_delete", current_user.id, workspace_id=workspace_id, db=db, template_id=template_id)
+    return None
+
+
+@router.get("/{workspace_id}/template-assignments", response_model=List[WorkspaceTemplateAssignmentResponse])
+def list_template_assignments(
+    workspace_id: int,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    if not check_permission(db, current_user.id, workspace_id, Action.WORKSPACE_READ):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    return (
+        db.query(WorkspaceTemplateAssignment)
+        .filter(WorkspaceTemplateAssignment.workspace_id == workspace_id)
+        .order_by(WorkspaceTemplateAssignment.is_default.desc(), WorkspaceTemplateAssignment.id.asc())
+        .all()
+    )
+
+
+def _validate_template_for_workspace(db: Session, workspace_id: int, template_id: int) -> WorkspaceTemplate:
+    template = db.query(WorkspaceTemplate).filter(
+        WorkspaceTemplate.workspace_id == workspace_id,
+        WorkspaceTemplate.id == template_id,
+    ).first()
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found in workspace")
+    return template
+
+
+@router.post("/{workspace_id}/template-assignments", response_model=WorkspaceTemplateAssignmentResponse)
+def create_template_assignment(
+    workspace_id: int,
+    assignment_in: WorkspaceTemplateAssignmentCreate,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    if not check_permission(db, current_user.id, workspace_id, Action.TEMPLATES_MANAGE):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    _validate_template_for_workspace(db, workspace_id, assignment_in.template_id)
+    assignment = WorkspaceTemplateAssignment(
+        workspace_id=workspace_id,
+        template_id=assignment_in.template_id,
+        project_key=assignment_in.project_key or None,
+        issue_type_id=assignment_in.issue_type_id or None,
+        workflow=assignment_in.workflow or None,
+        is_default=assignment_in.is_default,
+    )
+    db.add(assignment)
+    db.commit()
+    db.refresh(assignment)
+    log_audit("workspace.template_assignment_create", current_user.id, workspace_id=workspace_id, db=db, assignment_id=assignment.id)
+    return assignment
+
+
+@router.put("/{workspace_id}/template-assignments/{assignment_id}", response_model=WorkspaceTemplateAssignmentResponse)
+def update_template_assignment(
+    workspace_id: int,
+    assignment_id: int,
+    assignment_in: WorkspaceTemplateAssignmentUpdate,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    if not check_permission(db, current_user.id, workspace_id, Action.TEMPLATES_MANAGE):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    assignment = db.query(WorkspaceTemplateAssignment).filter(
+        WorkspaceTemplateAssignment.workspace_id == workspace_id,
+        WorkspaceTemplateAssignment.id == assignment_id,
+    ).first()
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Template assignment not found")
+    update_data = assignment_in.model_dump(exclude_unset=True)
+    if "template_id" in update_data and update_data["template_id"] is not None:
+        _validate_template_for_workspace(db, workspace_id, update_data["template_id"])
+    for field, value in update_data.items():
+        if field in ["project_key", "issue_type_id", "workflow"]:
+            setattr(assignment, field, value or None)
+        else:
+            setattr(assignment, field, value)
+    db.add(assignment)
+    db.commit()
+    db.refresh(assignment)
+    log_audit("workspace.template_assignment_update", current_user.id, workspace_id=workspace_id, db=db, assignment_id=assignment.id)
+    return assignment
+
+
+@router.delete("/{workspace_id}/template-assignments/{assignment_id}", status_code=204)
+def delete_template_assignment(
+    workspace_id: int,
+    assignment_id: int,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    if not check_permission(db, current_user.id, workspace_id, Action.TEMPLATES_MANAGE):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    assignment = db.query(WorkspaceTemplateAssignment).filter(
+        WorkspaceTemplateAssignment.workspace_id == workspace_id,
+        WorkspaceTemplateAssignment.id == assignment_id,
+    ).first()
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Template assignment not found")
+    db.delete(assignment)
+    db.commit()
+    log_audit("workspace.template_assignment_delete", current_user.id, workspace_id=workspace_id, db=db, assignment_id=assignment_id)
     return None
 
 

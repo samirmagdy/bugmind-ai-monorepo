@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { useBugMind } from '../../hooks/useBugMind';
 import { Activity, BarChart3, Link2, Shield, Layout, Plus, Trash2, Loader2 } from 'lucide-react';
 import { ActionButton, SurfaceCard } from '../common/DesignSystem';
-import { JiraConnection, Workspace } from '../../types';
+import { JiraConnection, Workspace, WorkspaceTemplateAssignment } from '../../types';
 import { apiRequest, getErrorMessage, readJsonResponse, throwApiErrorResponse } from '../../services/api';
 
 interface WorkspaceAuditLog {
@@ -34,6 +34,11 @@ export const WorkspaceDashboardView: React.FC = () => {
   const [templateName, setTemplateName] = useState('');
   const [templateType, setTemplateType] = useState<'bug' | 'test' | 'preset' | 'style'>('test');
   const [templateBody, setTemplateBody] = useState('');
+  const [assignmentTemplateId, setAssignmentTemplateId] = useState('');
+  const [assignmentProjectKey, setAssignmentProjectKey] = useState('');
+  const [assignmentIssueTypeId, setAssignmentIssueTypeId] = useState('');
+  const [assignmentWorkflow, setAssignmentWorkflow] = useState('');
+  const [assignmentDefault, setAssignmentDefault] = useState(false);
   const [notice, setNotice] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
   const [confirmAction, setConfirmAction] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
   const activeRole = session.activeWorkspaceRole || workspace?.role || null;
@@ -185,6 +190,44 @@ export const WorkspaceDashboardView: React.FC = () => {
       if (res.ok) fetchWorkspace();
     } catch (err) {
       showError(err, 'Failed to delete template');
+    }
+  };
+
+  const createTemplateAssignment = async () => {
+    if (!assignmentTemplateId) return;
+    try {
+      const res = await request(`${apiBase}/workspaces/${session.activeWorkspaceId}/template-assignments`, {
+        method: 'POST',
+        body: JSON.stringify({
+          template_id: Number(assignmentTemplateId),
+          project_key: assignmentProjectKey.trim() || null,
+          issue_type_id: assignmentIssueTypeId.trim() || null,
+          workflow: assignmentWorkflow || null,
+          is_default: assignmentDefault,
+        })
+      });
+      if (!res.ok) await throwApiErrorResponse(res, 'Failed to create template rule');
+      setAssignmentTemplateId('');
+      setAssignmentProjectKey('');
+      setAssignmentIssueTypeId('');
+      setAssignmentWorkflow('');
+      setAssignmentDefault(false);
+      setNotice({ type: 'success', message: 'Template rule saved.' });
+      fetchWorkspace();
+    } catch (err) {
+      showError(err, 'Failed to create template rule');
+    }
+  };
+
+  const deleteTemplateAssignment = async (assignmentId: number) => {
+    try {
+      const res = await request(`${apiBase}/workspaces/${session.activeWorkspaceId}/template-assignments/${assignmentId}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) await throwApiErrorResponse(res, 'Failed to delete template rule');
+      fetchWorkspace();
+    } catch (err) {
+      showError(err, 'Failed to delete template rule');
     }
   };
 
@@ -474,6 +517,82 @@ export const WorkspaceDashboardView: React.FC = () => {
                 </div>
               )}
            </div>
+           <SurfaceCard className="space-y-3">
+            <div>
+              <h3 className="text-[11px] font-bold text-[var(--text-main)]">Assignment Rules</h3>
+              <p className="mt-1 text-[10px] text-[var(--text-muted)]">Apply the right template by project, issue type, or workflow.</p>
+            </div>
+            {canManageTemplates && workspace.templates && workspace.templates.length > 0 && (
+              <div className="space-y-2 rounded-[8px] border border-dashed border-[var(--border-main)] bg-[var(--surface-soft)] p-3">
+                <select value={assignmentTemplateId} onChange={(e) => setAssignmentTemplateId(e.target.value)} className="form-input px-3 py-2 text-xs" aria-label="Rule template">
+                  <option value="">Choose template</option>
+                  {workspace.templates.map((template) => (
+                    <option key={template.id} value={template.id}>{template.name}</option>
+                  ))}
+                </select>
+                <div className="grid grid-cols-2 gap-2">
+                  <input value={assignmentProjectKey} onChange={(e) => setAssignmentProjectKey(e.target.value.toUpperCase())} placeholder="Project key" className="form-input px-3 py-2 text-xs" aria-label="Rule project key" />
+                  <select value={assignmentWorkflow} onChange={(e) => setAssignmentWorkflow(e.target.value)} className="form-input px-3 py-2 text-xs" aria-label="Rule workflow">
+                    <option value="">Any workflow</option>
+                    <option value="manual">Bug reports</option>
+                    <option value="analysis">Gap analysis</option>
+                    <option value="tests">Test cases</option>
+                    <option value="bulk">Bulk workflows</option>
+                  </select>
+                </div>
+                <input value={assignmentIssueTypeId} onChange={(e) => setAssignmentIssueTypeId(e.target.value)} placeholder="Issue type ID (optional)" className="form-input px-3 py-2 text-xs" aria-label="Rule issue type ID" />
+                <label className="flex items-center gap-2 text-[11px] font-semibold text-[var(--text-secondary)]">
+                  <input type="checkbox" checked={assignmentDefault} onChange={(e) => setAssignmentDefault(e.target.checked)} />
+                  Use as default when no specific rule matches
+                </label>
+                <button
+                  type="button"
+                  onClick={createTemplateAssignment}
+                  disabled={!assignmentTemplateId}
+                  className="flex h-9 w-full items-center justify-center rounded-lg bg-[var(--primary-gradient)] px-3 text-[10px] font-bold uppercase tracking-wider text-white shadow-[var(--shadow-button)] disabled:cursor-not-allowed disabled:bg-[var(--disabled-bg)] disabled:text-[var(--disabled-text)] disabled:shadow-none"
+                >
+                  Save Rule
+                </button>
+              </div>
+            )}
+            <div className="space-y-2">
+              {(workspace.template_assignments || []).length > 0 ? (workspace.template_assignments || []).map((assignment: WorkspaceTemplateAssignment) => {
+                const template = assignment.template || workspace.templates?.find((item) => item.id === assignment.template_id);
+                const ruleParts = [
+                  assignment.project_key || 'Any project',
+                  assignment.workflow ? String(assignment.workflow).replace(/_/g, ' ') : 'Any workflow',
+                  assignment.issue_type_id ? `Issue type ${assignment.issue_type_id}` : 'Any issue type',
+                  assignment.is_default ? 'Default' : '',
+                ].filter(Boolean);
+                return (
+                  <SurfaceCard key={assignment.id} className="flex items-start justify-between gap-3 p-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-xs font-semibold text-[var(--text-main)]">{template?.name || `Template ${assignment.template_id}`}</div>
+                      <div className="mt-1 text-[10px] text-[var(--text-muted)]">{ruleParts.join(' / ')}</div>
+                    </div>
+                    {canManageTemplates && (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmAction({
+                          title: 'Delete template rule',
+                          message: 'Delete this assignment rule?',
+                          onConfirm: () => deleteTemplateAssignment(assignment.id),
+                        })}
+                        className="p-1.5 hover:bg-[var(--error)]/10 rounded text-[var(--error)]"
+                        aria-label="Delete template rule"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    )}
+                  </SurfaceCard>
+                );
+              }) : (
+                <div className="rounded-[8px] border border-dashed border-[var(--border-main)] p-4 text-center text-[11px] text-[var(--text-muted)]">
+                  No assignment rules yet.
+                </div>
+              )}
+            </div>
+           </SurfaceCard>
         </div>
       )}
 

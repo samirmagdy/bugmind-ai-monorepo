@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Briefcase, ClipboardList, Cog, History, Layout, Search, X, Zap } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useBugMind } from '../../hooks/useBugMind';
 import { getWorkflowLabel } from '../../utils/productivity';
 import { MainWorkflow, View } from '../../types';
+import { buildAnalyticsEvent, sendProductEvent } from '../../services/productEvents';
 
 type Command = {
   id: string;
@@ -14,11 +15,19 @@ type Command = {
 };
 
 const CommandPalette: React.FC = () => {
-  const { session, updateSession, ai: { fetchAISettings } } = useBugMind();
+  const { session, updateSession, auth: { apiBase, authToken, refreshSession }, ai: { fetchAISettings } } = useBugMind();
   const [query, setQuery] = useState('');
 
-  const goView = (view: View) => updateSession({ view, commandPaletteOpen: false });
-  const goWorkflow = (workflow: MainWorkflow) => updateSession({ view: 'main', mainWorkflow: workflow, commandPaletteOpen: false });
+  const goView = useCallback((view: View) => updateSession({ view, commandPaletteOpen: false }), [updateSession]);
+  const goWorkflow = useCallback((workflow: MainWorkflow) => updateSession({ view: 'main', mainWorkflow: workflow, commandPaletteOpen: false }), [updateSession]);
+  const runCommand = useCallback((command: Command) => {
+    command.run();
+    sendProductEvent({
+      apiBase,
+      authToken,
+      refreshSession,
+    }, buildAnalyticsEvent(session, 'command_palette_action', { commandId: command.id, query }), 'analytics').catch(() => undefined);
+  }, [apiBase, authToken, query, refreshSession, session]);
 
   const commands = useMemo<Command[]>(() => [
     { id: 'work', label: 'Open Work', detail: 'Return to current Jira workflow', icon: Briefcase, run: () => goView('main') },
@@ -29,7 +38,7 @@ const CommandPalette: React.FC = () => {
     { id: 'jobs', label: 'Background Jobs', detail: 'Review running, failed, and completed jobs', icon: History, run: () => goView('jobs') },
     { id: 'workspace', label: 'Workspace', detail: 'Members, templates, shared connections, audit', icon: Layout, run: () => goView('workspace') },
     { id: 'settings', label: 'Settings', detail: 'AI, Jira mappings, Xray, connections, teams', icon: Cog, run: () => { fetchAISettings(); goView('settings'); } }
-  ], [fetchAISettings, updateSession]);
+  ], [fetchAISettings, goView, goWorkflow]);
 
   const filtered = useMemo(() => commands.filter((command) => {
     const haystack = `${command.label} ${command.detail}`.toLowerCase();
@@ -40,22 +49,27 @@ const CommandPalette: React.FC = () => {
     if (!session.commandPaletteOpen) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') updateSession({ commandPaletteOpen: false });
-      if (event.key === 'Enter' && filtered[0]) filtered[0].run();
+      if (event.key === 'Enter' && filtered[0]) runCommand(filtered[0]);
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [filtered, session.commandPaletteOpen, updateSession]);
+  }, [filtered, runCommand, session.commandPaletteOpen, updateSession]);
 
   useEffect(() => {
     const handleGlobalShortcut = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
         updateSession({ commandPaletteOpen: true });
+        sendProductEvent({
+          apiBase,
+          authToken,
+          refreshSession,
+        }, buildAnalyticsEvent(session, 'command_palette_opened'), 'analytics').catch(() => undefined);
       }
     };
     window.addEventListener('keydown', handleGlobalShortcut);
     return () => window.removeEventListener('keydown', handleGlobalShortcut);
-  }, [updateSession]);
+  }, [apiBase, authToken, refreshSession, session, updateSession]);
 
   if (!session.commandPaletteOpen) return null;
 
@@ -83,7 +97,7 @@ const CommandPalette: React.FC = () => {
               <button
                 key={command.id}
                 type="button"
-                onClick={command.run}
+                onClick={() => runCommand(command)}
                 className="flex w-full items-center gap-3 rounded-[8px] px-3 py-2.5 text-left hover:bg-[var(--surface-soft)]"
                 role="option"
                 aria-selected="false"

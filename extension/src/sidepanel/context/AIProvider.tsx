@@ -930,7 +930,7 @@ export const AIProvider: React.FC<{
       publishXrayInFlightRef.current = false;
       updateSession({ loading: false }, currentTabId);
     }
-  }, [apiBase, authToken, buildIdempotencyKey, currentTabId, normalizeFrontendTestCase, refreshAuthToken, session.connections, session.issueData, session.issueTypes, session.jiraCapabilityProfile, session.jiraConnectionId, session.testCases, session.xrayFieldDefaults, session.xrayFolderPath, session.xrayLinkType, session.xrayPublishMode, session.xrayPublishSupported, session.xrayRepositoryPathFieldId, session.xraySyncHistory, session.xrayTargetProjectId, session.xrayTargetProjectKey, session.xrayTestIssueTypeName, session.xrayUnsupportedReason, updateSession]);
+  }, [apiBase, authToken, buildIdempotencyKey, currentTabId, normalizeFrontendTestCase, refreshAuthToken, session, updateSession]);
 
   const handleManualGenerate = useCallback(async () => {
     if (manualGenerateInFlightRef.current) return;
@@ -1026,7 +1026,7 @@ export const AIProvider: React.FC<{
       manualGenerateInFlightRef.current = false;
       updateSession({ loading: false });
     }
-  }, [apiBase, authToken, buildArtifactContextFromList, buildGenerationLearningHints, buildIssueContext, fetchUsage, getProjectRequestParams, logDebug, refreshAuthToken, session.bugs, session.instanceUrl, session.issueData, session.jiraConnectionId, session.manualInputs, session.selectedIssueType?.id, session.selectedIssueType?.name, toFrontendBug, updateSession]);
+  }, [apiBase, authToken, buildArtifactContextFromList, buildGenerationLearningHints, buildIssueContext, fetchUsage, getProjectRequestParams, logDebug, refreshAuthToken, session, toFrontendBug, updateSession]);
 
   const regenerateBug = useCallback(async (index: number, refinementPrompt?: string) => {
     const bug = session.bugs[index];
@@ -1378,7 +1378,7 @@ export const AIProvider: React.FC<{
       submitBugsInFlightRef.current = false;
       updateSession({ loading: false });
     }
-  }, [authToken, apiBase, buildIdempotencyKey, extractBulkSubmitFailure, fingerprintPayload, getProjectRequestParams, parseJiraRequiredFieldErrors, refreshAuthToken, session.bugs, session.instanceUrl, session.issueData, session.jiraConnectionId, session.previewBugIndex, session.selectedIssueType, session.submitIdempotencyFingerprint, session.submitIdempotencyKey, session.visibleFields, updateSession, validateBug]);
+  }, [authToken, apiBase, buildIdempotencyKey, extractBulkSubmitFailure, fingerprintPayload, getProjectRequestParams, parseJiraRequiredFieldErrors, refreshAuthToken, session, updateSession, validateBug]);
 
   const searchUsers = useCallback(async (query: string, bugIndex?: number, fieldId?: string) => {
     if (query.length < 2 || !session.jiraConnectionId) return;

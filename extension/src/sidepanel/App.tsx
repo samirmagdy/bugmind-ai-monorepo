@@ -19,11 +19,13 @@ import DebugConsole from './components/layout/DebugConsole';
 import BlockingLoader from './components/common/BlockingLoader';
 import OnboardingTour from './components/common/OnboardingTour';
 import CommandPalette from './components/common/CommandPalette';
+import ToastStack from './components/common/ToastStack';
 import { ActionButton, StatusPanel } from './components/common/DesignSystem';
 import { XrayCloudWizard } from './components/views/XrayCloudWizard';
 import { APP_VERSION } from './constants';
 import { useI18n } from './i18n';
 import { addActivity, addToast } from './utils/productivity';
+import { buildActivityEvent, buildAnalyticsEvent, fetchActivityEvents, sendProductEvent } from './services/productEvents';
 
 export default function App() {
   const { 
@@ -37,6 +39,9 @@ export default function App() {
   const lastAuthCheckKey = useRef<string | null>(null);
   const lastToastSignature = useRef<string>('');
   const lastCreatedIssuesSignature = useRef<string>('');
+  const activityHistoryToken = useRef<string | null>(null);
+  const sentActivityIds = useRef<Set<string>>(new Set());
+  const lastAnalyticsSignature = useRef<string>('');
 
   useEffect(() => {
     document.documentElement.classList.remove('theme-light', 'theme-dark');
@@ -103,6 +108,59 @@ export default function App() {
       })
     });
   }, [session, session.error, session.mainWorkflow, session.success, session.view, updateSession]);
+
+  useEffect(() => {
+    if (!auth.authToken || !sessionHydrated) return;
+    if (activityHistoryToken.current === auth.authToken) return;
+    activityHistoryToken.current = auth.authToken;
+    fetchActivityEvents({
+      apiBase: auth.apiBase,
+      authToken: auth.authToken,
+      refreshSession: auth.refreshSession,
+    }, 50)
+      .then((serverActivity) => {
+        if (!serverActivity.length) return;
+        const existing = new Set((session.activityFeed || []).map((item) => item.id));
+        updateSession({
+          activityFeed: [
+            ...serverActivity.filter((item) => !existing.has(item.id)),
+            ...(session.activityFeed || [])
+          ].sort((a, b) => b.createdAt - a.createdAt).slice(0, 50)
+        });
+      })
+      .catch((err) => debugLog('EVENTS-WARN', err instanceof Error ? err.message : String(err)));
+  }, [auth.apiBase, auth.authToken, auth.refreshSession, debugLog, session.activityFeed, sessionHydrated, updateSession]);
+
+  useEffect(() => {
+    if (!auth.authToken || !sessionHydrated) return;
+    const unsentLocal = (session.activityFeed || []).filter((item) => !item.id.startsWith('server-') && !sentActivityIds.current.has(item.id));
+    if (!unsentLocal.length) return;
+    unsentLocal.forEach((item) => sentActivityIds.current.add(item.id));
+    Promise.allSettled(
+      unsentLocal.slice(0, 5).map((item) => sendProductEvent({
+        apiBase: auth.apiBase,
+        authToken: auth.authToken,
+        refreshSession: auth.refreshSession,
+      }, buildActivityEvent(session, item), 'activity'))
+    ).then((results) => {
+      const failed = results.find((result) => result.status === 'rejected') as PromiseRejectedResult | undefined;
+      if (failed) debugLog('EVENTS-WARN', failed.reason instanceof Error ? failed.reason.message : String(failed.reason));
+    });
+  }, [auth.apiBase, auth.authToken, auth.refreshSession, debugLog, session, session.activityFeed, sessionHydrated]);
+
+  useEffect(() => {
+    if (!auth.authToken || !sessionHydrated) return;
+    const signature = `${activeView}:${session.mainWorkflow}:${session.issueData?.key || 'no-issue'}`;
+    if (lastAnalyticsSignature.current === signature) return;
+    lastAnalyticsSignature.current = signature;
+    sendProductEvent({
+      apiBase: auth.apiBase,
+      authToken: auth.authToken,
+      refreshSession: auth.refreshSession,
+    }, buildAnalyticsEvent(session, 'view_entered', { activeView }), 'analytics').catch((err) => {
+      debugLog('ANALYTICS-WARN', err instanceof Error ? err.message : String(err));
+    });
+  }, [activeView, auth.apiBase, auth.authToken, auth.refreshSession, debugLog, session, session.issueData?.key, session.mainWorkflow, sessionHydrated]);
 
   useEffect(() => {
     if (!session.createdIssues.length) return;
@@ -295,6 +353,7 @@ export default function App() {
 
       {debug.show && <DebugConsole />}
       <CommandPalette />
+      <ToastStack />
       {session.showXrayCloudWizard && <XrayCloudWizard />}
       {session.loading && <BlockingLoader message={session.generationProgressMessage || t('loader.default')} percent={session.generationProgressPercent} etaSeconds={session.generationEtaSeconds} />}
       {auth.authToken && sessionHydrated && !session.onboardingCompleted && <OnboardingTour />}

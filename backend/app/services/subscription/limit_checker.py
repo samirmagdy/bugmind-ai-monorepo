@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import datetime, timezone
 from app.models.subscription import Subscription, PlanType
 from app.models.usage import UsageLog
 from fastapi import HTTPException
@@ -16,7 +16,7 @@ class LimitChecker:
             
         if sub.plan == PlanType.FREE:
             # Check usage for current month
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             first_day = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
             
             usage_count = db.query(UsageLog).filter(

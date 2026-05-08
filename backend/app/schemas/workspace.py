@@ -44,6 +44,36 @@ class WorkspaceTemplateResponse(WorkspaceTemplateBase):
 
     model_config = ConfigDict(from_attributes=True)
 
+
+class WorkspaceTemplateAssignmentBase(BaseModel):
+    template_id: int
+    project_key: Optional[str] = None
+    issue_type_id: Optional[str] = None
+    workflow: Optional[str] = None
+    is_default: bool = False
+
+
+class WorkspaceTemplateAssignmentCreate(WorkspaceTemplateAssignmentBase):
+    pass
+
+
+class WorkspaceTemplateAssignmentUpdate(BaseModel):
+    template_id: Optional[int] = None
+    project_key: Optional[str] = None
+    issue_type_id: Optional[str] = None
+    workflow: Optional[str] = None
+    is_default: Optional[bool] = None
+
+
+class WorkspaceTemplateAssignmentResponse(WorkspaceTemplateAssignmentBase):
+    id: int
+    workspace_id: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    template: Optional[WorkspaceTemplateResponse] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
 # Workspace Schemas
 class WorkspaceBase(BaseModel):
     name: str
@@ -66,6 +96,7 @@ class WorkspaceResponse(WorkspaceBase):
 class WorkspaceDetailResponse(WorkspaceResponse):
     members: List[WorkspaceMemberResponse]
     templates: List[WorkspaceTemplateResponse]
+    template_assignments: List[WorkspaceTemplateAssignmentResponse] = []
 
 
 class WorkspaceAuditLogResponse(BaseModel):

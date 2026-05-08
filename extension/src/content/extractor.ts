@@ -19,6 +19,9 @@ declare global {
     __BugMindInjected?: string | null;
     __BugMindCleanup?: () => void;
     __BugMindHistoryPatched?: boolean;
+    __BugMindHistoryPatchedVersion?: string;
+    __BugMindOriginalPushState?: History['pushState'];
+    __BugMindOriginalReplaceState?: History['replaceState'];
   }
 }
 
@@ -179,11 +182,24 @@ function initialize() {
     }, CONTEXT_NOTIFY_DEBOUNCE_MS);
   };
 
-  if (!window.__BugMindHistoryPatched) {
+  const onRouteChange = () => notifyContextChange();
+
+  if (!window.__BugMindHistoryPatched || window.__BugMindHistoryPatchedVersion !== VERSION) {
+    if (window.__BugMindOriginalPushState) {
+      window.history.pushState = window.__BugMindOriginalPushState;
+    }
+    if (window.__BugMindOriginalReplaceState) {
+      window.history.replaceState = window.__BugMindOriginalReplaceState;
+    }
+
     window.__BugMindHistoryPatched = true;
+    window.__BugMindHistoryPatchedVersion = VERSION;
+    window.__BugMindOriginalPushState = window.history.pushState;
+    window.__BugMindOriginalReplaceState = window.history.replaceState;
 
     const wrapHistoryMethod = (methodName: 'pushState' | 'replaceState') => {
-      const original = window.history[methodName];
+      const original = methodName === 'pushState' ? window.__BugMindOriginalPushState : window.__BugMindOriginalReplaceState;
+      if (!original) return;
       window.history[methodName] = function (...args) {
         const result = original.apply(this, args);
         notifyContextChange();
@@ -193,9 +209,9 @@ function initialize() {
 
     wrapHistoryMethod('pushState');
     wrapHistoryMethod('replaceState');
-    window.addEventListener('popstate', notifyContextChange);
-    window.addEventListener('hashchange', notifyContextChange);
   }
+  window.addEventListener('popstate', onRouteChange);
+  window.addEventListener('hashchange', onRouteChange);
 
   let lastTheme = detectTheme();
   const themeObserver = new MutationObserver(() => {
@@ -234,9 +250,19 @@ function initialize() {
     chrome.runtime.onMessage.removeListener(messageListener);
     themeObserver.disconnect();
     contextObserver.disconnect();
+    window.removeEventListener('popstate', onRouteChange);
+    window.removeEventListener('hashchange', onRouteChange);
     if (contextScanTimer !== null) {
       window.clearTimeout(contextScanTimer);
     }
+    if (window.__BugMindOriginalPushState) {
+      window.history.pushState = window.__BugMindOriginalPushState;
+    }
+    if (window.__BugMindOriginalReplaceState) {
+      window.history.replaceState = window.__BugMindOriginalReplaceState;
+    }
+    window.__BugMindHistoryPatched = false;
+    window.__BugMindHistoryPatchedVersion = undefined;
     window.__BugMindInjected = null;
   };
 

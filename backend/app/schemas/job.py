@@ -16,6 +16,10 @@ class JobResponse(BaseModel):
     error_code: Optional[str] = None
     error_message: Optional[str] = None
     result_payload: Optional[Any] = None
+    request_payload: Optional[Any] = None
+    retry_of_job_id: Optional[str] = None
+    resume_of_job_id: Optional[str] = None
+    retry_count: int = 0
     is_cancelled: bool
 
     model_config = ConfigDict(from_attributes=True)

@@ -287,12 +287,24 @@ export interface WorkspaceTemplate {
   content: Record<string, unknown>;
 }
 
+export interface WorkspaceTemplateAssignment {
+  id: number;
+  workspace_id: number;
+  template_id: number;
+  project_key?: string | null;
+  issue_type_id?: string | null;
+  workflow?: MainWorkflow | string | null;
+  is_default: boolean;
+  template?: WorkspaceTemplate | null;
+}
+
 export interface Workspace {
   id: number;
   name: string;
   owner_id: number;
   members?: WorkspaceMember[];
   templates?: WorkspaceTemplate[];
+  template_assignments?: WorkspaceTemplateAssignment[];
   role?: string;
 }
 

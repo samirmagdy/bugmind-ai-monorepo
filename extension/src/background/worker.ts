@@ -125,11 +125,25 @@ function decodeStoredToken(encoded: string | undefined): string {
 }
 
 function storageLocalGet<T extends Record<string, unknown>>(keys: string[]): Promise<T> {
-  return new Promise((resolve) => chrome.storage.local.get(keys, (value) => resolve(value as T)));
+  return new Promise((resolve, reject) => chrome.storage.local.get(keys, (value) => {
+    const error = chrome.runtime.lastError;
+    if (error) {
+      reject(new Error(error.message));
+      return;
+    }
+    resolve(value as T);
+  }));
 }
 
 function storageSessionGet<T extends Record<string, unknown>>(keys: string[]): Promise<T> {
-  return new Promise((resolve) => chrome.storage.session.get(keys, (value) => resolve(value as T)));
+  return new Promise((resolve, reject) => chrome.storage.session.get(keys, (value) => {
+    const error = chrome.runtime.lastError;
+    if (error) {
+      reject(new Error(error.message));
+      return;
+    }
+    resolve(value as T);
+  }));
 }
 
 async function getWorkerAuthContext(payload?: Record<string, unknown>): Promise<{ apiBase: string; token: string }> {

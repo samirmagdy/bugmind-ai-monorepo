@@ -27,8 +27,9 @@ from app.core.database import Base
 from app.main import app
 from app.models.audit import AuditLog
 from app.models.jira import JiraAuthType, JiraConnection
+from app.models.product_event import ProductEvent
 from app.models.user import User
-from app.models.workspace import Workspace, WorkspaceMember, WorkspaceRole, WorkspaceTemplate
+from app.models.workspace import Workspace, WorkspaceMember, WorkspaceRole, WorkspaceTemplate, WorkspaceTemplateAssignment
 from app.core.security import create_access_token, encrypt_credential, get_password_hash
 
 engine = create_engine(
@@ -66,7 +67,9 @@ class WorkspaceTests(unittest.TestCase):
     def setUp(self):
         with SessionLocal() as db:
             db.query(AuditLog).delete()
+            db.query(ProductEvent).delete()
             db.query(JiraConnection).delete()
+            db.query(WorkspaceTemplateAssignment).delete()
             db.query(WorkspaceTemplate).delete()
             db.query(WorkspaceMember).delete()
             db.query(Workspace).delete()
@@ -151,11 +154,26 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(template_res.status_code, 200, template_res.text)
         template_id = template_res.json()["id"]
 
+        assignment_res = self.client.post(
+            f"/api/v1/workspaces/{ws_id}/template-assignments",
+            headers=self.headers,
+            json={
+                "template_id": template_id,
+                "project_key": "OPS",
+                "issue_type_id": "10001",
+                "workflow": "tests",
+                "is_default": True,
+            },
+        )
+        self.assertEqual(assignment_res.status_code, 200, assignment_res.text)
+        assignment_id = assignment_res.json()["id"]
+
         detail_res = self.client.get(f"/api/v1/workspaces/{ws_id}", headers=self.headers)
         self.assertEqual(detail_res.status_code, 200, detail_res.text)
         detail = detail_res.json()
         self.assertEqual(detail["role"], "owner")
         self.assertEqual(detail["templates"][0]["name"], "API QA")
+        self.assertEqual(detail["template_assignments"][0]["project_key"], "OPS")
 
         with SessionLocal() as db:
             conn = JiraConnection(
@@ -192,14 +210,56 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(audit_res.status_code, 200, audit_res.text)
         actions = {row["action"] for row in audit_res.json()}
         self.assertIn("workspace.template_create", actions)
+        self.assertIn("workspace.template_assignment_create", actions)
         self.assertIn("workspace.connection_share", actions)
 
         unshare_res = self.client.delete(f"/api/v1/workspaces/{ws_id}/connections/{conn_id}/share", headers=self.headers)
         self.assertEqual(unshare_res.status_code, 200, unshare_res.text)
         self.assertFalse(unshare_res.json()["is_shared"])
 
+        delete_assignment_res = self.client.delete(f"/api/v1/workspaces/{ws_id}/template-assignments/{assignment_id}", headers=self.headers)
+        self.assertEqual(delete_assignment_res.status_code, 204, delete_assignment_res.text)
+
         delete_res = self.client.delete(f"/api/v1/workspaces/{ws_id}/templates/{template_id}", headers=self.headers)
         self.assertEqual(delete_res.status_code, 204, delete_res.text)
+
+    def test_product_events_activity_and_analytics(self):
+        ws_res = self.client.post("/api/v1/workspaces/", headers=self.headers, json={"name": "Events WS"})
+        ws_id = ws_res.json()["id"]
+
+        activity_res = self.client.post(
+            "/api/v1/events/activity",
+            headers=self.headers,
+            json={
+                "event_type": "activity.generation",
+                "workspace_id": ws_id,
+                "issue_key": "EVT-1",
+                "title": "Generated tests",
+                "detail": "3 test cases",
+                "metadata": {"workflow": "tests"},
+            },
+        )
+        self.assertEqual(activity_res.status_code, 200, activity_res.text)
+        self.assertEqual(activity_res.json()["metadata"]["workflow"], "tests")
+
+        analytics_res = self.client.post(
+            "/api/v1/events/analytics",
+            headers=self.headers,
+            json={
+                "event_type": "analytics.cta_click",
+                "workspace_id": ws_id,
+                "metadata": {"cta": "generate_tests"},
+            },
+        )
+        self.assertEqual(analytics_res.status_code, 200, analytics_res.text)
+
+        list_activity_res = self.client.get("/api/v1/events/activity", headers=self.headers)
+        self.assertEqual(list_activity_res.status_code, 200, list_activity_res.text)
+        self.assertEqual(list_activity_res.json()[0]["title"], "Generated tests")
+
+        list_analytics_res = self.client.get(f"/api/v1/events/analytics?workspace_id={ws_id}", headers=self.headers)
+        self.assertEqual(list_analytics_res.status_code, 200, list_analytics_res.text)
+        self.assertEqual(list_analytics_res.json()[0]["event_type"], "analytics.cta_click")
 
 if __name__ == "__main__":
     unittest.main()

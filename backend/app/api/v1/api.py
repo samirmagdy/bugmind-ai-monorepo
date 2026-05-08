@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1 import auth, stripe, jira, ai, settings, jobs, workspaces
+from app.api.v1 import auth, stripe, jira, ai, settings, jobs, workspaces, product_events
 
 api_router = APIRouter()
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
@@ -9,3 +9,4 @@ api_router.include_router(ai.router, prefix="/ai", tags=["ai"])
 api_router.include_router(settings.router, prefix="/settings", tags=["settings"])
 api_router.include_router(jobs.router)
 api_router.include_router(workspaces.router, prefix="/workspaces", tags=["workspaces"])
+api_router.include_router(product_events.router)

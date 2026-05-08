@@ -15,6 +15,9 @@ export interface Job {
   created_at: string;
   error_message: string | null;
   result_payload: Record<string, unknown> | null;
+  retry_of_job_id?: string | null;
+  resume_of_job_id?: string | null;
+  retry_count?: number;
 }
 
 export const JobDashboardView: React.FC = () => {
@@ -54,6 +57,33 @@ export const JobDashboardView: React.FC = () => {
     });
     if (!res.ok) await throwApiErrorResponse(res, 'Failed to cancel job');
     fetchJobs();
+  };
+
+  const restartJob = async (job: Job, mode: 'retry' | 'resume') => {
+    try {
+      setLoading(true);
+      const res = await apiRequest(`${apiBase}/jobs/${job.id}/${mode}`, {
+        method: 'POST',
+        token: authToken,
+        onUnauthorized: refreshSession,
+      });
+      if (!res.ok) await throwApiErrorResponse(res, `Failed to ${mode} job`);
+      const nextJob = await readJsonResponse<Job>(res);
+      updateSession({
+        success: mode === 'retry' ? 'Job retry started.' : 'Job resume started.',
+        activityFeed: addActivity(session, {
+          kind: 'job',
+          title: mode === 'retry' ? 'Retried background job' : 'Resumed background job',
+          detail: `${job.target_key} -> ${nextJob.id.slice(0, 8)}`,
+          actionView: 'jobs'
+        })
+      });
+      fetchJobs();
+    } catch (err) {
+      updateSession({ error: err instanceof Error ? err.message : `Failed to ${mode} job` });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const copyJobError = async (job: Job) => {
@@ -198,13 +228,22 @@ export const JobDashboardView: React.FC = () => {
                     Copy Error
                   </button>
                 )}
-                {job.status === 'failed' && (
+                {(job.status === 'failed' || job.status === 'cancelled') && (
                   <button
-                    onClick={() => { setLoading(true); fetchJobs(); }}
+                    onClick={() => restartJob(job, 'retry')}
                     className="flex items-center gap-1 text-[10px] font-bold text-[var(--primary-blue)] uppercase hover:bg-[var(--surface-soft)] px-2 py-1 rounded transition-colors"
                   >
                     <RefreshCw size={11} />
-                    Retry Status
+                    Retry Job
+                  </button>
+                )}
+                {job.status === 'partial_result_ready' && (
+                  <button
+                    onClick={() => restartJob(job, 'resume')}
+                    className="flex items-center gap-1 text-[10px] font-bold text-[var(--primary-blue)] uppercase hover:bg-[var(--surface-soft)] px-2 py-1 rounded transition-colors"
+                  >
+                    <RefreshCw size={11} />
+                    Resume Job
                   </button>
                 )}
                 {job.status === 'completed' && job.result_payload && (
