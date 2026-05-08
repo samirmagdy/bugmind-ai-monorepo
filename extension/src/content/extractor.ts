@@ -25,7 +25,7 @@ declare global {
   }
 }
 
-const VERSION = '1.2.0';
+const VERSION = '1.0.0';
 const CONTEXT_NOTIFY_DEBOUNCE_MS = 350;
 
 type BugMindMessage =
@@ -60,16 +60,19 @@ function extractJiraData(): ExtractedIssue | null {
   const projectId = document.querySelector('meta[name="ajs-project-id"]')?.getAttribute('content') ||
     document.querySelector('#gh-meta-project-id')?.getAttribute('content') ||
     document.querySelector('body')?.getAttribute('data-project-id') ||
+    document.querySelector('[data-project-id]')?.getAttribute('data-project-id') ||
     '';
 
   const issueKey = document.querySelector('a[data-testid="issue.views.issue-base.foundation.breadcrumbs.current-issue.item"]')?.textContent ||
     document.querySelector('#key-val')?.textContent ||
+    window.location.pathname.match(/\/(?:browse|issues|projects\/[A-Z]+\/issues)\/([A-Z]+-\d+)/)?.[1] ||
     document.querySelector('a[href*="/browse/"]')?.textContent?.match(/[A-Z]+-\d+/)?.[0] ||
     document.title.match(/[A-Z]+-\d+/)?.[0] ||
     '';
 
   const summary = document.querySelector('h1[data-testid="issue.views.issue-base.foundation.summary.heading"]')?.textContent ||
     document.querySelector('#summary-val')?.textContent ||
+    document.querySelector('h1.issue-summary')?.textContent ||
     document.querySelector('h1')?.textContent ||
     '';
 

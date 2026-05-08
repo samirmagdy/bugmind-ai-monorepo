@@ -7,7 +7,7 @@
 import { deobfuscate } from '../sidepanel/utils/StorageObfuscator';
 
 // Deployment Metadata
-const VERSION = '1.2.0';
+const VERSION = '1.0.0';
 const DEFAULT_API_BASE = 'https://bugmind-ai-monorepo.onrender.com/api/v1';
 const BULK_MODE_DEFAULT = true;
 const DEBUG_LOGS = false;

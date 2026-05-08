@@ -91,9 +91,22 @@ export default function App() {
     const message = session.success || session.error;
     if (!message) return;
 
-    // Filter out internal state indicators that shouldn't pollute the activity history
+    // Filter out internal state indicators and noisy greetings that shouldn't pollute the activity history
     const INTERNAL_STATES = ['STALE_PAGE', 'NOT_A_JIRA_PAGE', 'UNSUPPORTED_ISSUE_TYPE', 'MISSING_ISSUE_TYPE', 'NO_ISSUE_TYPES_FOUND'];
+    const NOISY_MESSAGES = [
+      'Welcome back',
+      'No revisions yet',
+      'Saved',
+      'Synced',
+      'Account created',
+      'Login successful'
+    ];
+
     if (session.error && INTERNAL_STATES.includes(session.error)) {
+      return;
+    }
+
+    if (message && NOISY_MESSAGES.some(noisy => message.includes(noisy))) {
       return;
     }
 
@@ -129,7 +142,11 @@ export default function App() {
       .then((serverActivity) => {
         if (!serverActivity.length) return;
         const INTERNAL_STATES = ['STALE_PAGE', 'NOT_A_JIRA_PAGE', 'UNSUPPORTED_ISSUE_TYPE', 'MISSING_ISSUE_TYPE', 'NO_ISSUE_TYPES_FOUND'];
-        const filtered = serverActivity.filter((item) => !INTERNAL_STATES.includes(item.detail || ''));
+        const NOISY_MESSAGES = ['Welcome back', 'No revisions yet', 'Saved', 'Synced', 'Account created', 'Login successful'];
+        const filtered = serverActivity.filter((item) => {
+          const detail = item.detail || '';
+          return !INTERNAL_STATES.includes(detail) && !NOISY_MESSAGES.some(noisy => detail.includes(noisy));
+        });
         if (!filtered.length) return;
         
         const existing = new Set((session.activityFeed || []).map((item) => item.id));

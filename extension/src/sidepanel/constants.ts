@@ -31,4 +31,4 @@ export const DOMAINS = {
   ISSUES_PATH: '/issues/',
 };
 
-export const APP_VERSION = 'v1.2.0-PRO';
+export const APP_VERSION = 'v1.0.0-PRO';
