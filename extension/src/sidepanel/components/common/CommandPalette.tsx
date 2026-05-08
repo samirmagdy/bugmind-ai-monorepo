@@ -91,7 +91,7 @@ const CommandPalette: React.FC = () => {
           </button>
         </div>
         <div className="max-h-[420px] overflow-y-auto p-2" role="listbox" aria-label="Available actions">
-          {filtered.map((command) => {
+          {filtered.length > 0 ? filtered.map((command, index) => {
             const Icon = command.icon;
             return (
               <button
@@ -100,7 +100,7 @@ const CommandPalette: React.FC = () => {
                 onClick={() => runCommand(command)}
                 className="flex w-full items-center gap-3 rounded-[8px] px-3 py-2.5 text-left hover:bg-[var(--surface-soft)]"
                 role="option"
-                aria-selected="false"
+                aria-selected={index === 0 ? 'true' : 'false'}
               >
                 <span className="flex h-8 w-8 items-center justify-center rounded-[8px] border border-[var(--border-soft)] bg-[var(--surface-accent-strong)] text-[var(--primary-blue)]">
                   <Icon size={15} />
@@ -111,7 +111,16 @@ const CommandPalette: React.FC = () => {
                 </span>
               </button>
             );
-          })}
+          }) : (
+            <div className="rounded-[8px] border border-dashed border-[var(--border-main)] p-5 text-center">
+              <p className="text-xs font-bold text-[var(--text-primary)]">No matching actions</p>
+              <p className="mt-1 text-[10px] text-[var(--text-muted)]">Try “jobs”, “tests”, “workspace”, or “settings”.</p>
+            </div>
+          )}
+        </div>
+        <div className="flex items-center justify-between border-t border-[var(--border-soft)] px-3 py-2 text-[10px] text-[var(--text-muted)]">
+          <span>Enter to open first result</span>
+          <span>Esc to close</span>
         </div>
       </div>
     </div>

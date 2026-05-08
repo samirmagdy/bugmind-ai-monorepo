@@ -225,7 +225,7 @@ const ProductivityPanel: React.FC = () => {
           <ShieldCheck size={14} className="text-[var(--success)]" />
           <span className="view-kicker">Message History</span>
         </div>
-        {(session.toastHistory || []).slice(0, 4).map((toast) => (
+        {(session.toastHistory || []).length > 0 ? (session.toastHistory || []).slice(0, 4).map((toast) => (
           <div key={toast.id} className="rounded-[8px] border border-[var(--border-soft)] bg-[var(--surface-soft)] px-3 py-2">
             <div className="flex items-center justify-between gap-2">
               <span className="text-[11px] font-bold text-[var(--text-primary)]">{toast.title}</span>
@@ -233,7 +233,11 @@ const ProductivityPanel: React.FC = () => {
             </div>
             {toast.detail && <p className="mt-1 line-clamp-2 text-[10px] text-[var(--text-muted)]">{toast.detail}</p>}
           </div>
-        ))}
+        )) : (
+          <div className="rounded-[8px] border border-dashed border-[var(--border-main)] p-4 text-center text-[11px] text-[var(--text-muted)]">
+            Success and error messages will be saved here during this session.
+          </div>
+        )}
       </SurfaceCard>
     </div>
   );

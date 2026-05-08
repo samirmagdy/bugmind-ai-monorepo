@@ -43,8 +43,21 @@ export const SurfaceCard: React.FC<{
   children: React.ReactNode;
   className?: string;
   onClick?: React.MouseEventHandler<HTMLDivElement>;
-}> = ({ children, className, onClick }) => (
-  <div className={cx('workflow-card', onClick && 'workflow-card-interactive', className)} onClick={onClick}>
+  'aria-label'?: string;
+}> = ({ children, className, onClick, 'aria-label': ariaLabel }) => (
+  <div
+    className={cx('workflow-card', onClick && 'workflow-card-interactive', className)}
+    onClick={onClick}
+    role={onClick ? 'button' : undefined}
+    tabIndex={onClick ? 0 : undefined}
+    aria-label={ariaLabel}
+    onKeyDown={onClick ? (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        onClick(event as unknown as React.MouseEvent<HTMLDivElement>);
+      }
+    } : undefined}
+  >
     {children}
   </div>
 );

@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useBugMind } from '../../hooks/useBugMind';
 import { Activity, BarChart3, Link2, Shield, Layout, Plus, Trash2, Loader2 } from 'lucide-react';
-import { ActionButton, SurfaceCard } from '../common/DesignSystem';
+import { ActionButton, StatusBadge, StatusPanel, SurfaceCard } from '../common/DesignSystem';
 import { JiraConnection, Workspace, WorkspaceTemplateAssignment } from '../../types';
 import { apiRequest, getErrorMessage, readJsonResponse, throwApiErrorResponse } from '../../services/api';
 
@@ -44,6 +44,7 @@ export const WorkspaceDashboardView: React.FC = () => {
   const activeRole = session.activeWorkspaceRole || workspace?.role || null;
   const canManageMembers = activeRole === 'owner' || activeRole === 'admin';
   const canManageTemplates = canManageMembers || activeRole === 'qa_lead';
+  const workspaceSummary = `${workspace?.members?.length || 0} members / ${workspace?.templates?.length || 0} templates / ${workspace?.template_assignments?.length || 0} rules`;
 
   const request = useCallback((url: string, options: RequestInit = {}) => {
     return apiRequest(url, {
@@ -256,7 +257,14 @@ export const WorkspaceDashboardView: React.FC = () => {
   };
 
   if (loading && !workspace) {
-    return <div className="flex items-center justify-center p-8"><Loader2 className="animate-spin text-[var(--text-muted)]" /></div>;
+    return (
+      <StatusPanel
+        icon={Loader2}
+        title="Loading workspace"
+        description="Fetching members, templates, connections, and rules."
+        className="[&_.empty-icon_svg]:animate-spin"
+      />
+    );
   }
 
   if (!workspace) {
@@ -284,10 +292,11 @@ export const WorkspaceDashboardView: React.FC = () => {
           <div className="view-heading">
             <p className="view-kicker">Workspace</p>
             <h2 className="view-title truncate max-w-[190px]">{workspace.name}</h2>
-            <p className="view-subtitle">Members, templates, shared connections, and audit history.</p>
+            <p className="view-subtitle">{workspaceSummary}</p>
           </div>
         </div>
         <button
+          type="button"
           onClick={() => updateSession({ view: 'main' })}
           className="rounded-[8px] border border-[var(--card-border)] bg-[var(--surface-soft)] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--text-muted)] hover:text-[var(--text-main)]"
         >
@@ -300,34 +309,46 @@ export const WorkspaceDashboardView: React.FC = () => {
           notice.type === 'error'
             ? 'border-[var(--error)]/20 bg-[var(--error)]/10 text-[var(--error)]'
             : 'border-[var(--success)]/20 bg-[var(--success)]/10 text-[var(--success)]'
-        }`}>
+        }`} role={notice.type === 'error' ? 'alert' : 'status'} aria-live={notice.type === 'error' ? 'assertive' : 'polite'}>
           {notice.message}
         </div>
       )}
 
       {/* Tabs */}
-      <div className="view-tabs grid-cols-4">
+      <div className="view-tabs grid-cols-4" role="tablist" aria-label="Workspace sections">
         <button 
+          type="button"
           onClick={() => setActiveTab('members')}
           className={`view-tab ${activeTab === 'members' ? 'view-tab-active' : ''}`}
+          role="tab"
+          aria-selected={activeTab === 'members'}
         >
           Members
         </button>
         <button 
+          type="button"
           onClick={() => setActiveTab('connections')}
           className={`view-tab ${activeTab === 'connections' ? 'view-tab-active' : ''}`}
+          role="tab"
+          aria-selected={activeTab === 'connections'}
         >
           Connections
         </button>
         <button 
+          type="button"
           onClick={() => setActiveTab('templates')}
           className={`view-tab ${activeTab === 'templates' ? 'view-tab-active' : ''}`}
+          role="tab"
+          aria-selected={activeTab === 'templates'}
         >
           Templates
         </button>
         <button 
+          type="button"
           onClick={() => setActiveTab('audit')}
           className={`view-tab ${activeTab === 'audit' ? 'view-tab-active' : ''}`}
+          role="tab"
+          aria-selected={activeTab === 'audit'}
         >
           Audit
         </button>
@@ -430,17 +451,19 @@ export const WorkspaceDashboardView: React.FC = () => {
            <p className="text-[10px] text-[var(--text-muted)] px-1 italic">Shared Jira/Xray connections for this workspace.</p>
            <div className="space-y-2">
             {sharedConnections.length === 0 ? (
-              <div className="text-center p-5 border border-dashed border-[var(--border-main)] rounded-xl text-[var(--text-muted)] text-xs">
-                No shared connections yet.
-              </div>
+                <StatusPanel
+                  icon={Link2}
+                  title="No shared connections"
+                  description="Share a Jira or Xray connection so workspace members can use the same setup."
+                />
             ) : sharedConnections.map(conn => (
               <SurfaceCard key={conn.id} className="p-3 flex items-center justify-between">
                 <div className="min-w-0">
                   <div className="text-xs font-semibold text-[var(--text-main)] truncate">{conn.host_url}</div>
                   <div className="text-[10px] text-[var(--text-muted)]">{conn.username}</div>
                 </div>
-                {canManageMembers && (
-                  <button onClick={() => unshareConnection(conn.id)} className="p-1.5 hover:bg-[var(--error)]/10 rounded text-[var(--error)]" aria-label="Unshare connection">
+                  {canManageMembers && (
+                  <button type="button" onClick={() => unshareConnection(conn.id)} className="p-1.5 hover:bg-[var(--error)]/10 rounded text-[var(--error)]" aria-label="Unshare connection">
                     <Trash2 size={12} />
                   </button>
                 )}
@@ -499,6 +522,7 @@ export const WorkspaceDashboardView: React.FC = () => {
                   </div>
                   {canManageTemplates && (
                     <button
+                      type="button"
                       onClick={() => setConfirmAction({
                         title: 'Delete template',
                         message: `Delete "${template.name}"? This cannot be undone.`,
@@ -512,15 +536,21 @@ export const WorkspaceDashboardView: React.FC = () => {
                   )}
                 </SurfaceCard>
               )) : (
-                <div className="text-center p-5 border border-dashed border-[var(--border-main)] rounded-xl text-[var(--text-muted)] text-xs">
-                  No workspace templates yet.
-                </div>
+                <StatusPanel
+                  title="No workspace templates"
+                  description="Save templates for bug reports, test cases, presets, and team writing style."
+                />
               )}
            </div>
            <SurfaceCard className="space-y-3">
-            <div>
-              <h3 className="text-[11px] font-bold text-[var(--text-main)]">Assignment Rules</h3>
-              <p className="mt-1 text-[10px] text-[var(--text-muted)]">Apply the right template by project, issue type, or workflow.</p>
+              <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-[11px] font-bold text-[var(--text-main)]">Assignment Rules</h3>
+                <p className="mt-1 text-[10px] text-[var(--text-muted)]">Apply the right template by project, issue type, or workflow.</p>
+              </div>
+              <StatusBadge tone={(workspace.template_assignments || []).length > 0 ? 'success' : 'neutral'}>
+                {(workspace.template_assignments || []).length} rules
+              </StatusBadge>
             </div>
             {canManageTemplates && workspace.templates && workspace.templates.length > 0 && (
               <div className="space-y-2 rounded-[8px] border border-dashed border-[var(--border-main)] bg-[var(--surface-soft)] p-3">
@@ -587,9 +617,10 @@ export const WorkspaceDashboardView: React.FC = () => {
                   </SurfaceCard>
                 );
               }) : (
-                <div className="rounded-[8px] border border-dashed border-[var(--border-main)] p-4 text-center text-[11px] text-[var(--text-muted)]">
-                  No assignment rules yet.
-                </div>
+                <StatusPanel
+                  title="No assignment rules"
+                  description="Create a rule to recommend the right template automatically for repeated team workflows."
+                />
               )}
             </div>
            </SurfaceCard>
@@ -635,9 +666,9 @@ export const WorkspaceDashboardView: React.FC = () => {
       )}
 
       {confirmAction && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4" role="dialog" aria-modal="true" aria-labelledby="workspace-confirm-title">
           <SurfaceCard className="w-full max-w-xs p-4 shadow-2xl">
-            <h3 className="text-sm font-bold text-[var(--text-main)]">{confirmAction.title}</h3>
+            <h3 id="workspace-confirm-title" className="text-sm font-bold text-[var(--text-main)]">{confirmAction.title}</h3>
             <p className="mt-2 text-xs leading-relaxed text-[var(--text-muted)]">{confirmAction.message}</p>
             <div className="mt-4 flex justify-end gap-2">
               <button

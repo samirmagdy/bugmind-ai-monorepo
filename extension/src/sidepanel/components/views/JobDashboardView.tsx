@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useBugMind } from '../../hooks/useBugMind';
 import { Activity, Clock, CheckCircle2, AlertTriangle, Loader2, X, Copy, RefreshCw } from 'lucide-react';
-import { ActionButton, SurfaceCard } from '../common/DesignSystem';
+import { ActionButton, StatusPanel, SurfaceCard } from '../common/DesignSystem';
 import { apiRequest, readJsonResponse, throwApiErrorResponse } from '../../services/api';
 import { addActivity } from '../../utils/productivity';
 
@@ -24,6 +24,8 @@ export const JobDashboardView: React.FC = () => {
   const { session, updateSession, auth: { apiBase, authToken, refreshSession } } = useBugMind();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
+  const runningCount = jobs.filter((job) => ['queued', 'running', 'partial_result_ready'].includes(job.status)).length;
+  const failedCount = jobs.filter((job) => ['failed', 'cancelled'].includes(job.status)).length;
 
   const fetchJobs = useCallback(async () => {
     try {
@@ -122,7 +124,9 @@ export const JobDashboardView: React.FC = () => {
           <div className="view-heading">
             <p className="view-kicker">Activity</p>
             <h2 className="view-title">Background Jobs</h2>
-            <p className="view-subtitle">Live status for generation and publishing tasks.</p>
+            <p className="view-subtitle">
+              {jobs.length > 0 ? `${runningCount} active, ${failedCount} need attention` : 'Live status for generation and publishing tasks.'}
+            </p>
           </div>
         </div>
         <button
@@ -135,13 +139,19 @@ export const JobDashboardView: React.FC = () => {
       </SurfaceCard>
 
       {loading && jobs.length === 0 ? (
-        <div className="flex items-center justify-center p-8 text-[var(--text-muted)]">
-          <Loader2 size={24} className="animate-spin" />
-        </div>
+        <StatusPanel
+          icon={Loader2}
+          title="Loading background jobs"
+          description="Checking active, failed, and completed work."
+          className="[&_.empty-icon_svg]:animate-spin"
+        />
       ) : jobs.length === 0 ? (
-        <div className="text-center p-8 bg-[var(--bg-input)] rounded-[8px] border border-[var(--border-main)] text-[var(--text-muted)] text-xs">
-          No background jobs running or completed.
-        </div>
+        <StatusPanel
+          icon={Activity}
+          title="No background jobs yet"
+          description="Epic generation, audits, and BRD comparisons will appear here once started."
+          action={<ActionButton variant="primary" onClick={() => updateSession({ view: 'main', mainWorkflow: 'bulk' })}>Start Bulk Workflow</ActionButton>}
+        />
       ) : (
         <div className="space-y-3">
           {jobs.map(job => (
@@ -181,6 +191,11 @@ export const JobDashboardView: React.FC = () => {
                     <Clock size={12} /> Queued
                   </div>
                 )}
+                {job.status === 'partial_result_ready' && (
+                  <div className="flex items-center gap-1.5 text-[var(--warning)] text-[10px] font-bold uppercase tracking-wider">
+                    <AlertTriangle size={12} /> Interrupted
+                  </div>
+                )}
               </div>
 
               {job.status === 'running' || job.status === 'partial_result_ready' ? (
@@ -189,7 +204,14 @@ export const JobDashboardView: React.FC = () => {
                     <span className="truncate">{job.current_step || 'Processing...'}</span>
                     <span>{Math.round(job.progress_percentage)}%</span>
                   </div>
-                  <div className="h-1.5 w-full bg-[var(--bg-input)] rounded-full overflow-hidden">
+                  <div
+                    className="h-1.5 w-full bg-[var(--bg-input)] rounded-full overflow-hidden"
+                    role="progressbar"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={Math.round(job.progress_percentage)}
+                    aria-label={`${job.target_key} progress`}
+                  >
                     <div 
                       className="h-full bg-blue-500 transition-all duration-300"
                       style={{ width: `${job.progress_percentage}%` }}
@@ -199,30 +221,33 @@ export const JobDashboardView: React.FC = () => {
               ) : null}
               
               {job.error_message && (
-                <div className="mt-2 text-[10px] text-[var(--error)] bg-[var(--error)]/10 p-2 rounded border border-[var(--error)]/20">
+                <div className="mt-2 text-[10px] text-[var(--error)] bg-[var(--error)]/10 p-2 rounded border border-[var(--error)]/20" role="alert">
                   {job.error_message}
                 </div>
               )}
 
-              <div className="mt-3 flex items-center justify-end gap-2 border-t border-[var(--border-soft)] pt-2">
+              <div className="mt-3 flex flex-wrap items-center justify-end gap-2 border-t border-[var(--border-soft)] pt-2">
                 <button
+                  type="button"
                   onClick={() => updateSession({ view: 'main' })}
-                  className="text-[10px] font-bold text-[var(--text-muted)] uppercase hover:bg-[var(--surface-soft)] px-2 py-1 rounded transition-colors"
+                  className="inline-action"
                 >
                   Resume Work
                 </button>
                 {(job.status === 'running' || job.status === 'queued' || job.status === 'partial_result_ready') && (
                   <button 
+                    type="button"
                     onClick={() => cancelJob(job.id)}
-                    className="text-[10px] font-bold text-[var(--error)] uppercase hover:bg-[var(--error)]/10 px-2 py-1 rounded transition-colors"
+                    className="inline-action inline-action-danger"
                   >
                     Cancel
                   </button>
                 )}
                 {job.error_message && (
                   <button
+                    type="button"
                     onClick={() => copyJobError(job)}
-                    className="flex items-center gap-1 text-[10px] font-bold text-[var(--text-muted)] uppercase hover:bg-[var(--surface-soft)] px-2 py-1 rounded transition-colors"
+                    className="inline-action"
                   >
                     <Copy size={11} />
                     Copy Error
@@ -230,8 +255,10 @@ export const JobDashboardView: React.FC = () => {
                 )}
                 {(job.status === 'failed' || job.status === 'cancelled') && (
                   <button
+                    type="button"
                     onClick={() => restartJob(job, 'retry')}
-                    className="flex items-center gap-1 text-[10px] font-bold text-[var(--primary-blue)] uppercase hover:bg-[var(--surface-soft)] px-2 py-1 rounded transition-colors"
+                    className="inline-action inline-action-primary"
+                    disabled={loading}
                   >
                     <RefreshCw size={11} />
                     Retry Job
@@ -239,8 +266,10 @@ export const JobDashboardView: React.FC = () => {
                 )}
                 {job.status === 'partial_result_ready' && (
                   <button
+                    type="button"
                     onClick={() => restartJob(job, 'resume')}
-                    className="flex items-center gap-1 text-[10px] font-bold text-[var(--primary-blue)] uppercase hover:bg-[var(--surface-soft)] px-2 py-1 rounded transition-colors"
+                    className="inline-action inline-action-primary"
+                    disabled={loading}
                   >
                     <RefreshCw size={11} />
                     Resume Job

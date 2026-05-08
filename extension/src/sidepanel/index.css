@@ -268,6 +268,7 @@ body {
   background: var(--panel-actions-bg);
   border: 1px solid var(--panel-actions-border);
   box-shadow: none;
+  overflow: hidden;
 }
 
 .panel-nav {
@@ -279,7 +280,7 @@ body {
 
 .panel-nav-button,
 .icon-action {
-  height: 32px;
+  min-height: 34px;
   border-radius: 8px;
   border: 0;
   background: transparent;
@@ -312,7 +313,7 @@ body {
 }
 
 .icon-action {
-  width: 32px;
+  width: 34px;
 }
 
 .icon-action-danger:hover {
@@ -346,6 +347,16 @@ body {
 
   .panel-usage {
     display: none;
+  }
+}
+
+@media (max-width: 340px) {
+  .panel-nav-button span {
+    display: none;
+  }
+
+  .panel-nav-button {
+    min-width: 34px;
   }
 }
 
@@ -449,6 +460,10 @@ body {
   transform: none;
   border-color: var(--border-active);
   box-shadow: var(--shadow-card);
+}
+
+.workflow-card-interactive:focus-visible {
+  border-color: var(--border-active);
 }
 
 .workflow-card-title {
@@ -610,12 +625,14 @@ body {
   position: fixed;
   left: 10px;
   right: 10px;
-  bottom: 56px;
+  bottom: 62px;
   z-index: 70;
   display: flex;
   flex-direction: column;
   gap: 8px;
   pointer-events: none;
+  max-width: 460px;
+  margin: 0 auto;
 }
 
 .toast-card {
@@ -629,6 +646,7 @@ body {
   background: var(--surface-card);
   box-shadow: 0 18px 36px rgba(15, 23, 42, 0.18);
   padding: 10px;
+  animation: toast-enter 180ms ease;
 }
 
 .toast-card-success {
@@ -666,6 +684,45 @@ body {
 .toast-close:hover {
   background: var(--surface-soft);
   color: var(--text-primary);
+}
+
+.inline-action {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border-radius: 8px;
+  padding: 0 8px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  transition: background-color 120ms ease, color 120ms ease, opacity 120ms ease;
+}
+
+.inline-action:hover {
+  background: var(--surface-soft);
+  color: var(--text-primary);
+}
+
+.inline-action-primary {
+  color: var(--primary-blue);
+}
+
+.inline-action-danger {
+  color: var(--error);
+}
+
+.inline-action-danger:hover {
+  background: var(--error-bg);
+  color: var(--error);
+}
+
+.inline-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .form-input {
@@ -970,6 +1027,17 @@ body {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 18px;
+}
+
+@keyframes toast-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* Scrollbar Style */
