@@ -27,7 +27,21 @@ const ProductivityPanel: React.FC = () => {
 
   const usageTone = !usage ? 'neutral' : usage.remaining <= 0 ? 'danger' : usage.remaining <= Math.max(1, Math.floor(usage.limit * 0.2)) ? 'warning' : 'success';
 
-  const recentActivity = useMemo(() => (session.activityFeed || []).slice(0, 5), [session.activityFeed]);
+  const INTERNAL_STATES = ['STALE_PAGE', 'NOT_A_JIRA_PAGE', 'UNSUPPORTED_ISSUE_TYPE', 'MISSING_ISSUE_TYPE', 'NO_ISSUE_TYPES_FOUND'];
+
+  const recentActivity = useMemo(() => 
+    (session.activityFeed || [])
+      .filter(item => !INTERNAL_STATES.includes(item.detail || ''))
+      .slice(0, 5), 
+    [session.activityFeed]
+  );
+
+  const recentToasts = useMemo(() => 
+    (session.toastHistory || [])
+      .filter(item => !INTERNAL_STATES.includes(item.detail || ''))
+      .slice(0, 4),
+    [session.toastHistory]
+  );
 
   const savePreset = () => {
     const name = presetName.trim() || `${getWorkflowLabel(session.mainWorkflow === 'home' ? 'tests' : session.mainWorkflow)} preset`;
@@ -225,7 +239,7 @@ const ProductivityPanel: React.FC = () => {
           <ShieldCheck size={14} className="text-[var(--success)]" />
           <span className="view-kicker">Message History</span>
         </div>
-        {(session.toastHistory || []).length > 0 ? (session.toastHistory || []).slice(0, 4).map((toast) => (
+        {recentToasts.length > 0 ? recentToasts.map((toast) => (
           <div key={toast.id} className="rounded-[8px] border border-[var(--border-soft)] bg-[var(--surface-soft)] px-3 py-2">
             <div className="flex items-center justify-between gap-2">
               <span className="text-[11px] font-bold text-[var(--text-primary)]">{toast.title}</span>

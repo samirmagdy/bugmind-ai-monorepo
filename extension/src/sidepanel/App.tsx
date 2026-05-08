@@ -90,9 +90,17 @@ export default function App() {
   useEffect(() => {
     const message = session.success || session.error;
     if (!message) return;
+
+    // Filter out internal state indicators that shouldn't pollute the activity history
+    const INTERNAL_STATES = ['STALE_PAGE', 'NOT_A_JIRA_PAGE', 'UNSUPPORTED_ISSUE_TYPE', 'MISSING_ISSUE_TYPE', 'NO_ISSUE_TYPES_FOUND'];
+    if (session.error && INTERNAL_STATES.includes(session.error)) {
+      return;
+    }
+
     const signature = `${session.success ? 'success' : 'error'}:${message}`;
     if (lastToastSignature.current === signature) return;
     lastToastSignature.current = signature;
+
     updateSession({
       toastHistory: addToast(session, {
         tone: session.success ? 'success' : 'error',
@@ -120,10 +128,14 @@ export default function App() {
     }, 50)
       .then((serverActivity) => {
         if (!serverActivity.length) return;
+        const INTERNAL_STATES = ['STALE_PAGE', 'NOT_A_JIRA_PAGE', 'UNSUPPORTED_ISSUE_TYPE', 'MISSING_ISSUE_TYPE', 'NO_ISSUE_TYPES_FOUND'];
+        const filtered = serverActivity.filter((item) => !INTERNAL_STATES.includes(item.detail || ''));
+        if (!filtered.length) return;
+        
         const existing = new Set((session.activityFeed || []).map((item) => item.id));
         updateSession({
           activityFeed: [
-            ...serverActivity.filter((item) => !existing.has(item.id)),
+            ...filtered.filter((item) => !existing.has(item.id)),
             ...(session.activityFeed || [])
           ].sort((a, b) => b.createdAt - a.createdAt).slice(0, 50)
         });
