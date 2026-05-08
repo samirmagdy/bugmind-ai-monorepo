@@ -1,4 +1,5 @@
 import os
+from typing import cast
 import sys
 import tempfile
 import unittest
@@ -24,7 +25,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.api import deps
 from app.core.database import Base
-from app.main import app
+from app.main import app as fastapi_app
 from app.models.audit import AuditLog
 from app.models.jira import JiraAuthType, JiraConnection
 from app.models.product_event import ProductEvent
@@ -51,13 +52,13 @@ class WorkspaceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         Base.metadata.create_all(bind=engine)
-        app.dependency_overrides[deps.get_db] = override_get_db
-        cls.client = TestClient(app)
+        fastapi_app.dependency_overrides[deps.get_db] = override_get_db
+        cls.client = TestClient(fastapi_app)
 
     @classmethod
     def tearDownClass(cls):
         cls.client.close()
-        app.dependency_overrides.pop(deps.get_db, None)
+        fastapi_app.dependency_overrides.pop(deps.get_db, None)
         Base.metadata.drop_all(bind=engine)
         try:
             os.unlink(DB_FILE.name)
@@ -83,7 +84,7 @@ class WorkspaceTests(unittest.TestCase):
             db.add(self.test_user)
             db.commit()
             db.refresh(self.test_user)
-            self.token = create_access_token(subject=self.test_user.id)
+            self.token = create_access_token(subject=str(cast(int, self.test_user.id)))
             self.headers = {"Authorization": f"Bearer {self.token}"}
 
     def test_create_workspace(self):
@@ -97,12 +98,14 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(data["name"], "Test Workspace")
         
         with SessionLocal() as db:
+            db.expire_all()
             ws = db.query(Workspace).filter(Workspace.id == data["id"]).first()
-            self.assertIsNotNone(ws)
+            self.assertIsNotNone(ws, "Workspace should have been created")
             member = db.query(WorkspaceMember).filter(
-                WorkspaceMember.workspace_id == ws.id,
-                WorkspaceMember.user_id == self.test_user.id
+                WorkspaceMember.workspace_id == cast(int, ws.id),
+                WorkspaceMember.user_id == cast(int, self.test_user.id)
             ).first()
+            self.assertIsNotNone(member, "Owner should have been added as a workspace member")
             self.assertEqual(member.role, WorkspaceRole.OWNER)
 
     def test_list_workspaces(self):
@@ -122,7 +125,8 @@ class WorkspaceTests(unittest.TestCase):
             other_user = User(email="other@example.com", hashed_password="...")
             db.add(other_user)
             db.commit()
-            other_id = other_user.id
+            db.refresh(other_user)
+            other_id = cast(int, other_user.id)
         
         response = self.client.post(
             f"/api/v1/workspaces/{ws_id}/members?email=other@example.com&role=qa_engineer",
@@ -131,10 +135,12 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         
         with SessionLocal() as db:
+            db.expire_all()
             member = db.query(WorkspaceMember).filter(
-                WorkspaceMember.workspace_id == ws_id,
+                WorkspaceMember.workspace_id == cast(int, ws_id),
                 WorkspaceMember.user_id == other_id
             ).first()
+            self.assertIsNotNone(member, "Member should have been added to the workspace")
             self.assertEqual(member.role, WorkspaceRole.QA_ENGINEER)
 
     def test_workspace_details_templates_connections_usage_and_audit(self):
@@ -177,7 +183,7 @@ class WorkspaceTests(unittest.TestCase):
 
         with SessionLocal() as db:
             conn = JiraConnection(
-                user_id=self.test_user.id,
+                user_id=cast(int, self.test_user.id),
                 auth_type=JiraAuthType.CLOUD,
                 host_url="https://example.atlassian.net",
                 username="test@example.com",
@@ -187,7 +193,8 @@ class WorkspaceTests(unittest.TestCase):
             )
             db.add(conn)
             db.commit()
-            conn_id = conn.id
+            db.refresh(conn)
+            conn_id = cast(int, conn.id)
 
         share_res = self.client.post(f"/api/v1/workspaces/{ws_id}/connections/{conn_id}/share", headers=self.headers)
         self.assertEqual(share_res.status_code, 200, share_res.text)

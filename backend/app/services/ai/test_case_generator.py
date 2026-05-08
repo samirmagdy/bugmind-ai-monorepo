@@ -9,10 +9,10 @@ class TestCaseGenerator(BaseAIGenerator):
     async def generate_test_cases(
         self,
         context_text: str,
-        model: str = None,
-        custom_instructions: str = None,
-        issue_type_name: str = None,
-        supporting_context: str = None,
+        model: Optional[str] = None,
+        custom_instructions: Optional[str] = None,
+        issue_type_name: Optional[str] = None,
+        supporting_context: Optional[str] = None,
         test_categories: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """

@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from typing import Any, cast
+
+from fastapi import HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+
 from app.core.context import get_trace_id
 from app.schemas.error import APIErrorResponse
 
@@ -100,15 +106,15 @@ def build_error_response(status_code: int, detail: Any) -> APIErrorResponse:
         user_action = mapping.get("user_action", user_action)
 
     return APIErrorResponse(
-        code=code,
-        message=message,
-        user_action=user_action,
+        code=cast(str, code),
+        message=cast(str, message),
+        user_action=cast(str, user_action),
         trace_id=trace_id,
         details=_json_safe(details) if isinstance(details, dict) else {"raw": _json_safe(details)},
-        detail=message
+        detail=cast(str, message)
     )
 
-async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+async def http_exception_handler(request: Request, exc: Any) -> JSONResponse:
     error_body = build_error_response(exc.status_code, exc.detail)
     return JSONResponse(
         status_code=exc.status_code,
@@ -116,7 +122,7 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
         headers={"X-Request-ID": error_body.trace_id}
     )
 
-async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+async def validation_exception_handler(request: Request, exc: Any) -> JSONResponse:
     error_body = build_error_response(422, exc.errors())
     return JSONResponse(
         status_code=422,

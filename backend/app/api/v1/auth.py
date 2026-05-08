@@ -16,6 +16,7 @@ from app.models.auth import PasswordResetCode, RefreshSession
 from app.models.jira import JiraConnection
 from app.models.subscription import Subscription
 from app.models.user import User
+from app.models.workspace import Workspace, WorkspaceMember
 from app.schemas.jira import JiraBootstrapContextRequest
 from app.schemas.token import (
     AuthBootstrapError,
@@ -309,8 +310,6 @@ def reset_password(request: ResetPasswordRequest, http_request: Request, db: Ses
     log_audit("auth.password_reset", user.id, db=db, request_path=str(http_request.url.path))
     return ForgotPasswordResponse(message="Password updated successfully. Please sign in again.")
 
-
-from app.models.workspace import Workspace, WorkspaceMember
 
 @router.post("/bootstrap", response_model=AuthBootstrapResponse)
 def bootstrap_authenticated_session(

@@ -1,4 +1,5 @@
-from typing import List
+from datetime import datetime
+from typing import List, cast, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -14,16 +15,16 @@ router = APIRouter(prefix="/events", tags=["events"])
 
 def _serialize_event(event: ProductEvent) -> ProductEventResponse:
     return ProductEventResponse(
-        id=event.id,
-        user_id=event.user_id,
-        workspace_id=event.workspace_id,
-        event_type=event.event_type,
-        source=event.source,
-        issue_key=event.issue_key,
-        title=event.title,
-        detail=event.detail,
-        metadata=event.event_metadata or {},
-        created_at=event.created_at,
+        id=cast(int, event.id),
+        user_id=cast(int, event.user_id),
+        workspace_id=cast(Optional[int], event.workspace_id),
+        event_type=cast(str, event.event_type),
+        source=cast(str, event.source),
+        issue_key=cast(Optional[str], event.issue_key),
+        title=cast(Optional[str], event.title),
+        detail=cast(Optional[str], event.detail),
+        metadata=cast(dict, event.event_metadata or {}),
+        created_at=cast(datetime, event.created_at),
     )
 
 
@@ -31,12 +32,12 @@ def _create_event(db: Session, current_user: User, payload: ProductEventCreate, 
     if not payload.event_type.startswith(required_prefix):
         raise HTTPException(status_code=400, detail=f"event_type must start with {required_prefix}")
 
-    workspace_id = payload.workspace_id or current_user.default_workspace_id
-    if workspace_id and not check_permission(db, current_user.id, workspace_id, Action.WORKSPACE_READ):
+    workspace_id = payload.workspace_id or cast(Optional[int], current_user.default_workspace_id)
+    if workspace_id and not check_permission(db, cast(int, current_user.id), workspace_id, Action.WORKSPACE_READ):
         raise HTTPException(status_code=403, detail="Not enough permissions for workspace event")
 
     event = ProductEvent(
-        user_id=current_user.id,
+        user_id=cast(int, current_user.id),
         workspace_id=workspace_id,
         event_type=payload.event_type,
         source=payload.source or "sidepanel",
@@ -68,7 +69,7 @@ def list_activity_events(
 ):
     rows = (
         db.query(ProductEvent)
-        .filter(ProductEvent.user_id == current_user.id, ProductEvent.event_type.like("activity.%"))
+        .filter(ProductEvent.user_id == cast(int, current_user.id), ProductEvent.event_type.like("activity.%"))
         .order_by(ProductEvent.created_at.desc())
         .limit(max(1, min(limit, 200)))
         .all()
@@ -92,7 +93,7 @@ def list_analytics_events(
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
-    if not check_permission(db, current_user.id, workspace_id, Action.AUDIT_READ):
+    if not check_permission(db, cast(int, current_user.id), workspace_id, Action.AUDIT_READ):
         raise HTTPException(status_code=403, detail="Not enough permissions")
     rows = (
         db.query(ProductEvent)

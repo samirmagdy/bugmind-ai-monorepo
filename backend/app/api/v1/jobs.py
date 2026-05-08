@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional, cast
 
 from app.api import deps
 from app.models.user import User
@@ -17,7 +17,10 @@ def _job_payload(request: EpicJobCreateRequest) -> dict:
 
 
 def _get_owned_job(db: Session, current_user: User, job_id: str) -> Job:
-    job = db.query(Job).filter(Job.id == job_id, Job.user_id == current_user.id).first()
+    job = db.query(Job).filter(
+        Job.id == job_id,
+        Job.user_id == cast(int, current_user.id)
+    ).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
@@ -38,13 +41,13 @@ def _start_job_from_payload(background_tasks: BackgroundTasks, job: Job, current
         )
 
     if job.job_type == "epic_test_generation":
-        background_tasks.add_task(process_job, job.id, epic_test_generation_processor, current_user, connection_id, epic_key, issue_type_id)
+        background_tasks.add_task(process_job, cast(str, job.id), epic_test_generation_processor, current_user, connection_id, epic_key, issue_type_id)
         return
 
     if job.job_type == "epic_audit":
         background_tasks.add_task(
             process_job,
-            job.id,
+            cast(str, job.id),
             epic_audit_processor,
             current_user,
             connection_id,
@@ -69,7 +72,7 @@ def _start_job_from_payload(background_tasks: BackgroundTasks, job: Job, current
             )
         background_tasks.add_task(
             process_job,
-            job.id,
+            cast(str, job.id),
             brd_coverage_processor,
             current_user,
             connection_id,
@@ -104,15 +107,15 @@ def _clone_job_for_restart(
 
     return create_job(
         db=db,
-        user_id=source_job.user_id,
-        job_type=source_job.job_type,
-        target_key=source_job.target_key,
-        project_key=source_job.project_key,
-        workspace_id=source_job.workspace_id,
-        request_payload=source_job.request_payload,
+        user_id=cast(int, source_job.user_id),
+        job_type=cast(str, source_job.job_type),
+        target_key=cast(str, source_job.target_key),
+        project_key=cast(str, source_job.project_key),
+        workspace_id=cast(Optional[int], source_job.workspace_id),
+        request_payload=cast(Optional[dict], source_job.request_payload),
         retry_of_job_id=retry_of_job_id,
         resume_of_job_id=resume_of_job_id,
-        retry_count=(source_job.retry_count or 0) + 1,
+        retry_count=(cast(int, source_job.retry_count) or 0) + 1,
     )
 
 @router.post("/epic-test-generation", response_model=JobResponse)
@@ -124,17 +127,17 @@ def create_epic_test_generation_job(
 ):
     job = create_job(
         db=db,
-        user_id=current_user.id,
+        user_id=cast(int, current_user.id),
         job_type="epic_test_generation",
         target_key=request.epic_key,
         project_key=request.project_key or request.epic_key.split("-", 1)[0],
-        workspace_id=current_user.default_workspace_id,
+        workspace_id=cast(Optional[int], current_user.default_workspace_id),
         request_payload=_job_payload(request),
     )
     
     background_tasks.add_task(
         process_job,
-        job.id,
+        cast(str, job.id),
         epic_test_generation_processor,
         current_user,
         request.jira_connection_id,
@@ -152,16 +155,16 @@ def create_epic_audit_job(
 ):
     job = create_job(
         db,
-        current_user.id,
+        cast(int, current_user.id),
         "epic_audit",
         request.epic_key,
         request.project_key or request.epic_key.split("-", 1)[0],
-        workspace_id=current_user.default_workspace_id,
+        workspace_id=cast(Optional[int], current_user.default_workspace_id),
         request_payload=_job_payload(request),
     )
     background_tasks.add_task(
         process_job,
-        job.id,
+        cast(str, job.id),
         epic_audit_processor,
         current_user,
         request.jira_connection_id,
@@ -192,16 +195,16 @@ def create_brd_coverage_job(
 
     job = create_job(
         db,
-        current_user.id,
+        cast(int, current_user.id),
         "brd_coverage",
         request.epic_key,
         request.project_key or request.epic_key.split("-", 1)[0],
-        workspace_id=current_user.default_workspace_id,
+        workspace_id=cast(Optional[int], current_user.default_workspace_id),
         request_payload=_job_payload(request),
     )
     background_tasks.add_task(
         process_job,
-        job.id,
+        cast(str, job.id),
         brd_coverage_processor,
         current_user,
         request.jira_connection_id,
@@ -215,8 +218,15 @@ def create_brd_coverage_job(
     return job
 
 @router.get("", response_model=List[JobResponse])
-def get_jobs(db: Session = Depends(deps.get_db), current_user: User = Depends(deps.get_current_user)):
-    jobs = db.query(Job).filter(Job.user_id == current_user.id).order_by(Job.created_at.desc()).limit(50).all()
+def get_jobs(
+    skip: int = 0,
+    limit: int = 50,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    jobs = db.query(Job).filter(
+        Job.user_id == cast(int, current_user.id)
+    ).order_by(Job.created_at.desc()).offset(skip).limit(max(1, min(limit, 200))).all()
     return jobs
 
 
@@ -231,8 +241,8 @@ def retry_job(
     if source_job.status not in ["failed", "cancelled"]:
         raise HTTPException(status_code=400, detail="Only failed or cancelled jobs can be retried.")
 
-    job = _clone_job_for_restart(db, source_job, retry_of_job_id=source_job.id)
-    _start_job_from_payload(background_tasks, job, current_user, job.request_payload or {})
+    job = _clone_job_for_restart(db, source_job, retry_of_job_id=cast(str, source_job.id))
+    _start_job_from_payload(background_tasks, job, current_user, cast(dict, job.request_payload or {}))
     return job
 
 
@@ -247,11 +257,11 @@ def resume_job(
     if source_job.status not in ["partial_result_ready", "failed", "cancelled"]:
         raise HTTPException(status_code=400, detail="Only interrupted jobs can be resumed.")
 
-    job = _clone_job_for_restart(db, source_job, resume_of_job_id=source_job.id)
-    payload = dict(job.request_payload or {})
+    job = _clone_job_for_restart(db, source_job, resume_of_job_id=cast(str, source_job.id))
+    payload = dict(cast(dict, job.request_payload or {}))
     if source_job.result_payload:
-        payload["resume_source_job_id"] = source_job.id
-        payload["resume_source_payload"] = source_job.result_payload
+        payload["resume_source_job_id"] = cast(str, source_job.id)
+        payload["resume_source_payload"] = cast(dict, source_job.result_payload)
         job.request_payload = payload
         db.add(job)
         db.commit()

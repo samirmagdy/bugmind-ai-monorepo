@@ -109,7 +109,7 @@ class BaseAIGenerator:
         self,
         system_prompt: str,
         user_prompt: str,
-        model: str = None,
+        model: Optional[str] = None,
         expect_test_suite: bool = False,
     ) -> Dict[str, Any]:
         response = await self.ai_client.generate_completion(
@@ -133,7 +133,7 @@ class BaseAIGenerator:
         self,
         system_prompt: str,
         user_prompt: str,
-        model: str = None,
+        model: Optional[str] = None,
         expect_test_suite: bool = False,
     ) -> Dict[str, Any]:
         try:

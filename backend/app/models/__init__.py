@@ -27,6 +27,8 @@ __all__ = [
     "WorkspaceMember",
     "WorkspaceRole",
     "WorkspaceTemplate",
+    "WorkspaceTemplateAssignment",
     "WorkspaceTemplateType",
+    "ProductEvent",
     "Base",
 ]

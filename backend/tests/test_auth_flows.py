@@ -22,24 +22,36 @@ os.environ.setdefault("GOOGLE_OAUTH_CLIENT_ID", "google-client-id.apps.googleuse
 os.environ.setdefault("RATE_LIMITS_ENABLED", "false")
 
 import app.models  # noqa: E402,F401
+from typing import cast
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app.core.database import Base, SessionLocal, engine  # noqa: E402
-from app.main import app  # noqa: E402
+from app.api import deps
+from app.main import app as fastapi_app  # noqa: E402
 from app.models.auth import PasswordResetCode, RefreshSession  # noqa: E402
 from app.models.subscription import Subscription  # noqa: E402
 from app.models.user import User  # noqa: E402
+ 
+ 
+def override_get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 
 class AuthFlowTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         Base.metadata.create_all(bind=engine)
-        cls.client = TestClient(app)
+        fastapi_app.dependency_overrides[deps.get_db] = override_get_db
+        cls.client = TestClient(fastapi_app)
 
     @classmethod
     def tearDownClass(cls):
         cls.client.close()
+        fastapi_app.dependency_overrides.pop(deps.get_db, None)
         Base.metadata.drop_all(bind=engine)
         try:
             os.unlink(DB_FILE.name)
@@ -67,10 +79,12 @@ class AuthFlowTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
 
         with SessionLocal() as db:
+            db.expire_all()
             user = db.query(User).filter(User.email == "user@example.com").first()
-            subscription = db.query(Subscription).filter(Subscription.user_id == user.id).first()
-            self.assertIsNotNone(user)
-            self.assertIsNotNone(subscription)
+            self.assertIsNotNone(user, "User should have been created during registration")
+            
+            subscription = db.query(Subscription).filter(Subscription.user_id == cast(int, user.id)).first()
+            self.assertIsNotNone(subscription, "Subscription should have been created for new user")
 
     def test_password_reset_revokes_existing_refresh_sessions(self):
         self.assertEqual(self.register_user().status_code, 200)
@@ -114,7 +128,9 @@ class AuthFlowTests(unittest.TestCase):
         refresh_token = login.json()["refresh_token"]
 
         with SessionLocal() as db:
+            db.expire_all()
             user = db.query(User).filter(User.email == "user@example.com").first()
+            self.assertIsNotNone(user, "User should have been created during registration")
             user.is_active = False
             db.add(user)
             db.commit()
@@ -145,8 +161,11 @@ class AuthFlowTests(unittest.TestCase):
         self.assertIn("refresh_token", body)
 
         with SessionLocal() as db:
+            db.expire_all()
             user = db.query(User).filter(User.email == "google-user@example.com").first()
-            subscription = db.query(Subscription).filter(Subscription.user_id == user.id).first()
+            self.assertIsNotNone(user, "User should have been created during Google login")
+            
+            subscription = db.query(Subscription).filter(Subscription.user_id == cast(int, user.id)).first()
             self.assertEqual(user.google_subject, "google-sub-123")
             self.assertIsNone(user.hashed_password)
             self.assertIsNotNone(subscription)

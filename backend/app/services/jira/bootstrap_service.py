@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.core.audit import log_audit
 from app.models.jira import JiraConnection, JiraFieldMapping
 from app.models.user import User
+from app.models.workspace import WorkspaceMember
 from app.schemas.jira import (
     JiraBootstrapContextRequest,
     JiraBootstrapContextResponse,
@@ -45,8 +46,6 @@ def select_issue_type(issue_types: list[dict], issue_type_id: Optional[str]) -> 
         return bug_type
     return issue_types[0] if issue_types else None
 
-
-from app.models.workspace import WorkspaceMember
 
 def resolve_jira_bootstrap_context(
     req: JiraBootstrapContextRequest,
@@ -183,7 +182,7 @@ def resolve_jira_bootstrap_context(
             WorkspaceMember, JiraFieldMapping.workspace_id == WorkspaceMember.workspace_id
         ).filter(
             WorkspaceMember.user_id == current_user.id,
-            JiraFieldMapping.is_shared == True,
+            JiraFieldMapping.is_shared.is_(True),
             JiraFieldMapping.project_key == canonical_project_key,
             JiraFieldMapping.issue_type_id == selected_issue_type_id,
         )

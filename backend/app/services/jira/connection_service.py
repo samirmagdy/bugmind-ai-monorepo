@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, cast
 from urllib.parse import urlparse
 
 from cryptography.fernet import InvalidToken
@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.core import security
 from app.core.request_security import enforce_secure_jira_ssl, validate_connection_host
 from app.models.jira import JiraAuthType, JiraConnection
+from app.models.workspace import WorkspaceMember
 from app.services.jira.adapters.cloud import JiraCloudAdapter
 from app.services.jira.adapters.server import JiraServerAdapter
 
@@ -35,18 +36,18 @@ def normalize_instance_url(url: Optional[str]) -> str:
 
 
 def get_adapter(connection: JiraConnection):
-    enforce_secure_jira_ssl(connection.verify_ssl)
-    safe_host_url = validate_connection_host(connection.host_url, connection.auth_type.value)
+    enforce_secure_jira_ssl(cast(bool, connection.verify_ssl))
+    safe_host_url = validate_connection_host(cast(str, connection.host_url), cast(str, connection.auth_type.value))
     try:
-        token = security.decrypt_credential(connection.encrypted_token)
+        token = security.decrypt_credential(cast(str, connection.encrypted_token))
     except InvalidToken:
         raise HTTPException(
             status_code=401,
             detail="Jira Connection Stale: Encryption keys have changed. Please delete and re-add this connection.",
         )
     if connection.auth_type == JiraAuthType.CLOUD:
-        return JiraCloudAdapter(safe_host_url, connection.username, token, verify_ssl=connection.verify_ssl)
-    return JiraServerAdapter(safe_host_url, connection.username, token, verify_ssl=connection.verify_ssl)
+        return JiraCloudAdapter(safe_host_url, cast(str, connection.username), token, verify_ssl=cast(bool, connection.verify_ssl))
+    return JiraServerAdapter(safe_host_url, cast(str, connection.username), token, verify_ssl=cast(bool, connection.verify_ssl))
 
 
 def verify_connection_credentials(
@@ -64,8 +65,6 @@ def verify_connection_credentials(
     adapter.get_current_user()
 
 
-from app.models.workspace import WorkspaceMember
-
 def get_owned_connection(db: Session, user_id: int, connection_id: int) -> JiraConnection:
     # Check personal connection
     conn = db.query(JiraConnection).filter(
@@ -79,7 +78,7 @@ def get_owned_connection(db: Session, user_id: int, connection_id: int) -> JiraC
             WorkspaceMember, JiraConnection.workspace_id == WorkspaceMember.workspace_id
         ).filter(
             JiraConnection.id == connection_id,
-            JiraConnection.is_shared == True,
+            JiraConnection.is_shared.is_(True),
             WorkspaceMember.user_id == user_id
         ).first()
         
@@ -93,7 +92,7 @@ def assert_connection_matches_instance(connection: JiraConnection, instance_url:
         return
 
     requested = normalize_instance_url(instance_url)
-    connection_url = normalize_instance_url(connection.host_url)
+    connection_url = normalize_instance_url(cast(str, connection.host_url))
     if requested and connection_url and requested != connection_url:
         raise HTTPException(
             status_code=400,

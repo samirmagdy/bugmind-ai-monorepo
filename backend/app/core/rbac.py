@@ -1,3 +1,5 @@
+from typing import Optional, cast, List
+
 from sqlalchemy.orm import Session
 from app.models.workspace import WorkspaceMember, WorkspaceRole
 
@@ -38,7 +40,7 @@ ROLE_PERMISSIONS = {
 }
 
 def check_permission(db: Session, user_id: int, workspace_id: int, action: str) -> bool:
-    member = db.query(WorkspaceMember).filter(
+    member: Optional[WorkspaceMember] = db.query(WorkspaceMember).filter(
         WorkspaceMember.workspace_id == workspace_id,
         WorkspaceMember.user_id == user_id
     ).first()
@@ -46,12 +48,12 @@ def check_permission(db: Session, user_id: int, workspace_id: int, action: str) 
     if not member:
         return False
         
-    allowed_actions = ROLE_PERMISSIONS.get(member.role, [])
+    allowed_actions = ROLE_PERMISSIONS.get(cast(WorkspaceRole, member.role), [])
     return action in allowed_actions
 
 def get_user_workspace_role(db: Session, user_id: int, workspace_id: int) -> Optional[WorkspaceRole]:
-    member = db.query(WorkspaceMember).filter(
+    member: Optional[WorkspaceMember] = db.query(WorkspaceMember).filter(
         WorkspaceMember.workspace_id == workspace_id,
         WorkspaceMember.user_id == user_id
     ).first()
-    return member.role if member else None
+    return cast(WorkspaceRole, member.role) if member else None

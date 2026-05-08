@@ -1,3 +1,4 @@
+from typing import cast, Optional
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
@@ -16,14 +17,17 @@ from app.models.workspace import WorkspaceMember
 def list_user_connections(db: Session, current_user: User) -> list[JiraConnection]:
     # Fetch personal connections
     # OR connections shared in workspaces where user is a member
-    return db.query(JiraConnection).outerjoin(
-        WorkspaceMember, JiraConnection.workspace_id == WorkspaceMember.workspace_id
-    ).filter(
+    return db.query(JiraConnection).filter(
         or_(
-            JiraConnection.user_id == current_user.id,
+            JiraConnection.user_id == cast(int, current_user.id),
             and_(
+                JiraConnection.workspace_id != None,
                 JiraConnection.is_shared == True,
-                WorkspaceMember.user_id == current_user.id
+                JiraConnection.workspace_id.in_(
+                    db.query(WorkspaceMember.workspace_id).filter(
+                        WorkspaceMember.user_id == cast(int, current_user.id)
+                    ).scalar_subquery()
+                )
             )
         )
     ).order_by(JiraConnection.is_active.desc(), JiraConnection.id.asc()).distinct().all()
@@ -37,12 +41,12 @@ def create_user_connection(db: Session, current_user: User, conn_in: JiraConnect
     verify_connection_credentials(conn_in.auth_type, safe_host_url, conn_in.username, conn_in.token, conn_in.verify_ssl)
 
     encrypted = security.encrypt_credential(conn_in.token)
-    db.query(JiraConnection).filter(JiraConnection.user_id == current_user.id).update(
+    db.query(JiraConnection).filter(JiraConnection.user_id == cast(int, current_user.id)).update(
         {JiraConnection.is_active: False},
         synchronize_session=False,
     )
     conn = JiraConnection(
-        user_id=current_user.id,
+        user_id=cast(int, current_user.id),
         auth_type=conn_in.auth_type,
         host_url=safe_host_url,
         username=conn_in.username,
@@ -55,19 +59,19 @@ def create_user_connection(db: Session, current_user: User, conn_in: JiraConnect
     db.add(conn)
     db.commit()
     db.refresh(conn)
-    log_audit("jira.connection_create", current_user.id, db=db, connection_id=conn.id, host_url=conn.host_url)
+    log_audit("jira.connection_create", cast(int, current_user.id), db=db, connection_id=cast(int, conn.id), host_url=cast(str, conn.host_url))
     return conn
 
 
 def update_user_connection(db: Session, current_user: User, conn_id: int, conn_in: JiraConnectionUpdate) -> JiraConnection:
-    conn = db.query(JiraConnection).filter(JiraConnection.id == conn_id, JiraConnection.user_id == current_user.id).first()
+    conn = db.query(JiraConnection).filter(JiraConnection.id == conn_id, JiraConnection.user_id == cast(int, current_user.id)).first()
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
 
     update_data = conn_in.model_dump(exclude_unset=True)
     effective_auth_type = update_data.get("auth_type", conn.auth_type)
     effective_verify_ssl = update_data.get("verify_ssl", conn.verify_ssl)
-    effective_host_url = conn.host_url
+    effective_host_url = cast(str, conn.host_url)
     effective_username = update_data.get("username", conn.username)
     effective_token = None
 
@@ -92,7 +96,7 @@ def update_user_connection(db: Session, current_user: User, conn_id: int, conn_i
     should_verify = any(key in update_data for key in ("auth_type", "host_url", "username", "verify_ssl", "encrypted_token"))
     if should_verify:
         if effective_token is None:
-            effective_token = security.decrypt_credential(conn.encrypted_token)
+            effective_token = security.decrypt_credential(cast(str, conn.encrypted_token))
         verify_connection_credentials(
             effective_auth_type,
             effective_host_url,
@@ -103,7 +107,7 @@ def update_user_connection(db: Session, current_user: User, conn_id: int, conn_i
 
     if update_data.get("is_active") is True:
         db.query(JiraConnection).filter(
-            JiraConnection.user_id == current_user.id,
+            JiraConnection.user_id == cast(int, current_user.id),
             JiraConnection.id != conn_id,
         ).update({JiraConnection.is_active: False}, synchronize_session=False)
 
@@ -113,12 +117,12 @@ def update_user_connection(db: Session, current_user: User, conn_id: int, conn_i
     db.add(conn)
     db.commit()
     db.refresh(conn)
-    log_audit("jira.connection_update", current_user.id, db=db, connection_id=conn_id)
+    log_audit("jira.connection_update", cast(int, current_user.id), db=db, connection_id=conn_id)
     return conn
 
 
 def delete_user_connection(db: Session, current_user: User, conn_id: int) -> None:
-    conn = db.query(JiraConnection).filter(JiraConnection.id == conn_id, JiraConnection.user_id == current_user.id).first()
+    conn = db.query(JiraConnection).filter(JiraConnection.id == conn_id, JiraConnection.user_id == cast(int, current_user.id)).first()
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
 
@@ -126,10 +130,10 @@ def delete_user_connection(db: Session, current_user: User, conn_id: int) -> Non
     db.delete(conn)
     if was_active:
         replacement = db.query(JiraConnection).filter(
-            JiraConnection.user_id == current_user.id,
+            JiraConnection.user_id == cast(int, current_user.id),
         ).order_by(JiraConnection.id.asc()).first()
         if replacement:
             replacement.is_active = True
             db.add(replacement)
     db.commit()
-    log_audit("jira.connection_delete", current_user.id, db=db, connection_id=conn_id)
+    log_audit("jira.connection_delete", cast(int, current_user.id), db=db, connection_id=conn_id)

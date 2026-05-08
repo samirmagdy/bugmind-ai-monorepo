@@ -1,3 +1,4 @@
+from typing import cast, Optional
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from app.api import deps
@@ -15,7 +16,7 @@ def get_ai_settings(
     current_user: User = Depends(deps.get_current_user)
 ):
     return AISettingsResponse(
-        custom_model=current_user.custom_ai_model,
+        custom_model=cast(Optional[str], current_user.custom_ai_model),
         has_custom_key=bool(current_user.encrypted_ai_api_key)
     )
 
@@ -29,7 +30,7 @@ def update_ai_settings(
 
     if settings.custom_model is not None:
         normalized_model = settings.custom_model.strip() or None
-        if current_user.custom_ai_model != normalized_model:
+        if cast(Optional[str], current_user.custom_ai_model) != normalized_model:
             current_user.custom_ai_model = normalized_model
             changed = True
     
@@ -43,7 +44,7 @@ def update_ai_settings(
             existing_key = None
             if current_user.encrypted_ai_api_key:
                 try:
-                    existing_key = decrypt_credential(current_user.encrypted_ai_api_key)
+                    existing_key = decrypt_credential(cast(str, current_user.encrypted_ai_api_key))
                 except Exception:
                     existing_key = None
 
@@ -53,7 +54,7 @@ def update_ai_settings(
 
     if changed:
         db.commit()
-        log_audit("settings.ai_update", current_user.id, db=db, custom_model=current_user.custom_ai_model)
+        log_audit("settings.ai_update", cast(int, current_user.id), db=db, custom_model=cast(Optional[str], current_user.custom_ai_model))
 
     return {"status": "ok"}
 
@@ -63,9 +64,9 @@ def update_jira_settings(
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
-    get_owned_connection(db, current_user.id, settings.jira_connection_id)
+    get_owned_connection(db, cast(int, current_user.id), settings.jira_connection_id)
     query = db.query(JiraFieldMapping).filter(
-        JiraFieldMapping.user_id == current_user.id,
+        JiraFieldMapping.user_id == cast(int, current_user.id),
         JiraFieldMapping.jira_connection_id == settings.jira_connection_id,
         JiraFieldMapping.project_key == settings.project_key,
         JiraFieldMapping.issue_type_id == settings.issue_type_id
@@ -78,7 +79,7 @@ def update_jira_settings(
 
     if not mapping:
         mapping = JiraFieldMapping(
-            user_id=current_user.id,
+            user_id=cast(int, current_user.id),
             jira_connection_id=settings.jira_connection_id,
             project_key=settings.project_key,
             project_id=settings.project_id,
@@ -100,5 +101,5 @@ def update_jira_settings(
             mapping.field_defaults = settings.field_defaults
 
     db.commit()
-    log_audit("settings.jira_mapping_update", current_user.id, db=db, project_key=settings.project_key)
+    log_audit("settings.jira_mapping_update", cast(int, current_user.id), db=db, project_key=settings.project_key)
     return {"status": "ok"}

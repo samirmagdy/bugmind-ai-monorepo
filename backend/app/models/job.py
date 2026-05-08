@@ -1,11 +1,10 @@
+from datetime import datetime
+from typing import Optional
 from sqlalchemy import Integer, String, Float, DateTime, Text, Boolean, JSON, ForeignKey
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 from sqlalchemy.sql import func
-from typing import Optional
-from datetime import datetime
 
 from app.core.database import Base
-
 
 class Job(Base):
     __tablename__ = "jobs"
@@ -36,4 +35,4 @@ class Job(Base):
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
     is_cancelled: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    user = relationship("User")
+    user: Mapped["User"] = relationship("User")

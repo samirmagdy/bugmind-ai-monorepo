@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from typing import cast, Optional
 from sqlalchemy.orm import Session
 from app.core.security import decrypt_credential
 from app.services.jobs.worker import update_job_progress, check_cancelled
@@ -37,7 +38,7 @@ async def epic_test_generation_processor(job_id: str, db: Session, user: User, c
 
         update_job_progress(db, job_id, 5.0, "Fetching Epic Children", {"stories": [], "epic_key": epic_key})
         
-        conn = get_owned_connection(db, user.id, connection_id)
+        conn = get_owned_connection(db, cast(int, user.id), connection_id)
         adapter = get_adapter(conn)
         
         # 1. Fetch Epic Children
@@ -49,7 +50,7 @@ async def epic_test_generation_processor(job_id: str, db: Session, user: User, c
             update_job_progress(db, job_id, 100.0, "Completed - No Stories Found", {"stories": [], "epic_key": epic_key, "warnings": ["No stories found in this epic."]})
             return
 
-        custom_api_key = decrypt_credential(user.encrypted_ai_api_key) if user.encrypted_ai_api_key else None
+        custom_api_key = decrypt_credential(cast(str, user.encrypted_ai_api_key)) if user.encrypted_ai_api_key else None
         ai_generator = TestCaseGenerator(api_key=custom_api_key)
         results = []
         warnings = []
@@ -77,7 +78,7 @@ async def epic_test_generation_processor(job_id: str, db: Session, user: User, c
 
                 ai_result = await ai_generator.generate_test_cases(
                     context_text=context_text,
-                    model=user.custom_ai_model,
+                    model=cast(Optional[str], user.custom_ai_model),
                     issue_type_name="Story",
                     test_categories=["Positive", "Negative", "Boundary", "Regression"],
                 )
@@ -123,14 +124,14 @@ async def epic_audit_processor(
     epic_key: str,
     issue_type_id: str,
     project_key: str = "",
-    project_id: str = None,
-    issue_type_name: str = None,
+    project_id: Optional[str] = None,
+    issue_type_name: Optional[str] = None,
 ):
     if check_cancelled(db, job_id):
         return
 
     update_job_progress(db, job_id, 10.0, "Fetching Epic Children", {"epic_key": epic_key, "findings": []})
-    conn = get_owned_connection(db, user.id, connection_id)
+    conn = get_owned_connection(db, cast(int, user.id), connection_id)
     adapter = get_adapter(conn)
     bulk_fetch_response = fetch_epic_children(adapter, epic_key, max_results=50)
     stories = _job_story_inputs(bulk_fetch_response.issues)
@@ -173,8 +174,8 @@ async def brd_coverage_processor(
     issue_type_id: str,
     brd_text: str,
     project_key: str = "",
-    project_id: str = None,
-    issue_type_name: str = None,
+    project_id: Optional[str] = None,
+    issue_type_name: Optional[str] = None,
 ):
     if check_cancelled(db, job_id):
         return
@@ -183,7 +184,7 @@ async def brd_coverage_processor(
         raise ValueError("BRD text is required for async BRD coverage comparison.")
 
     update_job_progress(db, job_id, 10.0, "Fetching Epic Children", {"epic_key": epic_key, "findings": []})
-    conn = get_owned_connection(db, user.id, connection_id)
+    conn = get_owned_connection(db, cast(int, user.id), connection_id)
     adapter = get_adapter(conn)
     bulk_fetch_response = fetch_epic_children(adapter, epic_key, max_results=50)
     stories = _job_story_inputs(bulk_fetch_response.issues)

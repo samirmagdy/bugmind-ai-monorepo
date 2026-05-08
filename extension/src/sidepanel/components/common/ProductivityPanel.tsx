@@ -11,6 +11,8 @@ import {
 } from '../../utils/productivity';
 import { MainWorkflow, WorkspaceTemplate } from '../../types';
 
+const INTERNAL_STATES = ['STALE_PAGE', 'NOT_A_JIRA_PAGE', 'UNSUPPORTED_ISSUE_TYPE', 'MISSING_ISSUE_TYPE', 'NO_ISSUE_TYPES_FOUND'];
+
 function getTemplateBody(template: WorkspaceTemplate): string {
   const body = template.content?.body;
   return typeof body === 'string' ? body : JSON.stringify(template.content || {});
@@ -26,8 +28,6 @@ const ProductivityPanel: React.FC = () => {
   const selectedTemplate = templates.find((template) => template.id === session.selectedWorkspaceTemplateId);
 
   const usageTone = !usage ? 'neutral' : usage.remaining <= 0 ? 'danger' : usage.remaining <= Math.max(1, Math.floor(usage.limit * 0.2)) ? 'warning' : 'success';
-
-  const INTERNAL_STATES = ['STALE_PAGE', 'NOT_A_JIRA_PAGE', 'UNSUPPORTED_ISSUE_TYPE', 'MISSING_ISSUE_TYPE', 'NO_ISSUE_TYPES_FOUND'];
 
   const recentActivity = useMemo(() => 
     (session.activityFeed || [])

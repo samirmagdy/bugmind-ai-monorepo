@@ -158,7 +158,8 @@ class BugJiraPayloadResolver:
         # 6. Array handling (generic arrays)
         elif field_type == "array":
             if not isinstance(raw_value, list):
-                if not raw_value: return []
+                if not raw_value:
+                    return []
                 raw_value = [raw_value]
             
             # Special case for labels (list of strings)
