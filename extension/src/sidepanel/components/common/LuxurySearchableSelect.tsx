@@ -178,8 +178,8 @@ const LuxurySearchableSelect: React.FC<LuxurySearchableSelectProps> = ({
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className={`w-full min-h-[46px] flex items-center justify-between bg-[var(--bg-input)] border rounded-[1rem] px-4 py-2.5 outline-none transition-all duration-300 shadow-inner group/trigger ${
-          isOpen ? 'border-[var(--status-info)]/30 ring-4 ring-[var(--status-info)]/5' : 
+        className={`w-full min-h-[42px] flex items-center justify-between bg-[var(--bg-input)] border rounded-[8px] px-3 py-2 outline-none transition-all duration-200 group/trigger ${
+          isOpen ? 'border-[var(--status-info)]/40 ring-2 ring-[var(--status-info)]/10' : 
           (required && currentValues.length === 0 ? 'border-[var(--status-danger)]/20' : 'border-[var(--border-main)] hover:border-[var(--text-muted)]/30')
         }`}
       >
@@ -210,7 +210,7 @@ const LuxurySearchableSelect: React.FC<LuxurySearchableSelectProps> = ({
                 return (
                   <div 
                     key={typeof v === 'object' && v !== null ? (v.id || i) : (v ?? i)} 
-                    className="bg-[var(--status-info)]/10 text-[var(--status-info)] px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-tight flex items-center gap-1.5 border border-[var(--status-info)]/20 animate-in zoom-in-95"
+                    className="bg-[var(--status-info)]/10 text-[var(--status-info)] px-2 py-0.5 rounded-[8px] text-[9px] font-black uppercase tracking-tight flex items-center gap-1.5 border border-[var(--status-info)]/20 animate-in zoom-in-95"
                   >
                     <span className="truncate max-w-[80px]">{label}</span>
                     <button 
@@ -234,7 +234,7 @@ const LuxurySearchableSelect: React.FC<LuxurySearchableSelectProps> = ({
       </button>
 
       {isOpen && (
-        <div className={`absolute left-0 w-full bg-[var(--dropdown-bg)] border border-[var(--dropdown-border)] rounded-[1.1rem] overflow-hidden shadow-none z-[1000] animate-luxury flex flex-col max-h-[280px] ${
+        <div className={`absolute left-0 w-full bg-[var(--dropdown-bg)] border border-[var(--dropdown-border)] rounded-[8px] overflow-hidden shadow-none z-[1000] animate-luxury flex flex-col max-h-[280px] ${
           openUp ? 'bottom-full mb-2' : 'top-full mt-2'
         }`}>
           <div className="p-2 border-b border-[var(--dropdown-border)] sticky top-0 bg-[var(--dropdown-bg)] z-10">
@@ -244,7 +244,7 @@ const LuxurySearchableSelect: React.FC<LuxurySearchableSelectProps> = ({
                 type="text"
                 placeholder="Search..."
                 autoFocus
-                className="w-full bg-[var(--dropdown-bg-muted)] border border-[var(--dropdown-border)] rounded-[0.85rem] pl-8 pr-3 py-2 text-[12px] outline-none focus:border-[var(--status-info)]/30 transition-all font-medium text-[var(--text-main)]"
+                className="w-full bg-[var(--dropdown-bg-muted)] border border-[var(--dropdown-border)] rounded-[8px] pl-8 pr-3 py-2 text-[12px] outline-none focus:border-[var(--status-info)]/30 transition-all font-medium text-[var(--text-main)]"
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 onKeyDown={e => {
@@ -288,7 +288,7 @@ const LuxurySearchableSelect: React.FC<LuxurySearchableSelectProps> = ({
                       </div>
                     </div>
                     {isSelected && (
-                      <div className="bg-[var(--status-info)] p-0.5 rounded shadow-[0_0_8px_rgba(59,130,246,0.4)]">
+                      <div className="bg-[var(--status-info)] p-0.5 rounded-[4px]">
                         <Check size={10} className="text-white" />
                       </div>
                     )}

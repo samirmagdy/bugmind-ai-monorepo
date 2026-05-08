@@ -209,7 +209,7 @@ export const WorkspaceDashboardView: React.FC = () => {
   if (!workspace) {
     return (
       <div className="p-4 text-center space-y-4">
-        <div className="w-12 h-12 rounded-2xl bg-[var(--surface-soft)] flex items-center justify-center mx-auto text-[var(--text-muted)]">
+        <div className="w-12 h-12 rounded-[8px] bg-[var(--surface-soft)] flex items-center justify-center mx-auto text-[var(--text-muted)]">
             <Layout size={24} />
         </div>
         <div>
@@ -222,19 +222,25 @@ export const WorkspaceDashboardView: React.FC = () => {
   }
 
   return (
-    <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
-      <div className="flex items-center justify-between pb-2 border-b border-[var(--border-main)]">
-        <div className="flex items-center gap-2">
-          <Layout size={18} className="text-[var(--primary-blue)]" />
-          <h2 className="text-sm font-bold text-[var(--text-main)] truncate max-w-[150px]">{workspace.name}</h2>
+    <div className="view-shell animate-in fade-in slide-in-from-bottom-2 duration-300">
+      <SurfaceCard className="view-header">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-[8px] border border-[var(--border-soft)] bg-[var(--surface-accent-strong)] text-[var(--primary-blue)]">
+            <Layout size={18} />
+          </div>
+          <div className="view-heading">
+            <p className="view-kicker">Workspace</p>
+            <h2 className="view-title truncate max-w-[190px]">{workspace.name}</h2>
+            <p className="view-subtitle">Members, templates, shared connections, and audit history.</p>
+          </div>
         </div>
         <button
           onClick={() => updateSession({ view: 'main' })}
-          className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)] hover:text-[var(--text-main)]"
+          className="rounded-[8px] border border-[var(--card-border)] bg-[var(--surface-soft)] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--text-muted)] hover:text-[var(--text-main)]"
         >
           Back
         </button>
-      </div>
+      </SurfaceCard>
 
       {notice && (
         <div className={`rounded-xl border px-3 py-2 text-[11px] font-medium ${
@@ -247,34 +253,30 @@ export const WorkspaceDashboardView: React.FC = () => {
       )}
 
       {/* Tabs */}
-      <div className="flex gap-4 border-b border-[var(--border-soft)]">
+      <div className="view-tabs grid-cols-4">
         <button 
           onClick={() => setActiveTab('members')}
-          className={`pb-2 text-xs font-semibold transition-colors relative ${activeTab === 'members' ? 'text-[var(--primary-blue)]' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'}`}
+          className={`view-tab ${activeTab === 'members' ? 'view-tab-active' : ''}`}
         >
           Members
-          {activeTab === 'members' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[var(--primary-blue)]" />}
         </button>
         <button 
           onClick={() => setActiveTab('connections')}
-          className={`pb-2 text-xs font-semibold transition-colors relative ${activeTab === 'connections' ? 'text-[var(--primary-blue)]' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'}`}
+          className={`view-tab ${activeTab === 'connections' ? 'view-tab-active' : ''}`}
         >
           Connections
-          {activeTab === 'connections' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[var(--primary-blue)]" />}
         </button>
         <button 
           onClick={() => setActiveTab('templates')}
-          className={`pb-2 text-xs font-semibold transition-colors relative ${activeTab === 'templates' ? 'text-[var(--primary-blue)]' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'}`}
+          className={`view-tab ${activeTab === 'templates' ? 'view-tab-active' : ''}`}
         >
           Templates
-          {activeTab === 'templates' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[var(--primary-blue)]" />}
         </button>
         <button 
           onClick={() => setActiveTab('audit')}
-          className={`pb-2 text-xs font-semibold transition-colors relative ${activeTab === 'audit' ? 'text-[var(--primary-blue)]' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'}`}
+          className={`view-tab ${activeTab === 'audit' ? 'view-tab-active' : ''}`}
         >
           Audit
-          {activeTab === 'audit' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[var(--primary-blue)]" />}
         </button>
       </div>
 

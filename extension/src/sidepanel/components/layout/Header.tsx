@@ -1,18 +1,23 @@
 import React from 'react';
-import { Bug, Settings, LogOut, Moon, Sun } from 'lucide-react';
+import { Bug, Settings, LogOut, Moon, Sun, ClipboardList, Layout } from 'lucide-react';
 import { useBugMind } from '../../hooks/useBugMind';
 import { StatusBadge } from '../common/DesignSystem';
 
 const Header: React.FC = () => {
   const { session, auth: { globalView }, ai: { fetchAISettings, usage }, updateSession, handleLogout } = useBugMind();
+  const navItems = [
+    { view: 'main' as const, label: 'Work', icon: Bug },
+    { view: 'jobs' as const, label: 'Jobs', icon: ClipboardList },
+    { view: 'workspace' as const, label: 'Workspace', icon: Layout }
+  ];
 
   return (
     <header className="panel-header">
-      <div className="flex items-center gap-3">
+      <div className="min-w-0 flex items-center gap-3">
         <div className="panel-icon">
           <Bug className="text-white" size={20} />
         </div>
-        <div className="leading-tight">
+        <div className="min-w-0 leading-tight">
           <h1 className="panel-title">
             BugMind <span className="text-[var(--primary-blue)] opacity-70">AI</span>
           </h1>
@@ -21,9 +26,26 @@ const Header: React.FC = () => {
       </div>
 
       {globalView !== 'auth' && (
-        <div className="panel-actions">
+        <div className="panel-actions" aria-label="Panel navigation">
+          <nav className="panel-nav">
+            {navItems.map(({ view, label, icon: Icon }) => (
+              <button
+                key={view}
+                type="button"
+                onClick={() => updateSession({ view })}
+                className={`panel-nav-button ${session.view === view ? 'panel-nav-button-active' : ''}`}
+                title={label}
+                aria-label={label}
+                aria-current={session.view === view ? 'page' : undefined}
+              >
+                <Icon size={15} />
+                <span>{label}</span>
+              </button>
+            ))}
+          </nav>
+
           {usage && (
-            <div className="hidden sm:flex items-center">
+            <div className="panel-usage">
               <StatusBadge tone="success" className="bg-[var(--surface-soft)]">
                 {usage.remaining} left
               </StatusBadge>
@@ -36,23 +58,26 @@ const Header: React.FC = () => {
                 theme: session.theme === 'dark' ? 'light' : 'dark',
                 themeSource: 'manual'
               })}
-              className="p-2.5 hover:bg-[var(--surface-soft)] rounded-full transition-all text-[var(--text-secondary)] hover:text-[var(--primary-blue)]"
+              className="icon-action"
               title={session.theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              aria-label={session.theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
             >
               {session.theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
             </button>
             <button 
               onClick={() => { fetchAISettings(); updateSession({ view: 'settings' }); }} 
-              className="p-2.5 hover:bg-[var(--surface-soft)] rounded-full transition-all text-[var(--text-secondary)] hover:text-[var(--primary-blue)]"
+              className={`icon-action ${session.view === 'settings' ? 'icon-action-active' : ''}`}
               title="Settings"
+              aria-label="Settings"
             >
               <Settings size={18} />
             </button>
             
             <button 
               onClick={handleLogout} 
-              className="p-2.5 hover:bg-[var(--error-bg)] rounded-full transition-all text-[var(--text-secondary)] hover:text-[var(--error)]"
+              className="icon-action icon-action-danger"
               title="Logout"
+              aria-label="Logout"
             >
               <LogOut size={18} />
             </button>

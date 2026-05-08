@@ -73,20 +73,22 @@ const SetupView: React.FC = () => {
   const hasConnections = (session.connections?.length || 0) > 0;
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-500">
+    <div className="view-shell animate-in fade-in duration-500">
       {/* Header */}
-      <SurfaceCard className="flex items-center gap-3 px-4 py-3.5">
+      <SurfaceCard className="view-header">
         {hasConnections && (
           <button 
             onClick={() => setGlobalView('main')}
-            className="p-2.5 rounded-full bg-[var(--surface-soft)] border border-[var(--card-border)] text-[var(--text-muted)] hover:text-[var(--primary-blue)] hover:border-[var(--primary-blue)] transition-all"
+            className="icon-button"
+            aria-label="Back to workspace"
           >
             <ArrowLeft size={16} />
           </button>
         )}
-        <div>
-          <h2 className="text-lg font-bold text-[var(--text-primary)]">Jira Connection</h2>
-          <p className="text-xs text-[var(--text-secondary)]">Link your Jira workspace to BugMind</p>
+        <div className="view-heading flex-1">
+          <p className="view-kicker">Setup</p>
+          <h2 className="view-title">Jira Connection</h2>
+          <p className="view-subtitle">Link the Jira workspace and discover project capabilities.</p>
         </div>
       </SurfaceCard>
 
@@ -113,7 +115,7 @@ const SetupView: React.FC = () => {
                   const val = e.target.value;
                   chrome.storage.local.set({ 'bugmind_api_base': val.trim().replace(/\/+$/, '') });
                 }}
-                className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-2xl pl-9 pr-4 py-2.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)] transition-all"
+                className="form-input pl-9 pr-4 py-2.5 text-sm"
                 placeholder="https://api.bugmind.ai/v1"
                 required
               />
@@ -156,7 +158,7 @@ const SetupView: React.FC = () => {
                 type="url" 
                 value={url} 
                 onChange={e => setUrl(e.target.value)}
-                className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-2xl pl-9 pr-4 py-2.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)] transition-all"
+                className="form-input pl-9 pr-4 py-2.5 text-sm"
                 placeholder={platform === 'cloud' ? 'https://your-domain.atlassian.net' : 'https://jira.your-corp.com'}
                 required
               />
@@ -173,7 +175,7 @@ const SetupView: React.FC = () => {
                 type="text" 
                 value={username} 
                 onChange={e => setUsername(e.target.value)}
-                className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-2xl pl-9 pr-4 py-2.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)] transition-all"
+                className="form-input pl-9 pr-4 py-2.5 text-sm"
                 placeholder="admin@company.com"
                 required
               />
@@ -200,7 +202,7 @@ const SetupView: React.FC = () => {
                 type="password" 
                 value={token} 
                 onChange={e => setToken(e.target.value)}
-                className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-2xl pl-9 pr-4 py-2.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)] transition-all"
+                className="form-input pl-9 pr-4 py-2.5 text-sm"
                 placeholder="••••••••••••••••"
                 required
               />
@@ -214,7 +216,7 @@ const SetupView: React.FC = () => {
                 type="text"
                 value={projectKey}
                 onChange={e => setProjectKey(e.target.value.toUpperCase())}
-                className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-2xl px-4 py-2.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)] transition-all"
+                className="form-input px-4 py-2.5 text-sm"
                 placeholder="Optional, e.g. YMA"
               />
             </div>
@@ -224,7 +226,7 @@ const SetupView: React.FC = () => {
               <select
                 value={xrayMode}
                 onChange={e => setXrayMode(e.target.value as typeof xrayMode)}
-                className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-2xl px-4 py-2.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)] transition-all"
+                className="form-input px-4 py-2.5 text-sm"
               >
                 <option value="auto">Auto detect</option>
                 <option value="server-dc-raven">Server/DC Raven API</option>

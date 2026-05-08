@@ -56,26 +56,32 @@ export const JobDashboardView: React.FC = () => {
   };
 
   return (
-    <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
-      <div className="flex items-center justify-between pb-2 border-b border-[var(--border-main)]">
-        <div className="flex items-center gap-2">
-          <Activity size={18} className="text-[var(--primary-blue)]" />
-          <h2 className="text-sm font-bold text-[var(--text-main)]">Background Jobs</h2>
+    <div className="view-shell animate-in fade-in slide-in-from-bottom-2 duration-300">
+      <SurfaceCard className="view-header">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-[8px] border border-[var(--border-soft)] bg-[var(--surface-accent-strong)] text-[var(--primary-blue)]">
+            <Activity size={18} />
+          </div>
+          <div className="view-heading">
+            <p className="view-kicker">Activity</p>
+            <h2 className="view-title">Background Jobs</h2>
+            <p className="view-subtitle">Live status for generation and publishing tasks.</p>
+          </div>
         </div>
         <button
           onClick={() => updateSession({ view: 'main' })}
-          className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)] hover:text-[var(--text-main)]"
+          className="rounded-[8px] border border-[var(--card-border)] bg-[var(--surface-soft)] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--text-muted)] hover:text-[var(--text-main)]"
         >
-          Back to Home
+          Back
         </button>
-      </div>
+      </SurfaceCard>
 
       {loading && jobs.length === 0 ? (
         <div className="flex items-center justify-center p-8 text-[var(--text-muted)]">
           <Loader2 size={24} className="animate-spin" />
         </div>
       ) : jobs.length === 0 ? (
-        <div className="text-center p-8 bg-[var(--bg-input)] rounded-xl border border-[var(--border-main)] text-[var(--text-muted)] text-xs">
+        <div className="text-center p-8 bg-[var(--bg-input)] rounded-[8px] border border-[var(--border-main)] text-[var(--text-muted)] text-xs">
           No background jobs running or completed.
         </div>
       ) : (

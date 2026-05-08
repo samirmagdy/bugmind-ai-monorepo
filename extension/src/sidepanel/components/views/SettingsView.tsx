@@ -771,7 +771,7 @@ const SettingsView: React.FC = () => {
   };
 
   return (
-    <div className="space-y-5 animate-in slide-in-from-right-4 duration-300">
+    <div className="view-shell animate-in slide-in-from-right-4 duration-300">
       {connectionToDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
           <SurfaceCard className="w-full max-w-xs p-4 shadow-2xl">
@@ -803,49 +803,50 @@ const SettingsView: React.FC = () => {
         </div>
       )}
 
-      <SurfaceCard className="flex items-center justify-between gap-3 px-4 py-3.5">
-        <div className="flex items-center gap-3">
-          <button onClick={() => updateSession({ view: 'main' })} className="flex h-11 w-11 items-center justify-center rounded-full bg-[var(--surface-soft)] border border-[var(--card-border)] text-[var(--text-muted)] hover:text-[var(--primary-blue)] hover:border-[var(--primary-blue)] transition-all">
+      <SurfaceCard className="view-header">
+        <div className="flex min-w-0 items-center gap-3">
+          <button onClick={() => updateSession({ view: 'main' })} className="icon-button" aria-label="Close settings">
             <X size={16} />
           </button>
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--text-muted)]">Preferences</p>
-            <h2 className="text-[20px] font-extrabold tracking-[-0.04em] text-[var(--text-primary)]">Settings</h2>
+          <div className="view-heading">
+            <p className="view-kicker">Preferences</p>
+            <h2 className="view-title">Settings</h2>
+            <p className="view-subtitle">Configure AI, Jira mapping, Xray, connections, and teams.</p>
           </div>
         </div>
-        <div className="hidden min-[360px]:flex items-center rounded-full bg-[var(--surface-soft)] border border-[var(--card-border)] px-3 py-1.5 text-[10px] font-semibold text-[var(--text-secondary)]">
-          Native polish
+        <div className="hidden min-[360px]:flex items-center rounded-[8px] bg-[var(--surface-soft)] border border-[var(--card-border)] px-3 py-1.5 text-[10px] font-semibold text-[var(--text-secondary)]">
+          Panel
         </div>
       </SurfaceCard>
 
-      <div className="grid grid-cols-5 gap-1.5 rounded-[1.4rem] border border-[var(--card-border)] bg-[var(--surface-soft)] p-1.5">
+      <div className="view-tabs grid-cols-5">
         <button
           onClick={() => updateSession({ settingsTab: 'ai' })}
-          className={`py-2.5 text-[10px] font-bold rounded-[1rem] transition-all tracking-[0.14em] uppercase ${session.settingsTab === 'ai' ? 'bg-[var(--bg-elevated)] text-[var(--primary-blue)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
+          className={`view-tab ${session.settingsTab === 'ai' ? 'view-tab-active' : ''}`}
         >
           AI
         </button>
         <button
           onClick={() => updateSession({ settingsTab: 'jira' })}
-          className={`py-2.5 text-[10px] font-bold rounded-[1rem] transition-all tracking-[0.14em] uppercase ${session.settingsTab === 'jira' ? 'bg-[var(--bg-elevated)] text-[var(--primary-blue)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
+          className={`view-tab ${session.settingsTab === 'jira' ? 'view-tab-active' : ''}`}
         >
           Map
         </button>
         <button
           onClick={() => updateSession({ settingsTab: 'capability' })}
-          className={`py-2.5 text-[10px] font-bold rounded-[1rem] transition-all tracking-[0.14em] uppercase ${session.settingsTab === 'capability' ? 'bg-[var(--bg-elevated)] text-[var(--primary-blue)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
+          className={`view-tab ${session.settingsTab === 'capability' ? 'view-tab-active' : ''}`}
         >
           Xray
         </button>
         <button
           onClick={() => updateSession({ settingsTab: 'connections' })}
-          className={`py-2.5 text-[10px] font-bold rounded-[1rem] transition-all tracking-[0.14em] uppercase ${session.settingsTab === 'connections' ? 'bg-[var(--bg-elevated)] text-[var(--primary-blue)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
+          className={`view-tab ${session.settingsTab === 'connections' ? 'view-tab-active' : ''}`}
         >
           Conns
         </button>
         <button 
           onClick={() => updateSession({ settingsTab: 'workspaces' })}
-          className={`py-2.5 text-[10px] font-bold rounded-[1rem] transition-all tracking-[0.14em] uppercase ${session.settingsTab === 'workspaces' ? 'bg-[var(--bg-elevated)] text-[var(--primary-blue)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
+          className={`view-tab ${session.settingsTab === 'workspaces' ? 'view-tab-active' : ''}`}
         >
           Teams
         </button>
@@ -861,7 +862,7 @@ const SettingsView: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center justify-between gap-3 rounded-[1rem] border border-[var(--card-border)] bg-[var(--surface-soft)] p-1.5">
+        <div className="flex items-center justify-between gap-3 rounded-[8px] border border-[var(--card-border)] bg-[var(--surface-soft)] p-1.5">
           <div className="flex items-center gap-2 px-2">
             <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--bg-elevated)] text-[var(--primary-blue)]">
               {session.theme === 'dark' ? <Sun size={13} /> : <Moon size={13} />}
@@ -882,7 +883,7 @@ const SettingsView: React.FC = () => {
               theme: session.theme === 'dark' ? 'light' : 'dark',
               themeSource: 'manual'
             })}
-            className="flex h-8 min-w-[92px] items-center justify-between rounded-full border border-[var(--card-border)] bg-[var(--bg-elevated)] px-2 text-[10px] font-bold text-[var(--text-primary)] transition-colors hover:border-[var(--border-active)] hover:bg-[var(--surface-soft-hover)]"
+            className="flex h-8 min-w-[92px] items-center justify-between rounded-[8px] border border-[var(--card-border)] bg-[var(--bg-elevated)] px-2 text-[10px] font-bold text-[var(--text-primary)] transition-colors hover:border-[var(--border-active)] hover:bg-[var(--surface-soft-hover)]"
           >
             <span className={`flex h-5 w-5 items-center justify-center rounded-full transition-colors ${
               session.theme === 'dark'
@@ -896,7 +897,7 @@ const SettingsView: React.FC = () => {
           <button
             type="button"
             onClick={() => setLocale(locale === 'ar' ? 'en' : 'ar')}
-            className="flex h-8 min-w-[92px] items-center justify-between rounded-full border border-[var(--card-border)] bg-[var(--bg-elevated)] px-2 text-[10px] font-bold text-[var(--text-primary)] transition-colors hover:border-[var(--border-active)] hover:bg-[var(--surface-soft-hover)]"
+            className="flex h-8 min-w-[92px] items-center justify-between rounded-[8px] border border-[var(--card-border)] bg-[var(--bg-elevated)] px-2 text-[10px] font-bold text-[var(--text-primary)] transition-colors hover:border-[var(--border-active)] hover:bg-[var(--surface-soft-hover)]"
             title="Language / اللغة"
           >
             <Languages size={12} className="text-[var(--primary-blue)]" />

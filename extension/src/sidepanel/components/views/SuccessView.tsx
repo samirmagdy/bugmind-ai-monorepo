@@ -7,14 +7,15 @@ const SuccessView: React.FC = () => {
   const { session, updateSession } = useBugMind();
 
   return (
-    <div className="py-12 text-center space-y-6 animate-in zoom-in-95 duration-500">
-      <div className="w-24 h-24 bg-[var(--status-success)]/14 rounded-[2rem] flex items-center justify-center mx-auto border border-[var(--status-success)]/20 text-[var(--status-success)] shadow-[var(--shadow-sm)]">
-        <CheckCircle size={56} />
+    <div className="py-8 text-center space-y-5 animate-in zoom-in-95 duration-500">
+      <div className="w-16 h-16 bg-[var(--status-success)]/14 rounded-[8px] flex items-center justify-center mx-auto border border-[var(--status-success)]/20 text-[var(--status-success)] shadow-[var(--shadow-sm)]">
+        <CheckCircle size={38} />
       </div>
       <div className="space-y-4">
         <div className="space-y-2">
-          <h2 className="text-lg font-bold text-[var(--text-main)]">Project Updated!</h2>
-          <p className="text-sm text-[var(--text-muted)] px-6">Your findings have been successfully logged as bug tickets in Jira.</p>
+          <p className="view-kicker">Published</p>
+          <h2 className="text-lg font-bold text-[var(--text-main)]">Project Updated</h2>
+          <p className="text-xs text-[var(--text-muted)] px-6">Your findings have been logged as Jira tickets.</p>
         </div>
 
         {session.createdIssues && session.createdIssues.length > 0 && (
@@ -36,7 +37,7 @@ const SuccessView: React.FC = () => {
                     </StatusBadge>
                     <span className="text-xs font-bold text-[var(--text-main)]">{issue.key}</span>
                   </div>
-                  <div className="p-2 bg-[var(--status-info)]/10 rounded-full text-[var(--status-info)] opacity-0 group-hover:opacity-100 transition-all">
+                  <div className="p-2 bg-[var(--status-info)]/10 rounded-[8px] text-[var(--status-info)] opacity-0 group-hover:opacity-100 transition-all">
                     <ExternalLink size={14} />
                   </div>
                 </a>
@@ -66,7 +67,7 @@ const SuccessView: React.FC = () => {
         }}
         variant="secondary"
         tone="neutral"
-        className="py-4 rounded-[1.4rem] font-bold"
+        className="py-4 rounded-[8px] font-bold"
       >
         Find Next Issue
       </ActionButton>

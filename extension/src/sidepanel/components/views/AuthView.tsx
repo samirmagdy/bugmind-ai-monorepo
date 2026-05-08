@@ -95,13 +95,14 @@ const AuthView: React.FC = () => {
 
   return (
     <div className="flex flex-col h-full animate-in fade-in duration-700">
-      <div className="flex-1 flex flex-col justify-center px-4 py-8">
-        <div className="space-y-2 mb-6 text-center">
-          <h1 className="text-3xl font-bold text-[var(--text-primary)] tracking-tight">{title}</h1>
-          <p className="text-[var(--text-secondary)] text-sm">{subtitle}</p>
+      <div className="flex-1 flex flex-col justify-center px-4 py-6">
+        <div className="space-y-2 mb-5 text-center">
+          <p className="view-kicker">Account</p>
+          <h1 className="text-[22px] font-bold text-[var(--text-primary)] tracking-normal">{title}</h1>
+          <p className="text-[var(--text-secondary)] text-xs">{subtitle}</p>
         </div>
 
-        <SurfaceCard className="p-6 relative overflow-hidden">
+        <SurfaceCard className="p-5 relative overflow-hidden">
           <div className="absolute top-0 left-0 w-full h-1 bg-[var(--primary-gradient)]" />
 
           {(isLogin || isRegister) && (
@@ -129,7 +130,7 @@ const AuthView: React.FC = () => {
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-2xl pl-12 pr-4 py-3 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)] focus:ring-4 focus:ring-[var(--primary-blue)]/5 transition-all"
+                  className="form-input pl-12 pr-4 py-3 text-sm"
                   placeholder="name@company.com"
                   required
                 />
@@ -166,7 +167,7 @@ const AuthView: React.FC = () => {
                     type="password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-2xl pl-12 pr-4 py-3 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)] focus:ring-4 focus:ring-[var(--primary-blue)]/5 transition-all"
+                    className="form-input pl-12 pr-4 py-3 text-sm"
                     placeholder="••••••••••••"
                     required
                   />
@@ -186,7 +187,7 @@ const AuthView: React.FC = () => {
                     inputMode="numeric"
                     value={resetCode}
                     onChange={(e) => setResetCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                    className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-2xl pl-12 pr-4 py-3 text-sm tracking-[0.25em] text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)] focus:ring-4 focus:ring-[var(--primary-blue)]/5 transition-all"
+                    className="form-input pl-12 pr-4 py-3 text-sm tracking-[0.25em]"
                     placeholder="123456"
                     required
                   />
@@ -206,7 +207,7 @@ const AuthView: React.FC = () => {
                       type="password"
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}
-                      className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-2xl pl-12 pr-4 py-3 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)] focus:ring-4 focus:ring-[var(--primary-blue)]/5 transition-all"
+                      className="form-input pl-12 pr-4 py-3 text-sm"
                       placeholder="••••••••••••"
                       required
                     />

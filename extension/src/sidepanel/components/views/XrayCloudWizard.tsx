@@ -76,24 +76,23 @@ export const XrayCloudWizard: React.FC = () => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--bg-overlay)] backdrop-blur-[12px] p-4 animate-in fade-in duration-200">
       <div className="w-full max-w-sm max-h-full overflow-y-auto">
-        <SurfaceCard className="relative overflow-hidden flex flex-col pointer-events-auto shadow-2xl">
-          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 to-purple-500" />
-          
+        <SurfaceCard className="relative overflow-hidden flex flex-col pointer-events-auto">
           <div className="flex items-center justify-between p-4 border-b border-[var(--border-main)]">
             <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-500 border border-blue-500/20">
+              <div className="w-8 h-8 rounded-[8px] bg-[var(--surface-accent-strong)] flex items-center justify-center text-[var(--primary-blue)] border border-[var(--border-soft)]">
                 <Cloud size={16} />
               </div>
               <div>
                 <h3 className="text-sm font-bold text-[var(--text-main)] leading-tight">Xray Cloud Setup</h3>
-                <p className="text-[10px] text-[var(--text-muted)] font-medium">Configure API Credentials</p>
+                <p className="view-kicker mt-0.5">Configure API Credentials</p>
               </div>
             </div>
             <button
               onClick={() => updateSession({ showXrayCloudWizard: false, xrayCloudWizardMode: undefined })}
-              className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-input)] rounded-lg transition-colors"
+              className="icon-button"
+              aria-label="Close Xray Cloud setup"
             >
               <X size={16} />
             </button>
@@ -114,7 +113,7 @@ export const XrayCloudWizard: React.FC = () => {
                     setClientId(e.target.value);
                     setTestSuccess(null);
                   }}
-                  className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-3 py-2 text-xs outline-none focus:border-blue-500/30 focus:ring-4 focus:ring-blue-500/10 transition-all font-mono"
+                  className="form-input px-3 py-2 text-xs font-mono"
                   placeholder="e.g. 12345678ABCD..."
                 />
               </div>
@@ -130,21 +129,21 @@ export const XrayCloudWizard: React.FC = () => {
                     setClientSecret(e.target.value);
                     setTestSuccess(null);
                   }}
-                  className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-xl px-3 py-2 text-xs outline-none focus:border-blue-500/30 focus:ring-4 focus:ring-blue-500/10 transition-all font-mono"
+                  className="form-input px-3 py-2 text-xs font-mono"
                   placeholder="••••••••••••••••"
                 />
               </div>
             </div>
 
             {errorMsg && (
-              <div className="flex items-start gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-500 text-xs">
+              <div className="flex items-start gap-2 p-3 bg-[var(--error-bg)] border border-[var(--error)]/20 rounded-[8px] text-[var(--error)] text-xs">
                 <AlertTriangle size={14} className="shrink-0 mt-0.5" />
                 <span>{errorMsg}</span>
               </div>
             )}
             
             {testSuccess && (
-              <div className="flex items-center gap-2 p-3 bg-green-500/10 border border-green-500/20 rounded-xl text-green-500 text-xs font-medium">
+              <div className="flex items-center gap-2 p-3 bg-[var(--success-bg)] border border-[var(--success)]/20 rounded-[8px] text-[var(--success)] text-xs font-medium">
                 <CheckCircle size={14} />
                 Connection verified successfully.
               </div>

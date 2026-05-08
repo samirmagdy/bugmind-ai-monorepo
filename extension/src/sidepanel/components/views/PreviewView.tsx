@@ -207,24 +207,24 @@ const PreviewView: React.FC = () => {
   const canGoNext = bugIndex !== null && bugIndex < totalBugs - 1;
 
   return (
-    <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500 pb-40">
+    <div className="view-shell animate-in fade-in slide-in-from-right-4 duration-500 pb-40">
       {/* Header */}
-      <SurfaceCard className="flex items-center justify-between px-4 py-3.5">
+      <SurfaceCard className="view-header">
         <button 
           onClick={() => returnToFindings()}
-          className="flex items-center gap-2 rounded-full border border-[var(--card-border)] bg-[var(--surface-soft)] px-4 py-2 text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors group"
+          className="flex items-center gap-2 rounded-[8px] border border-[var(--card-border)] bg-[var(--surface-soft)] px-3 py-2 text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors group"
         >
           <ArrowLeft size={16} className="group-hover:-translate-x-1 transition-transform" />
           <span className="text-[10px] font-black uppercase tracking-widest">Back to Findings</span>
         </button>
         <div className="flex items-center gap-2">
           {totalBugs > 1 && (
-            <div className="flex items-center gap-1 rounded-full border border-[var(--card-border)] bg-[var(--surface-soft)] p-1">
+            <div className="flex items-center gap-1 rounded-[8px] border border-[var(--card-border)] bg-[var(--surface-soft)] p-1">
               <button
                 type="button"
                 onClick={() => bugIndex !== null && preparePreviewBug(bugIndex - 1)}
                 disabled={!canGoPrevious}
-                className="flex h-7 w-7 items-center justify-center rounded-full text-[var(--text-muted)] hover:text-[var(--text-main)] disabled:opacity-35 disabled:cursor-not-allowed"
+                className="flex h-7 w-7 items-center justify-center rounded-[8px] text-[var(--text-muted)] hover:text-[var(--text-main)] disabled:opacity-35 disabled:cursor-not-allowed"
                 aria-label="Preview previous bug"
               >
                 <ChevronLeft size={14} />
@@ -236,22 +236,23 @@ const PreviewView: React.FC = () => {
                 type="button"
                 onClick={() => bugIndex !== null && preparePreviewBug(bugIndex + 1)}
                 disabled={!canGoNext}
-                className="flex h-7 w-7 items-center justify-center rounded-full text-[var(--text-muted)] hover:text-[var(--text-main)] disabled:opacity-35 disabled:cursor-not-allowed"
+                className="flex h-7 w-7 items-center justify-center rounded-[8px] text-[var(--text-muted)] hover:text-[var(--text-main)] disabled:opacity-35 disabled:cursor-not-allowed"
                 aria-label="Preview next bug"
               >
                 <ChevronRight size={14} />
               </button>
             </div>
           )}
-          <div className="flex items-center gap-2 bg-[var(--surface-soft)] border border-[var(--card-border)] px-3 py-1.5 rounded-full">
+          <div className="flex items-center gap-2 bg-[var(--surface-soft)] border border-[var(--card-border)] px-3 py-1.5 rounded-[8px]">
             <div className={`w-2 h-2 rounded-full ${isValid ? 'bg-[var(--status-success)]' : 'bg-[var(--status-warning)] animate-pulse'}`}></div>
             <span className="text-[9px] font-black uppercase tracking-widest text-[var(--text-muted)]">Jira Preview</span>
           </div>
         </div>
       </SurfaceCard>
 
-      <div className="space-y-4">
-        <h2 className="text-lg font-black text-[var(--text-main)] tracking-tight">Jira Preview</h2>
+      <div className="space-y-2">
+        <p className="view-kicker">Review</p>
+        <h2 className="view-title">Jira Preview</h2>
         <p className="text-[11px] text-[var(--text-muted)] leading-relaxed">
           This is exactly how {totalBugs > 1 ? 'this bug' : 'your bug'} will look in <span className="font-bold text-[var(--status-info)]">Jira {session.issueData?.key.split('-')[0]}</span>. 
           Use the <span className="font-bold">Edit Manually</span> button below to change individual fields.
@@ -260,7 +261,7 @@ const PreviewView: React.FC = () => {
 
       {/* Validation Panel */}
       {!isValid && (
-        <StatusPanel icon={AlertTriangle} title="Mandatory Fields Missing" tone="danger" className="rounded-[1.5rem]">
+        <StatusPanel icon={AlertTriangle} title="Mandatory Fields Missing" tone="danger">
           <ul className="space-y-1">
             {session.validationErrors.map((err, i) => (
               <li key={i} className="text-[11px] text-[var(--status-danger)] font-medium">• {err}</li>
@@ -270,7 +271,7 @@ const PreviewView: React.FC = () => {
       )}
 
       {/* Duplicate Detection Panel */}
-      <SurfaceCard className="space-y-3 rounded-[1.5rem] p-5">
+      <SurfaceCard className="space-y-3 p-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Search size={14} className="text-[var(--text-muted)]" />
@@ -281,7 +282,7 @@ const PreviewView: React.FC = () => {
           <button
             onClick={() => bugIndex !== null && checkDuplicates(bugIndex)}
             disabled={session.duplicateCheckLoading}
-            className="flex items-center gap-1.5 rounded-full border border-[var(--card-border)] bg-[var(--surface-soft)] px-3 py-1.5 text-[10px] font-bold text-[var(--status-info)] hover:opacity-80 transition-opacity disabled:opacity-40"
+            className="flex items-center gap-1.5 rounded-[8px] border border-[var(--card-border)] bg-[var(--surface-soft)] px-3 py-1.5 text-[10px] font-bold text-[var(--status-info)] hover:opacity-80 transition-opacity disabled:opacity-40"
           >
             {session.duplicateCheckLoading ? (
               <><Loader2 size={12} className="animate-spin" /> Checking...</>
@@ -292,7 +293,7 @@ const PreviewView: React.FC = () => {
         </div>
 
         {session.duplicateCheckFailed && (
-          <div className="flex items-center gap-2 rounded-[0.9rem] bg-[var(--status-warning)]/8 border border-[var(--status-warning)]/20 px-3 py-2">
+          <div className="flex items-center gap-2 rounded-[8px] bg-[var(--status-warning)]/8 border border-[var(--status-warning)]/20 px-3 py-2">
             <Info size={12} className="text-[var(--status-warning)] shrink-0" />
             <span className="text-[10px] text-[var(--text-muted)]">
               {session.duplicateCheckFailureReason || 'Duplicate check unavailable. You can still publish.'}
@@ -322,7 +323,7 @@ const PreviewView: React.FC = () => {
                 : 'text-[var(--text-muted)]';
 
               return (
-                <div key={match.issue_key} className={`rounded-[1rem] border ${borderColor} ${bgColor} p-3 space-y-2`}>
+                <div key={match.issue_key} className={`rounded-[8px] border ${borderColor} ${bgColor} p-3 space-y-2`}>
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
                       <span className={`text-[9px] font-black uppercase tracking-wider ${confidenceColor}`}>
@@ -351,7 +352,7 @@ const PreviewView: React.FC = () => {
                         href={match.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center gap-1 rounded-full border border-[var(--card-border)] bg-[var(--surface-soft)] px-2.5 py-1 text-[9px] font-bold text-[var(--status-info)] hover:opacity-80"
+                        className="flex items-center gap-1 rounded-[8px] border border-[var(--card-border)] bg-[var(--surface-soft)] px-2.5 py-1 text-[9px] font-bold text-[var(--status-info)] hover:opacity-80"
                       >
                         <ExternalLink size={10} /> Open in Jira
                       </a>
@@ -371,7 +372,7 @@ const PreviewView: React.FC = () => {
                           updateSession({ error: result?.error || 'Could not link issues.' });
                         }
                       }}
-                      className="flex items-center gap-1 rounded-full border border-[var(--card-border)] bg-[var(--surface-soft)] px-2.5 py-1 text-[9px] font-bold text-[var(--text-muted)] hover:text-[var(--status-info)] hover:opacity-80"
+                      className="flex items-center gap-1 rounded-[8px] border border-[var(--card-border)] bg-[var(--surface-soft)] px-2.5 py-1 text-[9px] font-bold text-[var(--text-muted)] hover:text-[var(--status-info)] hover:opacity-80"
                     >
                       <Link2 size={10} /> Link Instead
                     </button>
@@ -390,9 +391,7 @@ const PreviewView: React.FC = () => {
       </SurfaceCard>
 
       {/* High Fidelity Preview Card */}
-      <SurfaceCard className="space-y-6 rounded-[1.5rem] p-7 pb-16 shadow-[var(--shadow-card)] relative overflow-hidden">
-        <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-transparent via-[var(--status-info)]/30 to-transparent"></div>
-        
+      <SurfaceCard className="space-y-5 p-5 pb-14 relative overflow-hidden">
         {/* Issue Type Header */}
         <div className="flex items-center gap-3">
           {session.selectedIssueType?.iconUrl && (
@@ -404,22 +403,22 @@ const PreviewView: React.FC = () => {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {bug.category && (
-            <div className="rounded-full border border-[var(--card-border)] bg-[var(--surface-soft)] px-3 py-1 text-[9px] font-black uppercase tracking-wider text-[var(--text-muted)]">
+            <div className="rounded-[8px] border border-[var(--card-border)] bg-[var(--surface-soft)] px-3 py-1 text-[9px] font-black uppercase tracking-wider text-[var(--text-muted)]">
               {bug.category}
             </div>
           )}
-          <div className="rounded-full border border-[var(--card-border)] bg-[var(--surface-soft)] px-3 py-1 text-[9px] font-black uppercase tracking-wider text-[var(--text-muted)]">
+          <div className="rounded-[8px] border border-[var(--card-border)] bg-[var(--surface-soft)] px-3 py-1 text-[9px] font-black uppercase tracking-wider text-[var(--text-muted)]">
             {bug.severity} severity
           </div>
           {typeof bug.confidence === 'number' && (
-            <div className="rounded-full border border-[var(--card-border)] bg-[var(--surface-soft)] px-3 py-1 text-[9px] font-black uppercase tracking-wider text-[var(--text-muted)]">
+            <div className="rounded-[8px] border border-[var(--card-border)] bg-[var(--surface-soft)] px-3 py-1 text-[9px] font-black uppercase tracking-wider text-[var(--text-muted)]">
               {bug.confidence}% confidence
             </div>
           )}
         </div>
 
         {/* Summary */}
-        <h1 className="text-xl font-black text-[var(--text-main)] leading-tight tracking-tight">
+        <h1 className="text-lg font-black text-[var(--text-main)] leading-tight tracking-normal">
           {resolvedSummary}
         </h1>
 
@@ -431,7 +430,7 @@ const PreviewView: React.FC = () => {
             <AlignLeft size={12} />
             <span className="text-[9px] font-black uppercase tracking-[0.2em]">Core Description</span>
           </div>
-          <div className="max-w-none bg-[var(--bg-app)]/45 rounded-[1.5rem] p-4 border border-dashed border-[var(--border-main)]/50">
+          <div className="max-w-none bg-[var(--bg-app)]/45 rounded-[8px] p-4 border border-dashed border-[var(--border-main)]/50">
             <JiraMarkdown content={previewDescription} />
           </div>
         </div>
@@ -442,7 +441,7 @@ const PreviewView: React.FC = () => {
         <div className="grid grid-cols-1 gap-6 mb-8">
           <div className="space-y-2">
             <span className="text-[9px] font-black uppercase tracking-[0.2em] text-[var(--status-success)]/80">Steps to Reproduce</span>
-            <div className="bg-[var(--bg-app)]/50 rounded-[1.5rem] p-4 border border-[var(--border-main)]/50">
+            <div className="bg-[var(--bg-app)]/50 rounded-[8px] p-4 border border-[var(--border-main)]/50">
               <JiraMarkdown content={previewSteps} />
             </div>
           </div>
@@ -450,13 +449,13 @@ const PreviewView: React.FC = () => {
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <span className="text-[9px] font-black uppercase tracking-[0.2em] text-[var(--status-info)]/80">Expected Result</span>
-              <div className="bg-[var(--bg-app)]/50 rounded-[1.5rem] p-4 border border-[var(--border-main)]/50 h-full">
+              <div className="bg-[var(--bg-app)]/50 rounded-[8px] p-4 border border-[var(--border-main)]/50 h-full">
                 <JiraMarkdown content={bug.expected_result} />
               </div>
             </div>
             <div className="space-y-2">
               <span className="text-[9px] font-black uppercase tracking-[0.2em] text-[var(--status-danger)]/80">Actual Result</span>
-              <div className="bg-[var(--bg-app)]/50 rounded-[1.5rem] p-4 border border-[var(--border-main)]/50 h-full">
+              <div className="bg-[var(--bg-app)]/50 rounded-[8px] p-4 border border-[var(--border-main)]/50 h-full">
                 <JiraMarkdown content={bug.actual_result} />
               </div>
             </div>
@@ -470,7 +469,7 @@ const PreviewView: React.FC = () => {
               {(bug.acceptance_criteria_refs && bug.acceptance_criteria_refs.length > 0) && (
                 <div className="space-y-2">
                   <span className="text-[9px] font-black uppercase tracking-[0.2em] text-[var(--text-muted)]">Acceptance Criteria References</span>
-                  <div className="bg-[var(--bg-app)]/50 rounded-[1.5rem] p-4 border border-[var(--border-main)]/30 text-[11px] text-[var(--text-secondary)] space-y-1">
+                  <div className="bg-[var(--bg-app)]/50 rounded-[8px] p-4 border border-[var(--border-main)]/30 text-[11px] text-[var(--text-secondary)] space-y-1">
                     {bug.acceptance_criteria_refs.map((reference, index) => <div key={`${reference}-${index}`}>• {reference}</div>)}
                   </div>
                 </div>
@@ -478,7 +477,7 @@ const PreviewView: React.FC = () => {
               {(bug.evidence && bug.evidence.length > 0) && (
                 <div className="space-y-2">
                   <span className="text-[9px] font-black uppercase tracking-[0.2em] text-[var(--text-muted)]">Supporting Evidence</span>
-                  <div className="bg-[var(--bg-app)]/50 rounded-[1.5rem] p-4 border border-[var(--border-main)]/30 text-[11px] text-[var(--text-secondary)] space-y-1">
+                  <div className="bg-[var(--bg-app)]/50 rounded-[8px] p-4 border border-[var(--border-main)]/30 text-[11px] text-[var(--text-secondary)] space-y-1">
                     {bug.evidence.map((item, index) => <div key={`${item}-${index}`}>• {item}</div>)}
                   </div>
                 </div>
@@ -509,7 +508,7 @@ const PreviewView: React.FC = () => {
                 );
 
                 return (
-                  <div key={key} className="flex flex-col gap-1 bg-[var(--bg-app)]/50 p-3 rounded-[1.25rem] border border-[var(--border-main)]/30">
+                  <div key={key} className="flex flex-col gap-1 bg-[var(--bg-app)]/50 p-3 rounded-[8px] border border-[var(--border-main)]/30">
                     <span className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-wider">{field?.name || key}</span>
                     <span className="text-[10px] font-bold text-[var(--status-info)] truncate">{displayVal}</span>
                   </div>
@@ -527,7 +526,7 @@ const PreviewView: React.FC = () => {
             onClick={() => returnToFindings(bugIndex)}
             variant="secondary"
             tone="neutral"
-            className="flex-1 h-12 rounded-[1.35rem] text-[10px]"
+            className="flex-1 h-12 rounded-[8px] text-[10px]"
           >
             Edit Manually
           </ActionButton>
@@ -535,7 +534,7 @@ const PreviewView: React.FC = () => {
             onClick={() => submitBugs(bugIndex!)}
             disabled={!isValid || session.loading}
             variant="primary"
-            className="flex-[2] h-12 rounded-[1.35rem] text-[10px]"
+            className="flex-[2] h-12 rounded-[8px] text-[10px]"
           >
             {session.loading ? (
               <span className="flex items-center gap-2">
@@ -556,7 +555,7 @@ const PreviewView: React.FC = () => {
               onClick={() => submitBugs()}
               disabled={session.loading}
               variant="secondary"
-              className="w-full h-11 rounded-[1.35rem] text-[10px]"
+              className="w-full h-11 rounded-[8px] text-[10px]"
             >
               Publish All {totalBugs} Bugs
             </ActionButton>

@@ -6,6 +6,7 @@ import {
   Compass, ArrowRight, Check, Layout, AlertTriangle, BrainCircuit, Paperclip, X, ClipboardList,
   Trash2, Copy, ArrowUp, ArrowDown, Square, CheckSquare, FileText, RotateCcw, RotateCw, History, HelpCircle, Download, Upload
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { BugReport, JiraField, JiraFieldOption, JiraUser, SupportingArtifact, TestCase, ManualBugInput, AnalysisCoverageItem, MainWorkflow, TEST_CATEGORIES } from '../../types';
 import AutoResizeTextarea from '../common/AutoResizeTextarea';
 import { ActionButton, SurfaceCard, StatusBadge, StatusPanel } from '../common/DesignSystem';
@@ -251,6 +252,49 @@ const MainView: React.FC = () => {
       : recommendedWorkflow === 'analysis'
         ? 'Recommended: Run AI Gap Analysis to uncover missing scenarios'
         : 'Recommended: I Found a Bug for quick reporting';
+  const workflowOptions: Array<{
+    id: Exclude<MainWorkflow, 'home'>;
+    title: string;
+    description: string;
+    detail: string;
+    icon: LucideIcon;
+    badge?: string;
+    tone: 'manual' | 'analysis' | 'tests' | 'bulk';
+  }> = [
+    {
+      id: 'tests',
+      title: 'Generate Test Cases',
+      description: 'Create Xray-ready tests from story context.',
+      detail: 'Best when acceptance criteria are clear enough to validate.',
+      icon: Check,
+      tone: 'tests'
+    },
+    {
+      id: 'analysis',
+      title: 'AI Gap Analysis',
+      description: 'Find missing requirements, edge cases, and risks.',
+      detail: 'Best before refinement or when the story feels incomplete.',
+      icon: Zap,
+      tone: 'analysis'
+    },
+    {
+      id: 'manual',
+      title: 'I Found a Bug',
+      description: 'Turn notes, logs, or repro steps into Jira-ready bugs.',
+      detail: 'Best when you already know the defect you want to report.',
+      icon: Bug,
+      tone: 'manual'
+    },
+    {
+      id: 'bulk',
+      title: 'Bulk Epic Workflows',
+      description: 'Audit or generate tests across child stories.',
+      detail: 'Best for epic-level QA planning and BRD comparisons.',
+      icon: Layout,
+      badge: 'Beta',
+      tone: 'bulk'
+    }
+  ];
 
   const updateWorkWithHistory = (label: string, updates: Partial<typeof session>) => {
     recordHistory(label);
@@ -954,16 +998,18 @@ const MainView: React.FC = () => {
               <div className="space-y-4">
                 {session.mainWorkflow === 'home' ? (
                   <SurfaceCard className="space-y-0 cursor-default hover:border-[var(--card-border)] animate-in fade-in slide-in-from-bottom-4 duration-700 overflow-hidden">
-                    <div className="space-y-3 pb-5">
+                    <div className="space-y-3 pb-4">
                       <div className="flex items-center justify-between gap-3">
                         <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--text-muted)]">Choose Workflow</div>
                         <StatusBadge tone="info" className="opacity-80">
                           {session.issueData ? `${issueTypeLabel} Detected` : 'Context Needed'}
                         </StatusBadge>
                       </div>
-                      <h3 className="workflow-card-title">Choose what you want to do next</h3>
-                      <p className="workflow-card-subtitle">Your Jira issue context stays available while you work.</p>
-                      <div className={`rounded-[1rem] border px-3.5 py-3 text-[11px] font-medium leading-relaxed ${
+                      <div>
+                        <h3 className="workflow-card-title">Start from the next best action</h3>
+                        <p className="workflow-card-subtitle">The recommendation changes with the Jira issue context.</p>
+                      </div>
+                      <div className={`rounded-[8px] border px-3.5 py-3 text-[11px] font-medium leading-relaxed ${
                         session.issueData
                           ? 'border-[var(--border-soft)] bg-[var(--surface-soft)] text-[var(--text-secondary)]'
                           : 'border-[var(--status-warning)]/20 bg-[var(--warning-bg)] text-[var(--text-secondary)]'
@@ -981,120 +1027,40 @@ const MainView: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="border-t border-[var(--border-soft)]">
-                      <div className={`group relative flex items-center justify-between gap-4 rounded-[1.1rem] py-5 px-1 transition-colors ${
-                        recommendedWorkflow === 'manual' ? 'bg-[var(--surface-accent)]/45' : 'hover:bg-[var(--surface-soft)]/70'
-                      }`}>
-                        <button type="button" onClick={() => setWorkflow('manual')} className="absolute inset-0" aria-label="I Found a Bug" />
-                        <div className="flex items-center gap-3">
-                          <div className={`w-12 h-12 rounded-[1.1rem] flex items-center justify-center shrink-0 ${
-                            recommendedWorkflow === 'manual'
-                              ? 'bg-[var(--primary-gradient)] text-white'
-                              : 'bg-[var(--surface-accent)] text-[var(--primary-purple)]'
-                          }`}>
-                            <Bug size={20} />
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <h4 className="workflow-card-title text-[15px]">I Found a Bug</h4>
-                              <StatusBadge className={recommendedWorkflow === 'manual' ? '' : 'opacity-80'}>
-                                {recommendedWorkflow === 'manual' ? 'Recommended' : 'Available'}
-                              </StatusBadge>
-                            </div>
-                            <p className="workflow-card-subtitle">Convert plain English notes into Jira-ready bug reports.</p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <span className="rounded-full border border-[var(--card-border)] bg-[var(--bg-elevated)] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--text-primary)]">
-                            Start
-                          </span>
-                          <ArrowRight size={16} className="text-[var(--text-muted)] transition-transform group-hover:translate-x-0.5" />
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="border-t border-[var(--border-soft)]">
-                      <div className={`group relative flex items-center justify-between gap-4 rounded-[1.1rem] py-5 px-1 transition-colors ${
-                        recommendedWorkflow === 'analysis' ? 'bg-[var(--surface-accent-strong)]/55' : 'hover:bg-[var(--surface-soft)]/70'
-                      }`}>
-                        <button type="button" onClick={() => setWorkflow('analysis')} className="absolute inset-0" aria-label="AI Gap Analysis" />
-                        <div className="flex items-center gap-3">
-                          <div className={`w-12 h-12 rounded-[1.1rem] flex items-center justify-center shrink-0 ${
-                            recommendedWorkflow === 'analysis'
-                              ? 'bg-[var(--primary-blue)] text-white'
-                              : 'bg-[var(--surface-accent-strong)] text-[var(--primary-blue)]'
-                          }`}>
-                            <Zap size={20} />
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <h4 className="workflow-card-title text-[15px]">AI Gap Analysis</h4>
-                              {recommendedWorkflow === 'analysis' && <StatusBadge tone="info">Recommended</StatusBadge>}
-                            </div>
-                            <p className="workflow-card-subtitle">Find missing requirements, edge cases, risks, and unclear acceptance criteria.</p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <span className="rounded-full border border-[var(--card-border)] bg-[var(--bg-elevated)] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--text-primary)]">
-                            Start
-                          </span>
-                          <ArrowRight size={16} className="text-[var(--text-muted)] transition-transform group-hover:translate-x-0.5" />
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="border-t border-[var(--border-soft)]">
-                      <div className={`group relative flex items-center justify-between gap-4 rounded-[1.1rem] py-5 px-1 transition-colors ${
-                        recommendedWorkflow === 'tests' ? 'bg-[var(--success-bg)]/70' : 'hover:bg-[var(--surface-soft)]/70'
-                      }`}>
-                        <button type="button" onClick={() => setWorkflow('tests')} className="absolute inset-0" aria-label="Generate Test Cases" />
-                        <div className="flex items-center gap-3">
-                          <div className={`w-12 h-12 rounded-[1.1rem] flex items-center justify-center shrink-0 ${
-                            recommendedWorkflow === 'tests'
-                              ? 'bg-[var(--status-success)] text-white'
-                              : 'bg-[var(--surface-soft)] text-[var(--status-success)]'
-                          }`}>
-                            <Check size={20} />
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <h4 className="workflow-card-title text-[15px]">Generate Test Cases</h4>
-                              {recommendedWorkflow === 'tests' && <StatusBadge tone="success">Recommended</StatusBadge>}
-                            </div>
-                            <p className="workflow-card-subtitle">Generate Xray-ready test cases linked to the current Jira issue.</p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <span className="rounded-full border border-[var(--card-border)] bg-[var(--bg-elevated)] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--text-primary)]">
-                            Start
-                          </span>
-                          <ArrowRight size={16} className="text-[var(--text-muted)] transition-transform group-hover:translate-x-0.5" />
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="border-t border-[var(--border-soft)]">
-                      <div className="group relative flex items-center justify-between gap-4 rounded-[1.1rem] py-5 px-1 transition-colors hover:bg-[var(--surface-soft)]/70">
-                        <button type="button" onClick={() => setWorkflow('bulk')} className="absolute inset-0" aria-label="Bulk Epic Workflows" />
-                        <div className="flex items-center gap-3">
-                          <div className="w-12 h-12 rounded-[1.1rem] flex items-center justify-center shrink-0 bg-[var(--surface-accent-strong)] text-[var(--primary-blue)]">
-                            <Layout size={20} />
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <h4 className="workflow-card-title text-[15px]">Bulk Epic Workflows</h4>
-                              <StatusBadge tone="info">Beta</StatusBadge>
-                            </div>
-                            <p className="workflow-card-subtitle">Fetch child stories, run cross-story audit, generate tests, or compare BRD coverage.</p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <span className="rounded-full border border-[var(--card-border)] bg-[var(--bg-elevated)] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--text-primary)]">
-                            Start
-                          </span>
-                          <ArrowRight size={16} className="text-[var(--text-muted)] transition-transform group-hover:translate-x-0.5" />
-                        </div>
-                      </div>
+                    <div className="space-y-2 border-t border-[var(--border-soft)] pt-3">
+                      {workflowOptions.map((option) => {
+                        const Icon = option.icon;
+                        const isRecommended = recommendedWorkflow === option.id;
+                        const badgeTone = option.id === 'tests' ? 'success' : option.id === 'bulk' ? 'info' : 'neutral';
+                        return (
+                          <button
+                            key={option.id}
+                            type="button"
+                            onClick={() => setWorkflow(option.id)}
+                            className={`workflow-choice workflow-choice-${option.tone} ${isRecommended ? 'workflow-choice-recommended' : ''}`}
+                          >
+                            <span className="workflow-choice-icon">
+                              <Icon size={18} />
+                            </span>
+                            <span className="min-w-0 flex-1 text-left">
+                              <span className="flex items-center gap-2">
+                                <span className="workflow-card-title text-[13px]">{option.title}</span>
+                                {(isRecommended || option.badge) && (
+                                  <StatusBadge tone={isRecommended ? badgeTone : 'info'}>
+                                    {isRecommended ? 'Recommended' : option.badge}
+                                  </StatusBadge>
+                                )}
+                              </span>
+                              <span className="workflow-card-subtitle block">{option.description}</span>
+                              <span className="mt-1 block text-[10px] leading-relaxed text-[var(--text-muted)]">{option.detail}</span>
+                            </span>
+                            <span className="workflow-choice-cta">
+                              Start
+                              <ArrowRight size={14} />
+                            </span>
+                          </button>
+                        );
+                      })}
                     </div>
                   </SurfaceCard>
                 ) : (
