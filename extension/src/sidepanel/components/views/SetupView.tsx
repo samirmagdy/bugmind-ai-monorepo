@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useBugMind } from '../../hooks/useBugMind';
 import { ExternalLink, ArrowLeft, RefreshCw, Globe, ShieldCheck, Lock, AtSign, Link, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { ActionButton, SurfaceCard } from '../common/DesignSystem';
+import { normalizeApiBase } from '../../utils/url';
 
 const SetupView: React.FC = () => {
   const { 
@@ -78,7 +79,10 @@ const SetupView: React.FC = () => {
       <SurfaceCard className="view-header">
         {hasConnections && (
           <button 
-            onClick={() => setGlobalView('main')}
+            onClick={() => {
+              setGlobalView('main');
+              updateSession({ view: 'main' });
+            }}
             className="icon-button"
             aria-label="Back to workspace"
           >
@@ -107,19 +111,20 @@ const SetupView: React.FC = () => {
               <div className="absolute inset-y-0 left-3 flex items-center text-[var(--text-muted)]">
                 <Link size={14} />
               </div>
-              <input 
-                id="setup-api-base"
-                type="url" 
-                value={apiBase} 
-                onChange={e => setApiBase(e.target.value)}
-                onBlur={e => {
-                  const val = e.target.value;
-                  chrome.storage.local.set({ 'bugmind_api_base': val.trim().replace(/\/+$/, '') });
-                }}
-                className="form-input pl-9 pr-4 py-2.5 text-sm"
-                placeholder="https://api.bugmind.ai/v1"
-                required
-              />
+                <input 
+                  id="setup-api-base"
+                  type="url" 
+                  value={apiBase} 
+                  onChange={e => setApiBase(e.target.value)}
+                  onBlur={e => {
+                    const val = normalizeApiBase(e.target.value);
+                    setApiBase(val);
+                    chrome.storage.local.set({ 'bugmind_api_base': val });
+                  }}
+                  className="form-input pl-9 pr-4 py-2.5 text-sm"
+                  placeholder="https://api.bugmind.ai/v1"
+                  required
+                />
             </div>
           </div>
         </SurfaceCard>
@@ -132,7 +137,7 @@ const SetupView: React.FC = () => {
               type="button"
               onClick={() => setPlatform('cloud')}
               variant={platform === 'cloud' ? 'primary' : 'secondary'}
-              className="py-3 text-xs"
+              className={`py-3 text-xs ${platform === 'cloud' ? 'ring-2 ring-[var(--primary-blue)] ring-offset-2' : ''}`}
             >
               Atlassian Cloud
             </ActionButton>
@@ -140,11 +145,16 @@ const SetupView: React.FC = () => {
               type="button"
               onClick={() => setPlatform('server')}
               variant={platform === 'server' ? 'primary' : 'secondary'}
-              className="py-3 text-xs"
+              className={`py-3 text-xs ${platform === 'server' ? 'ring-2 ring-[var(--primary-blue)] ring-offset-2' : ''}`}
             >
               Data Center
             </ActionButton>
           </div>
+          <p className="text-[10px] text-[var(--text-muted)] ml-1">
+            {platform === 'cloud'
+              ? 'Cloud instances use API tokens from id.atlassian.com'
+              : 'Server/DC instances use personal access tokens'}
+          </p>
         </div>
 
         {/* Credentials */}

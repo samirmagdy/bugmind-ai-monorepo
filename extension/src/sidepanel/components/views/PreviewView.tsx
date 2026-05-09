@@ -243,6 +243,11 @@ const PreviewView: React.FC = () => {
               </button>
             </div>
           )}
+          {totalBugs > 1 && bug && (
+            <div className="min-w-0 max-w-[140px] truncate text-[11px] font-medium text-[var(--text-primary)]" title={bug.summary}>
+              {bug.summary}
+            </div>
+          )}
           <div className="flex items-center gap-2 bg-[var(--surface-soft)] border border-[var(--card-border)] px-3 py-1.5 rounded-[8px]">
             <div className={`w-2 h-2 rounded-full ${isValid ? 'bg-[var(--status-success)]' : 'bg-[var(--status-warning)] animate-pulse'}`}></div>
             <span className="text-[9px] font-black uppercase tracking-widest text-[var(--text-muted)]">Jira Preview</span>

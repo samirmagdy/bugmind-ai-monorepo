@@ -411,7 +411,7 @@ export const WorkspaceDashboardView: React.FC = () => {
                 
                 <div className="flex items-center gap-2">
                   {canManageMembers && member.role !== 'owner' ? (
-                    <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="flex items-center gap-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                       <select 
                         value={member.role}
                         onChange={(e: React.ChangeEvent<HTMLSelectElement>) => changeRole(member.user_id, e.target.value)}

@@ -41,7 +41,7 @@
 
   --text-primary: #101828;
   --text-secondary: #425466;
-  --text-muted: #6b7a90;
+  --text-muted: #374151;
   --text-main: #101828;
   --text-soft: #526277;
 
@@ -260,15 +260,15 @@ body {
 .panel-actions {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 6px;
+  justify-content: space-between;
+  gap: 8px;
+  flex: 1;
   min-width: 0;
-  padding: 4px;
-  border-radius: 8px;
+  padding: 3px 6px;
+  border-radius: 10px;
   background: var(--panel-actions-bg);
   border: 1px solid var(--panel-actions-border);
   box-shadow: none;
-  overflow: hidden;
 }
 
 .panel-nav {
@@ -324,16 +324,20 @@ body {
 .panel-usage {
   display: flex;
   align-items: center;
+  flex-shrink: 0;
 }
 
-@media (max-width: 420px) {
+@media (max-width: 480px) {
   .panel-header {
-    align-items: flex-start;
+    align-items: stretch;
     flex-direction: column;
+    height: auto;
+    padding: 12px;
   }
 
   .panel-actions {
     width: 100%;
+    margin-top: 4px;
   }
 
   .panel-nav {
@@ -342,7 +346,7 @@ body {
 
   .panel-nav-button {
     flex: 1;
-    padding: 0 6px;
+    padding: 0 4px;
   }
 
   .panel-usage {

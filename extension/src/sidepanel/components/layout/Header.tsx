@@ -44,55 +44,57 @@ const Header: React.FC = () => {
             ))}
           </nav>
 
-          {usage && (
-            <div className="panel-usage">
-              <StatusBadge tone="success" className="bg-[var(--surface-soft)]">
-                {usage.remaining} left
-              </StatusBadge>
-            </div>
-          )}
-          
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={() => updateSession({ commandPaletteOpen: true })}
-              className="icon-action"
-              title="Search actions"
-              aria-label="Search actions"
-            >
-              <Search size={18} />
-            </button>
-            <button
-              type="button"
-              onClick={() => updateSession({
-                theme: session.theme === 'dark' ? 'light' : 'dark',
-                themeSource: 'manual'
-              })}
-              className="icon-action"
-              title={session.theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-              aria-label={session.theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-            >
-              {session.theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
-            </button>
-            <button 
-              type="button"
-              onClick={() => { fetchAISettings(); updateSession({ view: 'settings' }); }} 
-              className={`icon-action ${session.view === 'settings' ? 'icon-action-active' : ''}`}
-              title="Settings"
-              aria-label="Settings"
-            >
-              <Settings size={18} />
-            </button>
+          <div className="flex items-center gap-2 shrink-0">
+            {usage && (
+              <div className="panel-usage">
+                <StatusBadge tone="success" className="bg-[var(--surface-soft)]">
+                  {usage.remaining} left
+                </StatusBadge>
+              </div>
+            )}
             
-            <button 
-              type="button"
-              onClick={handleLogout} 
-              className="icon-action icon-action-danger"
-              title="Logout"
-              aria-label="Logout"
-            >
-              <LogOut size={18} />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => updateSession({ commandPaletteOpen: true })}
+                className="icon-action"
+                title="Search actions"
+                aria-label="Search actions"
+              >
+                <Search size={18} />
+              </button>
+              <button
+                type="button"
+                onClick={() => updateSession({
+                  theme: session.theme === 'dark' ? 'light' : 'dark',
+                  themeSource: 'manual'
+                })}
+                className="icon-action"
+                title={session.theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+                aria-label={session.theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              >
+                {session.theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+              </button>
+              <button 
+                type="button"
+                onClick={() => { fetchAISettings(); updateSession({ view: 'settings' }); }} 
+                className={`icon-action ${session.view === 'settings' ? 'icon-action-active' : ''}`}
+                title="Settings"
+                aria-label="Settings"
+              >
+                <Settings size={18} />
+              </button>
+              
+              <button 
+                type="button"
+                onClick={handleLogout} 
+                className="icon-action icon-action-danger"
+                title="Logout"
+                aria-label="Logout"
+              >
+                <LogOut size={18} />
+              </button>
+            </div>
           </div>
         </div>
       )}

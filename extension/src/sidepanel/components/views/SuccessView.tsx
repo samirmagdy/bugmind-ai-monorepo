@@ -69,7 +69,7 @@ const SuccessView: React.FC = () => {
         tone="neutral"
         className="py-4 rounded-[8px] font-bold"
       >
-        Find Next Issue
+        Return to Workspace
       </ActionButton>
     </div>
   );

@@ -229,6 +229,7 @@ export interface TabSession {
   bulkProgressMessage: string;
   bulkProgressPercent: number;
   bulkBrdText: string;
+  bulkBrdFileName?: string;
   previewBugIndex: number | null;
   validationErrors: string[];
   resolvedPayload: ResolvedPayload | null;
@@ -693,6 +694,7 @@ export const INITIAL_SESSION: TabSession = {
   bulkProgressMessage: '',
   bulkProgressPercent: 0,
   bulkBrdText: '',
+  bulkBrdFileName: '',
   previewBugIndex: null,
   validationErrors: [],
   resolvedPayload: null,

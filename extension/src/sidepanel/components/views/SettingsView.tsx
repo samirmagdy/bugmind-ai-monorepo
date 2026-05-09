@@ -6,6 +6,7 @@ import { ActionButton, StatusBadge, StatusPanel, SurfaceCard } from '../common/D
 import LuxurySearchableSelect, { SelectOption, SelectValue } from '../common/LuxurySearchableSelect';
 import { apiRequest, readJsonResponse, throwApiErrorResponse } from '../../services/api';
 import { useI18n } from '../../i18n';
+import { normalizeApiBase } from '../../utils/url';
 import {
   buildAdminDiagnosticReport,
   buildCapabilityFeatures,
@@ -75,16 +76,6 @@ function isSelectOption(value: SelectValue | SelectValue[]): value is SelectOpti
 
 function isConnectionAuthType(value: unknown): value is 'cloud' | 'server' {
   return value === 'cloud' || value === 'server';
-}
-
-function normalizeApiBaseInput(value: string): string {
-  let trimmed = value.trim().replace(/\/+$/, '');
-  trimmed = trimmed.replace(/\/(auth|jira|ai|settings|stripe)(?:\/.*)?$/i, '');
-  if (trimmed.endsWith('/api')) return `${trimmed}/v1`;
-  if (!trimmed.endsWith('/api/v1')) {
-    trimmed = trimmed.replace(/\/api\/v1\/.*$/i, '/api/v1');
-  }
-  return trimmed;
 }
 
 const FieldRow: React.FC<{
@@ -163,10 +154,11 @@ const FieldRow: React.FC<{
           onClick={(e) => { e.stopPropagation(); onToggleVisibility(); }}
           disabled={field.required}
           className={`relative w-9 h-5 rounded-full transition-all duration-300 border ${
-            isVisible 
-              ? 'bg-[var(--status-info)] border-[var(--status-info)]' 
+            isVisible
+              ? 'bg-[var(--status-info)] border-[var(--status-info)]'
               : 'bg-[var(--bg-input)] border-[var(--border-main)] hover:border-[var(--text-muted)]/30'
           } ${field.required ? 'opacity-20 cursor-not-allowed' : 'cursor-pointer active:scale-90'}`}
+          title={field.required ? 'Required field — always included' : 'Show/hide this field in AI extraction'}
         >
           <div className={`absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full transition-all duration-300 ${
             isVisible ? 'left-[21px] bg-[var(--bg-elevated)]' : 'left-[4px] bg-[var(--text-muted)] opacity-40'
@@ -916,16 +908,18 @@ const SettingsView: React.FC = () => {
             <div className="space-y-2">
               <label className="context-label uppercase tracking-wider block ml-1">BugMind API Endpoint</label>
               <input 
+                id="setup-api-base"
                 type="url" 
                 value={apiBase} 
                 onChange={e => setApiBase(e.target.value)}
                 onBlur={e => {
-                  const val = normalizeApiBaseInput(e.target.value);
+                  const val = normalizeApiBase(e.target.value);
                   setApiBase(val);
                   chrome.storage.local.set({ 'bugmind_api_base': val });
                 }}
-                className="w-full bg-[var(--bg-input)] border border-[var(--border-main)] rounded-2xl px-4 py-3 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)] focus:ring-4 focus:ring-[var(--primary-blue)]/10 transition-all"
-                placeholder="https://api.bugmind.ai/api/v1"
+                className="form-input pl-9 pr-4 py-2.5 text-sm"
+                placeholder="https://api.bugmind.ai/v1"
+                required
               />
             </div>
           </SurfaceCard>

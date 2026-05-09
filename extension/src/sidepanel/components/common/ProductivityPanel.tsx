@@ -12,6 +12,7 @@ import {
 import { MainWorkflow, WorkspaceTemplate } from '../../types';
 
 const INTERNAL_STATES = ['STALE_PAGE', 'NOT_A_JIRA_PAGE', 'UNSUPPORTED_ISSUE_TYPE', 'MISSING_ISSUE_TYPE', 'NO_ISSUE_TYPES_FOUND'];
+const NOISY_MESSAGES = ['Welcome back', 'No revisions yet', 'Saved', 'Synced', 'Account created', 'Login successful', 'timed out'];
 
 function getTemplateBody(template: WorkspaceTemplate): string {
   const body = template.content?.body;
@@ -31,14 +32,27 @@ const ProductivityPanel: React.FC = () => {
 
   const recentActivity = useMemo(() => 
     (session.activityFeed || [])
-      .filter(item => !INTERNAL_STATES.includes(item.detail || ''))
+      .filter(item => {
+        const detail = (item.detail || '').toLowerCase();
+        const title = (item.title || '').toLowerCase();
+        // Recent Activity should only show productive actions, never system errors
+        if (item.kind === 'error' || title.includes('error')) return false;
+        
+        return !INTERNAL_STATES.includes(item.detail || '') && 
+               !NOISY_MESSAGES.some(noisy => detail.includes(noisy.toLowerCase()) || title.includes(noisy.toLowerCase()));
+      })
       .slice(0, 5), 
     [session.activityFeed]
   );
 
   const recentToasts = useMemo(() => 
     (session.toastHistory || [])
-      .filter(item => !INTERNAL_STATES.includes(item.detail || ''))
+      .filter(item => {
+        const detail = (item.detail || '').toLowerCase();
+        const title = (item.title || '').toLowerCase();
+        return !INTERNAL_STATES.includes(item.detail || '') && 
+               !NOISY_MESSAGES.some(noisy => detail.includes(noisy.toLowerCase()) || title.includes(noisy.toLowerCase()));
+      })
       .slice(0, 4),
     [session.toastHistory]
   );

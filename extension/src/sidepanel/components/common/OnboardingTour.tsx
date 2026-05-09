@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useBugMind } from '../../hooks/useBugMind';
 import { ChevronRight, X, Info, ShieldCheck, Zap } from 'lucide-react';
 import { ActionButton, SurfaceCard } from './DesignSystem';
@@ -8,6 +8,16 @@ const OnboardingTour: React.FC = () => {
   const { session, completeOnboarding } = useBugMind();
   const { t } = useI18n();
   const [step, setStep] = useState(0);
+
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        completeOnboarding();
+      }
+    };
+    document.addEventListener('keydown', handleEsc);
+    return () => document.removeEventListener('keydown', handleEsc);
+  }, [completeOnboarding]);
 
   if (session.onboardingCompleted) return null;
 

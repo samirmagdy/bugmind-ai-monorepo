@@ -352,7 +352,7 @@ const MainView: React.FC = () => {
       : session.bulkBrdText.trim()
         ? 3
         : 2;
-  const bulkSteps = ['Epic', 'Select', 'Action', 'Review'];
+  const bulkSteps = ['Epic', 'Select', 'Run', 'Done'];
 
   const copySanitizedProfile = async () => {
     if (!session.jiraCapabilityProfile) return;
@@ -457,7 +457,7 @@ const MainView: React.FC = () => {
       return;
     }
     const text = (await file.text()).trim();
-    updateSession({ bulkBrdText: text, success: `Loaded BRD text from ${file.name}.` });
+    updateSession({ bulkBrdText: text, bulkBrdFileName: file.name, success: `Loaded BRD text from ${file.name}.` });
     event.target.value = '';
   };
 
@@ -671,17 +671,36 @@ const MainView: React.FC = () => {
   const supportingContextPanel = (
     <div className="space-y-3">
       <div className="space-y-1.5">
-        <label className="context-label uppercase tracking-wider block ml-1">Supporting Context</label>
-        <AutoResizeTextarea
+        <div className="flex items-center gap-1.5">
+          <FileText size={12} className="text-[var(--text-muted)]" />
+          <label className="context-label uppercase tracking-wider block ml-0">Supporting Context (Shared)</label>
+                             </div>
+                             {session.bulkBrdFileName && (
+                               <div className="flex items-center justify-between gap-2 rounded-full bg-[var(--surface-soft)] border border-[var(--border-soft)] px-3 py-1.5 text-[10px] font-medium text-[var(--text-primary)]">
+                                 <span className="truncate flex-1 min-w-0">{session.bulkBrdFileName}</span>
+                                 <button
+                                   type="button"
+                                   onClick={() => updateSession({ bulkBrdText: '', bulkBrdFileName: '' })}
+                                   className="flex h-5 w-5 items-center justify-center rounded-full hover:bg-[var(--error)]/10 text-[var(--text-muted)] hover:text-[var(--error)] transition-colors"
+                                   aria-label="Clear loaded BRD file"
+                                 >
+                                   <X size={12} />
+                                 </button>
+                               </div>
+                             )}
+                             <AutoResizeTextarea
           value={session.generationSupportingContext}
           onChange={e => updateSession({ generationSupportingContext: e.target.value })}
           className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-[1rem] p-3 text-xs text-[var(--text-secondary)] outline-none min-h-[72px]"
-          placeholder="Optional: add logs, constraints, environment notes, or URLs that should influence generation."
+          placeholder="Optional: add logs, constraints, environment notes, or URLs that should influence generation. Applies to all bugs."
         />
       </div>
       <div className="space-y-2">
         <div className="flex items-center justify-between gap-3">
-          <label className="context-label uppercase tracking-wider block ml-1">Supporting Files</label>
+          <div className="flex items-center gap-1.5">
+            <Paperclip size={12} className="text-[var(--text-muted)]" />
+            <label className="context-label uppercase tracking-wider block ml-0">Supporting Files (Shared)</label>
+          </div>
           <button
             type="button"
             onClick={() => artifactInputRef.current?.click()}
@@ -1120,25 +1139,28 @@ const MainView: React.FC = () => {
 
                       {session.mainWorkflow === 'manual' ? (
                         <div className="space-y-3">
-                          <p className="text-[12px] text-[var(--text-secondary)] leading-relaxed">
-                            Add one or more bug descriptions. Each input will be structured as a separate Jira-ready bug report.
-                          </p>
-                          <div className="space-y-3">
-                            {manualInputs.map((manualInput: ManualBugInput, index) => (
-                              <div key={`manual-input-${index}`} className="space-y-2">
-                                <div className="flex items-center justify-between">
-                                  <label className="context-label uppercase tracking-wider block ml-1">Bug Input {index + 1}</label>
-                                  {manualInputs.length > 1 && (
-                                    <button
-                                      type="button"
-                                      onClick={() => removeManualInput(index)}
-                                      className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--error)]"
-                                    >
-                                      Remove
-                                    </button>
-                                  )}
-                                </div>
-                                <AutoResizeTextarea
+                           <p className="text-[12px] text-[var(--text-secondary)] leading-relaxed">
+                             Add one or more bug descriptions. Each input will be structured as a separate Jira-ready bug report.
+                           </p>
+                           <div className="space-y-3">
+                             {manualInputs.map((manualInput: ManualBugInput, index) => (
+                               <SurfaceCard key={`manual-input-${index}`} className="p-4 space-y-3">
+                                 <div className="flex items-center justify-between">
+                                   <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                                     Bug Report {index + 1}
+                                   </span>
+                                   {manualInputs.length > 1 && (
+                                     <button
+                                       type="button"
+                                       onClick={() => removeManualInput(index)}
+                                       className="flex h-7 w-7 items-center justify-center rounded-full border border-[var(--border-soft)] text-[var(--text-muted)] hover:text-[var(--error)] hover:bg-[var(--error)]/10 transition-colors"
+                                       aria-label={`Remove bug ${index + 1}`}
+                                     >
+                                       <X size={14} />
+                                     </button>
+                                   )}
+                                 </div>
+                                 <AutoResizeTextarea
                                   className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-[1rem] p-3 text-sm outline-none focus:border-[var(--border-active)] min-h-[96px]"
                                   placeholder="Describe the issue in plain English. This input becomes one bug."
                                   value={manualInput.text}
@@ -1146,7 +1168,10 @@ const MainView: React.FC = () => {
                                 />
                                 <div className="space-y-3 rounded-[1rem] border border-[var(--border-soft)] bg-[var(--surface-soft)]/65 p-3">
                                   <div className="space-y-1.5">
-                                    <label className="context-label uppercase tracking-wider block ml-1">Bug-Specific Logs / Notes</label>
+                                    <div className="flex items-center gap-1.5">
+                                      <FileText size={12} className="text-[var(--text-muted)]" />
+                                      <label className="context-label uppercase tracking-wider block ml-0">Bug-Specific Notes</label>
+                                    </div>
                                     <AutoResizeTextarea
                                       value={manualInput.supportingContext}
                                       onChange={e => updateManualSupportingContext(index, e.target.value)}
@@ -1156,7 +1181,10 @@ const MainView: React.FC = () => {
                                   </div>
                                   <div className="space-y-2">
                                     <div className="flex items-center justify-between gap-3">
-                                      <label className="context-label uppercase tracking-wider block ml-1">Bug-Specific Files</label>
+                                      <div className="flex items-center gap-1.5">
+                                        <Paperclip size={12} className="text-[var(--text-muted)]" />
+                                        <label className="context-label uppercase tracking-wider block ml-0">Bug-Specific Files</label>
+                                      </div>
                                       <label
                                         htmlFor={`manual-artifacts-${index}`}
                                         className="flex cursor-pointer items-center gap-1 rounded-full border border-[var(--border-soft)] bg-[var(--bg-input)] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--text-primary)]"
@@ -1179,19 +1207,28 @@ const MainView: React.FC = () => {
                                     )}
                                   </div>
                                 </div>
-                              </div>
+                              </SurfaceCard>
                             ))}
                           </div>
                           <ActionButton onClick={addManualInput} variant="secondary" className="h-10 w-full text-[12px]">
                             <Plus size={15} />
                             Add Another Bug
                           </ActionButton>
-                          <ActionButton
-                            onClick={() => handleManualGenerate()}
-                            variant="primary"
-                            disabled={session.loading || manualInputs.every(input => !input.text.trim()) || !canGenerateFromProfile}
-                            className="h-11"
-                          >
+                           <ActionButton
+                             onClick={() => handleManualGenerate()}
+                             variant="primary"
+                             disabled={session.loading || manualInputs.every(input => !input.text.trim()) || !canGenerateFromProfile}
+                             className="h-11"
+                             title={
+                               session.loading
+                                 ? 'Processing...'
+                                 : manualInputs.every(input => !input.text.trim())
+                                 ? 'Enter at least one bug description to enable generation'
+                                 : !canGenerateFromProfile
+                                 ? 'Jira capability profile required'
+                                 : 'Generate structured bugs'
+                             }
+                           >
                             <Zap size={16} />
                             Generate Structured Bugs
                           </ActionButton>
@@ -1202,7 +1239,7 @@ const MainView: React.FC = () => {
                             Analyze the story and acceptance criteria to surface hidden requirements, edge cases, and functional risk.
                           </p>
                           <div className="space-y-2">
-                            <label className="context-label uppercase tracking-wider mb-1.5 block ml-1">Finding Count</label>
+                            <label className="context-label uppercase tracking-wider mb-1.5 block ml-1">Number of Bugs</label>
                             <div className="grid grid-cols-3 gap-2">
                               {[3, 5, 7].map((count) => (
                                 <button
@@ -1216,10 +1253,11 @@ const MainView: React.FC = () => {
                                       : 'border-[var(--border-soft)] bg-[var(--bg-input)] text-[var(--text-secondary)]'
                                   }`}
                                 >
-                                  {count} Bugs
+                                  {count}
                                 </button>
                               ))}
                             </div>
+                            <p className="text-[10px] text-[var(--text-muted)] ml-1">Bugs to generate from gap analysis</p>
                           </div>
                           {supportingContextPanel}
                           <ActionButton 
@@ -1450,12 +1488,18 @@ const MainView: React.FC = () => {
                                 />
                               </label>
                             </div>
-                            <AutoResizeTextarea
-                              value={session.bulkBrdText}
-                              onChange={e => updateSession({ bulkBrdText: e.target.value })}
-                              className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-[1rem] p-3 text-xs text-[var(--text-secondary)] outline-none min-h-[92px]"
-                              placeholder="Paste BRD requirements here."
-                            />
+                             <AutoResizeTextarea
+                               value={session.bulkBrdText}
+                               onChange={e => {
+                                 const val = e.target.value;
+                                 updateSession({
+                                   bulkBrdText: val,
+                                   bulkBrdFileName: val.trim() ? session.bulkBrdFileName : ''
+                                 });
+                               }}
+                               className="w-full bg-[var(--bg-input)] border border-[var(--border-soft)] rounded-[1rem] p-3 text-xs text-[var(--text-secondary)] outline-none min-h-[92px]"
+                               placeholder="Paste BRD requirements here."
+                             />
                             <ActionButton
                               onClick={bulkCompareBrd}
                               variant="secondary"

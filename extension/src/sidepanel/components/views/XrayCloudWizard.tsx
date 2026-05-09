@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useBugMind } from '../../hooks/useBugMind';
 import { X, Cloud, Key, CheckCircle, AlertTriangle, Loader2 } from 'lucide-react';
 import { ActionButton, SurfaceCard } from '../common/DesignSystem';
@@ -12,6 +12,16 @@ export const XrayCloudWizard: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [testSuccess, setTestSuccess] = useState<boolean | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
+
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        updateSession({ showXrayCloudWizard: false, xrayCloudWizardMode: undefined });
+      }
+    };
+    document.addEventListener('keydown', handleEsc);
+    return () => document.removeEventListener('keydown', handleEsc);
+  }, [updateSession]);
 
   const handleTest = async () => {
     if (!clientId.trim() || !clientSecret.trim()) {
@@ -84,10 +94,12 @@ export const XrayCloudWizard: React.FC = () => {
               <div className="w-8 h-8 rounded-[8px] bg-[var(--surface-accent-strong)] flex items-center justify-center text-[var(--primary-blue)] border border-[var(--border-soft)]">
                 <Cloud size={16} />
               </div>
-              <div>
-                <h3 id="xray-cloud-title" className="text-sm font-bold text-[var(--text-main)] leading-tight">Xray Cloud Setup</h3>
-                <p className="view-kicker mt-0.5">Configure API Credentials</p>
-              </div>
+            <div>
+              <h3 id="xray-cloud-title" className="text-sm font-bold text-[var(--text-main)] leading-tight">Xray Cloud Setup</h3>
+              <p className="view-kicker mt-0.5">
+                {session.xrayCloudWizardMode === 'publish' ? 'Required to publish tests' : 'Configure API Credentials'}
+              </p>
+            </div>
             </div>
             <button
               onClick={() => updateSession({ showXrayCloudWizard: false, xrayCloudWizardMode: undefined })}

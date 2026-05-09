@@ -47,7 +47,7 @@ export const JobDashboardView: React.FC = () => {
 
   useEffect(() => {
     fetchJobs();
-    const interval = setInterval(fetchJobs, 3000);
+    const interval = setInterval(fetchJobs, 5000);
     return () => clearInterval(interval);
   }, [fetchJobs]);
 

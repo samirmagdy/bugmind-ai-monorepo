@@ -427,6 +427,13 @@ export const AIProvider: React.FC<{
     }
   }, [apiBase, authToken, logDebug, refreshAuthToken, updateSession]);
 
+  useEffect(() => {
+    if (authToken) {
+      void fetchUsage();
+      void fetchAISettings();
+    }
+  }, [authToken, fetchUsage, fetchAISettings]);
+
   const handleUpdateBug = useCallback((index: number, updates: Partial<BugReport>) => {
     if (!currentTabId) return;
     setTabSessions(prev => {

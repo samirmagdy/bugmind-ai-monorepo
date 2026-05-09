@@ -27,6 +27,9 @@ import { useI18n } from './i18n';
 import { addActivity, addToast } from './utils/productivity';
 import { buildActivityEvent, buildAnalyticsEvent, fetchActivityEvents, sendProductEvent } from './services/productEvents';
 
+const INTERNAL_STATES = ['STALE_PAGE', 'NOT_A_JIRA_PAGE', 'UNSUPPORTED_ISSUE_TYPE', 'MISSING_ISSUE_TYPE', 'NO_ISSUE_TYPES_FOUND'] as const;
+const NOISY_MESSAGES = ['Welcome back', 'No revisions yet', 'Saved', 'Synced', 'Account created', 'Login successful'] as const;
+
 export default function App() {
   const { 
     session, updateSession, auth, initializing, checkAuth, refreshIssue, debug, handleLogout, sessionHydrated 
@@ -91,18 +94,7 @@ export default function App() {
     const message = session.success || session.error;
     if (!message) return;
 
-    // Filter out internal state indicators and noisy greetings that shouldn't pollute the activity history
-    const INTERNAL_STATES = ['STALE_PAGE', 'NOT_A_JIRA_PAGE', 'UNSUPPORTED_ISSUE_TYPE', 'MISSING_ISSUE_TYPE', 'NO_ISSUE_TYPES_FOUND'];
-    const NOISY_MESSAGES = [
-      'Welcome back',
-      'No revisions yet',
-      'Saved',
-      'Synced',
-      'Account created',
-      'Login successful'
-    ];
-
-    if (session.error && INTERNAL_STATES.includes(session.error)) {
+    if (session.error && (INTERNAL_STATES as readonly string[]).includes(session.error)) {
       return;
     }
 
@@ -114,16 +106,18 @@ export default function App() {
     if (lastToastSignature.current === signature) return;
     lastToastSignature.current = signature;
 
+    const translated = session.error ? translateError(session.error) : { title: 'Success', description: message };
+
     updateSession({
       toastHistory: addToast(session, {
         tone: session.success ? 'success' : 'error',
-        title: session.success ? 'Success' : 'Needs attention',
-        detail: message
+        title: translated.title,
+        detail: translated.description
       }),
       activityFeed: addActivity(session, {
         kind: session.success ? 'success' : 'error',
-        title: session.success ? 'Success' : 'Error',
-        detail: message,
+        title: translated.title,
+        detail: translated.description,
         actionView: session.view,
         actionWorkflow: session.mainWorkflow
       })
@@ -141,11 +135,9 @@ export default function App() {
     }, 50)
       .then((serverActivity) => {
         if (!serverActivity.length) return;
-        const INTERNAL_STATES = ['STALE_PAGE', 'NOT_A_JIRA_PAGE', 'UNSUPPORTED_ISSUE_TYPE', 'MISSING_ISSUE_TYPE', 'NO_ISSUE_TYPES_FOUND'];
-        const NOISY_MESSAGES = ['Welcome back', 'No revisions yet', 'Saved', 'Synced', 'Account created', 'Login successful'];
         const filtered = serverActivity.filter((item) => {
           const detail = item.detail || '';
-          return !INTERNAL_STATES.includes(detail) && !NOISY_MESSAGES.some(noisy => detail.includes(noisy));
+          return !(INTERNAL_STATES as readonly string[]).includes(detail) && !NOISY_MESSAGES.some(noisy => detail.includes(noisy));
         });
         if (!filtered.length) return;
         

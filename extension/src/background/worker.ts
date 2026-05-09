@@ -5,10 +5,10 @@
  */
 
 import { deobfuscate } from '../sidepanel/utils/StorageObfuscator';
+import { normalizeApiBase } from '../sidepanel/utils/url';
 
 // Deployment Metadata
 const VERSION = '1.0.0';
-const DEFAULT_API_BASE = 'https://bugmind-ai-monorepo.onrender.com/api/v1';
 const BULK_MODE_DEFAULT = true;
 const DEBUG_LOGS = false;
 const DOMAINS = {
@@ -90,17 +90,6 @@ function normalizeJiraUrl(url: string | null | undefined): string {
   } catch {
     return trimmed;
   }
-}
-
-function normalizeApiBase(url: string | null | undefined): string {
-  let trimmed = (url || '').trim().replace(/\/+$/, '');
-  if (!trimmed) return DEFAULT_API_BASE;
-  trimmed = trimmed.replace(/\/(auth|jira|ai|settings|stripe)(?:\/.*)?$/i, '');
-  if (trimmed.endsWith('/api')) return `${trimmed}/v1`;
-  if (!trimmed.endsWith('/api/v1')) {
-    trimmed = trimmed.replace(/\/api\/v1\/.*$/i, '/api/v1');
-  }
-  return trimmed.endsWith('/api') ? `${trimmed}/v1` : trimmed;
 }
 
 function containsControlCharacters(value: string): boolean {

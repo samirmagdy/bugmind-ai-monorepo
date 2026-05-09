@@ -31,4 +31,6 @@ export const DOMAINS = {
   ISSUES_PATH: '/issues/',
 };
 
+export const DEFAULT_API_BASE = 'https://bugmind-ai-monorepo.onrender.com/api/v1';
+
 export const APP_VERSION = 'v1.0.0-PRO';

@@ -4,52 +4,7 @@ import { apiRequest, readJsonResponse, throwApiErrorResponse } from '../services
 import { AuthRefreshRequestPayload, AuthTokenResponsePayload } from '../services/contracts';
 import { View } from '../types';
 import { AuthContext } from './auth-context';
-
-const DEFAULT_API_BASE = 'https://bugmind-ai-monorepo.onrender.com/api/v1';
-
-function normalizeApiBase(url: string): string {
-  let trimmed = url.trim().replace(/\/+$/, '');
-  if (!trimmed) return DEFAULT_API_BASE;
-
-  trimmed = trimmed.replace(/\/(auth|jira|ai|settings|stripe)(?:\/.*)?$/i, '');
-
-  if (trimmed.endsWith('/api')) {
-    return `${trimmed}/v1`;
-  }
-
-  if (!trimmed.endsWith('/api/v1')) {
-    trimmed = trimmed.replace(/\/api\/v1\/.*$/i, '/api/v1');
-  }
-
-  return trimmed;
-}
-
-function decodeStoredToken(encoded: string | undefined): string {
-  if (!encoded) return '';
-
-  const decoded = deobfuscate(encoded);
-  if (decoded && decoded.split('.').length === 3 && !containsControlCharacters(decoded)) {
-    return decoded;
-  }
-
-  try {
-    const legacy = atob(encoded);
-    if (legacy && legacy.split('.').length === 3 && !containsControlCharacters(legacy)) {
-      return legacy;
-    }
-  } catch {
-    // Ignore legacy decode failure and fall through.
-  }
-
-  return decoded;
-}
-
-function containsControlCharacters(value: string): boolean {
-  return Array.from(value).some((char) => {
-    const code = char.charCodeAt(0);
-    return code <= 31;
-  });
-}
+import { normalizeApiBase, DEFAULT_API_BASE } from '../utils/url';
 
 export const AuthProvider: React.FC<{ children: React.ReactNode, logDebug: (tag: string, msg: string) => void }> = ({ children, logDebug }) => {
   const [globalView, setGlobalView] = useState<View>('auth');
