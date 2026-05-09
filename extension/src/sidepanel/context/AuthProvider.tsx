@@ -44,8 +44,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode, logDebug: (tag:
       chrome.storage.session.get(['bugmind_token', 'bugmind_refresh_token'], (session) => {
         const tokenValue = (session.bugmind_token as string || local.bugmind_token as string);
         const refreshTokenValue = (session.bugmind_refresh_token as string || local.bugmind_refresh_token as string);
-        const token = decodeStoredToken(tokenValue);
-        const refreshed = decodeStoredToken(refreshTokenValue);
+        const token = deobfuscate(tokenValue);
+        const refreshed = deobfuscate(refreshTokenValue);
         
         if (token) {
           setAuthToken(token);
