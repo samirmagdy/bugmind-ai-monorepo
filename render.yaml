@@ -28,6 +28,8 @@ services:
         fromDatabase:
           name: bugmind-db
           property: connectionString
+      - key: DATABASE_EXTERNAL_URL
+        sync: false
       - key: ENVIRONMENT
         value: production
       - key: LOG_LEVEL
