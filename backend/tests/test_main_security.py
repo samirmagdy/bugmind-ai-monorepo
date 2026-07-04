@@ -5,6 +5,7 @@ import sys
 import pytest
 from cryptography.fernet import Fernet
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,6 +18,7 @@ os.environ.setdefault("ENCRYPTION_KEY", Fernet.generate_key().decode())
 os.environ.setdefault("RATE_LIMITS_ENABLED", "false")
 
 from app.core.middleware import MAX_REQUEST_BODY_SIZE, _internal_error_detail, _validate_content_length  # noqa: E402
+from app.main import app as fastapi_app  # noqa: E402
 
 
 def test_invalid_content_length_rejected():
@@ -61,3 +63,41 @@ def test_internal_error_detail_keeps_development_message(monkeypatch):
     detail = _internal_error_detail(RuntimeError("useful local debug message"))
 
     assert detail["message"] == "useful local debug message"
+
+
+def test_production_rejects_unsafe_request_from_unallowlisted_origin(monkeypatch):
+    from app.core import middleware
+
+    monkeypatch.setattr(middleware.settings, "ENVIRONMENT", "production")
+    monkeypatch.setattr(middleware.settings, "EXTENSION_ORIGINS", "chrome-extension://allowed-extension")
+    monkeypatch.setattr(middleware.settings, "CORS_ORIGINS", "https://app.example.com")
+
+    client = TestClient(fastapi_app)
+    response = client.post(
+        "/api/v1/auth/login",
+        headers={"Origin": "chrome-extension://untrusted-extension"},
+        data={"username": "user@example.com", "password": "Password123!"},
+    )
+    client.close()
+
+    assert response.status_code == 403
+    assert "EXTENSION_ORIGIN_NOT_ALLOWED" in response.text
+
+
+def test_production_allows_unsafe_request_from_configured_extension_origin(monkeypatch):
+    from app.core import middleware
+
+    monkeypatch.setattr(middleware.settings, "ENVIRONMENT", "production")
+    monkeypatch.setattr(middleware.settings, "EXTENSION_ORIGINS", "chrome-extension://allowed-extension")
+    monkeypatch.setattr(middleware.settings, "CORS_ORIGINS", "")
+
+    client = TestClient(fastapi_app)
+    response = client.post(
+        "/api/v1/auth/login",
+        headers={"Origin": "chrome-extension://allowed-extension"},
+        data={"username": "missing@example.com", "password": "Password123!"},
+    )
+    client.close()
+
+    assert response.status_code != 403
+    assert "EXTENSION_ORIGIN_NOT_ALLOWED" not in response.text

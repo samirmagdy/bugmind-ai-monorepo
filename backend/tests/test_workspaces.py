@@ -33,6 +33,7 @@ from app.models.product_event import ProductEvent
 from app.models.user import User
 from app.models.workspace import Workspace, WorkspaceMember, WorkspaceRole, WorkspaceTemplate, WorkspaceTemplateAssignment
 from app.core.security import create_access_token, encrypt_credential, get_password_hash
+from app.core.rbac import Action, check_permission
 
 engine = create_engine(
     "sqlite:///:memory:",
@@ -143,6 +144,38 @@ class WorkspaceTests(unittest.TestCase):
             ).first()
             self.assertIsNotNone(member, "Member should have been added to the workspace")
             self.assertEqual(member.role, WorkspaceRole.QA_ENGINEER)
+
+    def test_workspace_permission_matrix_blocks_unauthorized_generate_and_publish(self):
+        with SessionLocal() as db:
+            owner = self.test_user
+            viewer = User(email="viewer@example.com", hashed_password="...")
+            engineer = User(email="engineer@example.com", hashed_password="...")
+            lead = User(email="lead@example.com", hashed_password="...")
+            db.add_all([viewer, engineer, lead])
+            db.flush()
+
+            workspace = Workspace(name="RBAC WS", owner_id=cast(int, owner.id))
+            db.add(workspace)
+            db.flush()
+            db.add_all([
+                WorkspaceMember(workspace_id=cast(int, workspace.id), user_id=cast(int, owner.id), role=WorkspaceRole.OWNER),
+                WorkspaceMember(workspace_id=cast(int, workspace.id), user_id=cast(int, viewer.id), role=WorkspaceRole.VIEWER),
+                WorkspaceMember(workspace_id=cast(int, workspace.id), user_id=cast(int, engineer.id), role=WorkspaceRole.QA_ENGINEER),
+                WorkspaceMember(workspace_id=cast(int, workspace.id), user_id=cast(int, lead.id), role=WorkspaceRole.QA_LEAD),
+            ])
+            db.commit()
+
+            workspace_id = cast(int, workspace.id)
+            viewer_id = cast(int, viewer.id)
+            engineer_id = cast(int, engineer.id)
+            lead_id = cast(int, lead.id)
+
+            self.assertFalse(check_permission(db, viewer_id, workspace_id, Action.AI_GENERATE))
+            self.assertFalse(check_permission(db, viewer_id, workspace_id, Action.PUBLISH))
+            self.assertTrue(check_permission(db, engineer_id, workspace_id, Action.AI_GENERATE))
+            self.assertFalse(check_permission(db, engineer_id, workspace_id, Action.PUBLISH))
+            self.assertTrue(check_permission(db, lead_id, workspace_id, Action.AI_GENERATE))
+            self.assertTrue(check_permission(db, lead_id, workspace_id, Action.PUBLISH))
 
     def test_workspace_details_templates_connections_usage_and_audit(self):
         ws_res = self.client.post("/api/v1/workspaces/", headers=self.headers, json={"name": "Ops WS"})
