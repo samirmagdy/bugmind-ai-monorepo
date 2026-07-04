@@ -17,6 +17,7 @@ if str(ROOT) not in sys.path:
 from unittest.mock import patch, MagicMock
 import app.models # Registers metadata
 from app.services.jobs.worker import create_job, update_job_progress, check_cancelled, process_job
+from app.services.jobs.queue import JobDispatch, run_dispatch
 from app.services.jobs.epic_processor import epic_test_generation_processor
 from fastapi.testclient import TestClient
 from app.main import app as fastapi_app
@@ -132,6 +133,41 @@ async def test_worker_process_job_exception(db, test_user):
     db.refresh(job)
     assert job.status == "failed"
     assert "Simulated failure" in job.error_message
+
+
+@pytest.mark.anyio
+@patch("app.services.jobs.queue.PROCESSORS")
+async def test_queue_dispatch_processes_job_with_fresh_session(mock_processors, db, test_user):
+    job = create_job(
+        db,
+        cast(int, test_user.id),
+        "epic_test_generation",
+        "PROJ-123",
+        "PROJ",
+        request_payload={"jira_connection_id": 1, "epic_key": "PROJ-123", "issue_type_id": "10001"},
+    )
+
+    async def processor(job_id, worker_db, user, connection_id, epic_key, issue_type_id):
+        assert job_id == cast(str, job.id)
+        assert user.id == test_user.id
+        assert connection_id == 1
+        update_job_progress(worker_db, job_id, 100.0, "Done", {"ok": True})
+
+    mock_processors.get.return_value = processor
+
+    await run_dispatch(
+        JobDispatch(
+            job_id=cast(str, job.id),
+            job_type="epic_test_generation",
+            user_id=cast(int, test_user.id),
+            payload={"jira_connection_id": 1, "epic_key": "PROJ-123", "issue_type_id": "10001"},
+        ),
+        _session_factory=SessionLocal,
+    )
+
+    db.refresh(job)
+    assert job.status == "completed"
+    assert job.result_payload == {"ok": True}
 
 
 @pytest.mark.anyio

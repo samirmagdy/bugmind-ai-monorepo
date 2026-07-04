@@ -39,6 +39,7 @@ from app.services.ai.audit_metadata import build_ai_generation_audit_metadata
 from app.services.subscription.limit_checker import LimitChecker
 from app.services.ai.quality_scorer import score_bug_input
 from app.services.ai.story_analyzer import analyze_story_context
+from app.core.rbac import Action, require_workspace_permission
 
 
 router = APIRouter()
@@ -81,6 +82,11 @@ def _audit_ai_generation(
     )
 
 
+def _require_ai_generation(db: Session, current_user: User) -> None:
+    require_workspace_permission(db, current_user, Action.AI_GENERATE)
+    LimitChecker.check_allowed(db, current_user.id)
+
+
 @router.get("/usage")
 def get_usage(
     db: Session = Depends(deps.get_db),
@@ -97,7 +103,7 @@ async def generate_bug_report(
     current_user: User = Depends(deps.get_current_user),
 ):
     rate_limiter.check("ai.generate", str(current_user.id), limit=10, window_seconds=60)
-    LimitChecker.check_allowed(db, current_user.id)
+    _require_ai_generation(db, current_user)
     start_time = time.monotonic()
     try:
         response = await generate_findings_response(req, db, current_user, include_analysis_summary=True)
@@ -150,7 +156,7 @@ async def generate_manual_bug_report(
     current_user: User = Depends(deps.get_current_user),
 ):
     rate_limiter.check("ai.generate", str(current_user.id), limit=10, window_seconds=60)
-    LimitChecker.check_allowed(db, current_user.id)
+    _require_ai_generation(db, current_user)
     start_time = time.monotonic()
     try:
         response = await generate_findings_response(req, db, current_user, include_analysis_summary=False)
@@ -203,26 +209,50 @@ async def generate_test_suite(
     current_user: User = Depends(deps.get_current_user),
 ):
     rate_limiter.check("ai.test_cases", str(current_user.id), limit=5, window_seconds=60)
-    LimitChecker.check_allowed(db, current_user.id)
+    _require_ai_generation(db, current_user)
     start_time = time.monotonic()
-    response = await generate_test_suite_response(req, db, current_user)
-    duration_ms = int((time.monotonic() - start_time) * 1000)
-    LimitChecker.record_usage(db, current_user.id, "/test-cases", 0)
-    log_audit(
-        "ai.test_cases",
-        current_user.id,
-        db=db,
-        jira_connection_id=req.jira_connection_id,
-        project_key=req.project_key,
-        issue_type_id=req.issue_type_id,
-        request_path=str(request.url.path),
-        generation_type="test_cases",
-        selected_categories=req.test_categories,
-        output_count=len(response.test_cases),
-        duration_ms=duration_ms,
-        success=True,
-    )
-    return response
+    try:
+        response = await generate_test_suite_response(req, db, current_user)
+        LimitChecker.record_usage(db, current_user.id, "/test-cases", 0)
+        _audit_ai_generation(
+            action="ai.test_cases",
+            request=request,
+            req=req,
+            db=db,
+            current_user=current_user,
+            generation_source="test_cases",
+            start_time=start_time,
+            success=True,
+            response_payload=response,
+            output_count=len(response.test_cases),
+            extra={
+                "jira_connection_id": req.jira_connection_id,
+                "project_key": req.project_key,
+                "issue_type_id": req.issue_type_id,
+                "generation_type": "test_cases",
+                "selected_categories": req.test_categories,
+            },
+        )
+        return response
+    except Exception as exc:
+        _audit_ai_generation(
+            action="ai.test_cases",
+            request=request,
+            req=req,
+            db=db,
+            current_user=current_user,
+            generation_source="test_cases",
+            start_time=start_time,
+            success=False,
+            failure_reason=str(getattr(exc, "detail", None) or exc),
+            extra={
+                "jira_connection_id": req.jira_connection_id,
+                "project_key": req.project_key,
+                "issue_type_id": req.issue_type_id,
+                "generation_type": "test_cases",
+            },
+        )
+        raise
 
 
 @router.post("/quality-check")
@@ -268,21 +298,51 @@ async def generate_bulk_test_suites(
     current_user: User = Depends(deps.get_current_user),
 ):
     rate_limiter.check("ai.bulk_test_cases", str(current_user.id), limit=2, window_seconds=60)
-    LimitChecker.check_allowed(db, current_user.id)
-    response = await generate_bulk_test_suites_response(req, db, current_user)
-    LimitChecker.record_usage(db, current_user.id, "/bulk/test-cases", 0)
-    log_audit(
-        "ai.bulk_test_cases",
-        current_user.id,
-        db=db,
-        jira_connection_id=req.jira_connection_id,
-        project_key=req.project_key,
-        issue_type_id=req.issue_type_id,
-        request_path=str(request.url.path),
-        story_count=len(req.stories),
-        success_count=sum(1 for item in response.results if item.ok),
-    )
-    return response
+    _require_ai_generation(db, current_user)
+    start_time = time.monotonic()
+    try:
+        response = await generate_bulk_test_suites_response(req, db, current_user)
+        LimitChecker.record_usage(db, current_user.id, "/bulk/test-cases", 0)
+        _audit_ai_generation(
+            action="ai.bulk_test_cases",
+            request=request,
+            req=req,
+            db=db,
+            current_user=current_user,
+            generation_source="bulk_job",
+            start_time=start_time,
+            success=True,
+            response_payload=response,
+            output_count=sum(1 for item in response.results if item.ok),
+            extra={
+                "jira_connection_id": req.jira_connection_id,
+                "project_key": req.project_key,
+                "issue_type_id": req.issue_type_id,
+                "story_count": len(req.stories),
+                "generation_type": "bulk_test_cases",
+            },
+        )
+        return response
+    except Exception as exc:
+        _audit_ai_generation(
+            action="ai.bulk_test_cases",
+            request=request,
+            req=req,
+            db=db,
+            current_user=current_user,
+            generation_source="bulk_job",
+            start_time=start_time,
+            success=False,
+            failure_reason=str(getattr(exc, "detail", None) or exc),
+            extra={
+                "jira_connection_id": req.jira_connection_id,
+                "project_key": req.project_key,
+                "issue_type_id": req.issue_type_id,
+                "story_count": len(req.stories),
+                "generation_type": "bulk_test_cases",
+            },
+        )
+        raise
 
 
 @router.post("/bulk/analyze", response_model=GapAnalysisResponse)
@@ -293,7 +353,7 @@ async def bulk_analyze_stories(
     current_user: User = Depends(deps.get_current_user),
 ):
     rate_limiter.check("ai.bulk_analyze", str(current_user.id), limit=2, window_seconds=60)
-    LimitChecker.check_allowed(db, current_user.id)
+    _require_ai_generation(db, current_user)
     start_time = time.monotonic()
     try:
         response = await bulk_analyze_stories_response(req, db, current_user)
@@ -348,7 +408,7 @@ async def bulk_compare_brd(
     current_user: User = Depends(deps.get_current_user),
 ):
     rate_limiter.check("ai.bulk_brd_compare", str(current_user.id), limit=2, window_seconds=60)
-    LimitChecker.check_allowed(db, current_user.id)
+    _require_ai_generation(db, current_user)
     start_time = time.monotonic()
     try:
         response = await bulk_compare_brd_response(req, db, current_user)
@@ -401,6 +461,7 @@ async def prepare_bug_preview(
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
+    require_workspace_permission(db, current_user, Action.PUBLISH)
     return prepare_bug_preview_response(req, db, current_user)
 
 
@@ -412,4 +473,5 @@ async def submit_bugs(
     current_user: User = Depends(deps.get_current_user),
 ):
     rate_limiter.check("ai.submit", str(current_user.id), limit=10, window_seconds=60)
+    require_workspace_permission(db, current_user, Action.PUBLISH)
     return submit_bugs_response(request, req, db, current_user)

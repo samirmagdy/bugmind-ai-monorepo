@@ -12,10 +12,10 @@ const VERSION = '1.0.0';
 const BULK_MODE_DEFAULT = true;
 const DEBUG_LOGS = false;
 const DOMAINS = {
-  JIRA_CLOUD: '.atlassian.net',
   BROWSE_PATH: '/browse/',
   ISSUES_PATH: '/issues/',
 };
+const DEFAULT_ALLOWED_JIRA_HOST_PATTERNS = ['*.atlassian.net'];
 
 interface ExtractedIssueData {
   key: string;
@@ -128,6 +128,40 @@ async function getWorkerAuthContext(payload?: Record<string, unknown>): Promise<
 async function isBulkModeEnabled(): Promise<boolean> {
   const local = await storageLocalGet<{ bugmind_bulk_mode?: boolean }>(['bugmind_bulk_mode']);
   return local.bugmind_bulk_mode ?? BULK_MODE_DEFAULT;
+}
+
+function hostMatchesPattern(hostname: string, pattern: string): boolean {
+  const normalizedHost = hostname.toLowerCase();
+  const normalizedPattern = pattern.trim().toLowerCase();
+  if (!normalizedPattern) return false;
+  if (normalizedPattern.startsWith('*.')) {
+    const suffix = normalizedPattern.slice(1);
+    return normalizedHost.endsWith(suffix) && normalizedHost.length > suffix.length;
+  }
+  return normalizedHost === normalizedPattern;
+}
+
+async function getAllowedJiraHostPatterns(): Promise<string[]> {
+  const local = await storageLocalGet<{ bugmind_allowed_jira_hosts?: string | string[] }>(['bugmind_allowed_jira_hosts']);
+  const configured = Array.isArray(local.bugmind_allowed_jira_hosts)
+    ? local.bugmind_allowed_jira_hosts
+    : String(local.bugmind_allowed_jira_hosts || '')
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+  return [...DEFAULT_ALLOWED_JIRA_HOST_PATTERNS, ...configured];
+}
+
+async function isAllowedJiraUrl(url: string): Promise<boolean> {
+  try {
+    const parsed = new URL(url);
+    const pathLooksLikeJiraIssue = parsed.pathname.includes(DOMAINS.BROWSE_PATH) || parsed.pathname.includes(DOMAINS.ISSUES_PATH);
+    if (!pathLooksLikeJiraIssue) return false;
+    const patterns = await getAllowedJiraHostPatterns();
+    return patterns.some((pattern) => hostMatchesPattern(parsed.hostname, pattern));
+  } catch {
+    return false;
+  }
 }
 
 async function backendFetch<T>(path: string, options: RequestInit, payload?: Record<string, unknown>): Promise<T> {
@@ -424,8 +458,8 @@ async function refreshTabContext(tabId: number, url?: string, force: boolean = f
   tabLastRefreshAt.set(tabId, now);
   tabLastUrl.set(tabId, url);
 
-  // Domain Filter
-  const isJira = url.includes(DOMAINS.JIRA_CLOUD) || url.includes(DOMAINS.BROWSE_PATH) || url.includes(DOMAINS.ISSUES_PATH);
+  // Domain allowlist filter
+  const isJira = await isAllowedJiraUrl(url);
   if (!isJira) {
     const nextContext = { error: 'NOT_A_JIRA_PAGE', issueData: null, instanceUrl: null };
     const changed = !sameContext(tabContextCache[tabId], nextContext);

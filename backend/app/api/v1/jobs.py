@@ -7,7 +7,10 @@ from app.models.user import User
 from app.models.job import Job
 from app.schemas.job import JobResponse, EpicJobCreateRequest
 from app.services.jobs.worker import create_job, process_job
+from app.services.jobs.queue import enqueue_job
 from app.services.jobs.epic_processor import epic_audit_processor, brd_coverage_processor, epic_test_generation_processor
+from app.services.subscription.limit_checker import LimitChecker
+from app.core.rbac import Action, require_workspace_permission
 
 router = APIRouter(prefix="/jobs", tags=["Jobs"])
 
@@ -26,7 +29,7 @@ def _get_owned_job(db: Session, current_user: User, job_id: str) -> Job:
     return job
 
 
-def _start_job_from_payload(background_tasks: BackgroundTasks, job: Job, current_user: User, payload: dict) -> None:
+def _start_job_inline(background_tasks: BackgroundTasks, job: Job, current_user: User, payload: dict) -> None:
     connection_id = payload.get("jira_connection_id")
     epic_key = payload.get("epic_key")
     issue_type_id = payload.get("issue_type_id")
@@ -88,6 +91,17 @@ def _start_job_from_payload(background_tasks: BackgroundTasks, job: Job, current
     raise HTTPException(status_code=400, detail="Unsupported job type")
 
 
+def _enqueue_or_fallback(background_tasks: BackgroundTasks, job: Job, current_user: User, payload: dict) -> None:
+    if enqueue_job(job, payload):
+        return
+    _start_job_inline(background_tasks, job, current_user, payload)
+
+
+def _job_workspace_id(db: Session, current_user: User) -> int:
+    workspace_id = require_workspace_permission(db, current_user, Action.AI_GENERATE)
+    return cast(int, workspace_id)
+
+
 def _clone_job_for_restart(
     db: Session,
     source_job: Job,
@@ -125,25 +139,18 @@ def create_epic_test_generation_job(
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
+    workspace_id = _job_workspace_id(db, current_user)
+    LimitChecker.check_allowed(db, cast(int, current_user.id))
     job = create_job(
         db=db,
         user_id=cast(int, current_user.id),
         job_type="epic_test_generation",
         target_key=request.epic_key,
         project_key=request.project_key or request.epic_key.split("-", 1)[0],
-        workspace_id=cast(Optional[int], current_user.default_workspace_id),
+        workspace_id=workspace_id,
         request_payload=_job_payload(request),
     )
-    
-    background_tasks.add_task(
-        process_job,
-        cast(str, job.id),
-        epic_test_generation_processor,
-        current_user,
-        request.jira_connection_id,
-        request.epic_key,
-        request.issue_type_id
-    )
+    _enqueue_or_fallback(background_tasks, job, current_user, _job_payload(request))
     return job
 
 @router.post("/epic-audit", response_model=JobResponse)
@@ -153,27 +160,18 @@ def create_epic_audit_job(
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
+    workspace_id = _job_workspace_id(db, current_user)
+    LimitChecker.check_allowed(db, cast(int, current_user.id))
     job = create_job(
         db,
         cast(int, current_user.id),
         "epic_audit",
         request.epic_key,
         request.project_key or request.epic_key.split("-", 1)[0],
-        workspace_id=cast(Optional[int], current_user.default_workspace_id),
+        workspace_id=workspace_id,
         request_payload=_job_payload(request),
     )
-    background_tasks.add_task(
-        process_job,
-        cast(str, job.id),
-        epic_audit_processor,
-        current_user,
-        request.jira_connection_id,
-        request.epic_key,
-        request.issue_type_id,
-        request.project_key or "",
-        request.project_id,
-        request.issue_type_name,
-    )
+    _enqueue_or_fallback(background_tasks, job, current_user, _job_payload(request))
     return job
 
 @router.post("/brd-coverage-comparison", response_model=JobResponse)
@@ -183,6 +181,8 @@ def create_brd_coverage_job(
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
+    workspace_id = _job_workspace_id(db, current_user)
+    LimitChecker.check_allowed(db, cast(int, current_user.id))
     if not request.brd_text or not request.brd_text.strip():
         raise HTTPException(
             status_code=400,
@@ -199,22 +199,10 @@ def create_brd_coverage_job(
         "brd_coverage",
         request.epic_key,
         request.project_key or request.epic_key.split("-", 1)[0],
-        workspace_id=cast(Optional[int], current_user.default_workspace_id),
+        workspace_id=workspace_id,
         request_payload=_job_payload(request),
     )
-    background_tasks.add_task(
-        process_job,
-        cast(str, job.id),
-        brd_coverage_processor,
-        current_user,
-        request.jira_connection_id,
-        request.epic_key,
-        request.issue_type_id,
-        request.brd_text,
-        request.project_key or "",
-        request.project_id,
-        request.issue_type_name,
-    )
+    _enqueue_or_fallback(background_tasks, job, current_user, _job_payload(request))
     return job
 
 @router.get("", response_model=List[JobResponse])
@@ -242,7 +230,7 @@ def retry_job(
         raise HTTPException(status_code=400, detail="Only failed or cancelled jobs can be retried.")
 
     job = _clone_job_for_restart(db, source_job, retry_of_job_id=cast(str, source_job.id))
-    _start_job_from_payload(background_tasks, job, current_user, cast(dict, job.request_payload or {}))
+    _enqueue_or_fallback(background_tasks, job, current_user, cast(dict, job.request_payload or {}))
     return job
 
 
@@ -266,7 +254,7 @@ def resume_job(
         db.add(job)
         db.commit()
         db.refresh(job)
-    _start_job_from_payload(background_tasks, job, current_user, payload)
+    _enqueue_or_fallback(background_tasks, job, current_user, payload)
     return job
 
 @router.get("/{job_id}", response_model=JobResponse)

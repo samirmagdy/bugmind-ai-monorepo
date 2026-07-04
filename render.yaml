@@ -6,6 +6,13 @@ databases:
     user: bugmind_admin
 
 services:
+  - type: keyvalue
+    name: bugmind-redis
+    region: frankfurt
+    plan: free
+    maxmemoryPolicy: noeviction
+    ipAllowList: []
+
   - type: web
     name: bugmind-ai-monorepo
     runtime: python
@@ -30,18 +37,23 @@ services:
         value: production
       - key: LOG_LEVEL
         value: INFO
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: bugmind-redis
+          property: connectionString
       - key: SECRET_KEY
-        sync: true  # Changed from false to true
+        sync: false
       - key: ENCRYPTION_KEY
-        sync: true  # Changed from false to true
+        sync: false
       - key: OPENROUTER_API_KEY
-        sync: true  # Changed from false to true
+        sync: false
       - key: OPENROUTER_MODEL
-        sync: true  # Changed from false to true
+        sync: false
       - key: CORS_ORIGINS
-        sync: true  # Changed from false to true
+        sync: false
       - key: ALLOWED_HOSTS
-        sync: true  # Changed from false to true
+        sync: false
       - key: RATE_LIMITS_ENABLED
         value: "true"
       - key: ALLOW_PRIVATE_JIRA_HOSTS
@@ -49,22 +61,63 @@ services:
       - key: ALLOW_INSECURE_JIRA_SSL
         value: "false"
       - key: STRIPE_SECRET_KEY
-        sync: true  # Changed from false to true
+        sync: false
       - key: STRIPE_WEBHOOK_SECRET
-        sync: true  # Changed from false to true
+        sync: false
       - key: GOOGLE_OAUTH_CLIENT_ID
-        sync: true
+        sync: false
       - key: SMTP_HOST
-        sync: true
+        sync: false
       - key: SMTP_PORT
-        sync: true
+        sync: false
       - key: SMTP_USERNAME
-        sync: true
+        sync: false
       - key: SMTP_PASSWORD
-        sync: true
+        sync: false
       - key: SMTP_FROM_EMAIL
-        sync: true
+        sync: false
       - key: SMTP_USE_TLS
         value: "true"
       - key: PASSWORD_RESET_CODE_EXPIRE_MINUTES
         value: "15"
+
+  - type: worker
+    name: bugmind-job-worker
+    runtime: python
+    region: frankfurt
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m app.services.jobs.worker_main
+    maxShutdownDelaySeconds: 120
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.3
+      - key: DATABASE_URL
+        fromDatabase:
+          name: bugmind-db
+          property: connectionString
+      - key: DATABASE_EXTERNAL_URL
+        sync: false
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: bugmind-redis
+          property: connectionString
+      - key: SECRET_KEY
+        sync: false
+      - key: ENCRYPTION_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: OPENROUTER_MODEL
+        sync: false
+      - key: RATE_LIMITS_ENABLED
+        value: "true"
+      - key: ALLOW_PRIVATE_JIRA_HOSTS
+        value: "false"
+      - key: ALLOW_INSECURE_JIRA_SSL
+        value: "false"

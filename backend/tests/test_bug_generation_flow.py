@@ -23,7 +23,7 @@ from app.models.audit import AuditLog  # noqa: E402
 from app.models.jira import JiraAuthType, JiraConnection, JiraFieldMapping  # noqa: E402
 from app.models.user import User  # noqa: E402
 from app.api.v1.ai import _audit_ai_generation  # noqa: E402
-from app.schemas.bug import FindingGenerationRequest, GeneratedFindingResponse, IssueContext, ManualBugGenerationResponse  # noqa: E402
+from app.schemas.bug import FindingGenerationRequest, GeneratedFindingResponse, IssueContext, ManualBugGenerationResponse, TestCase, TestCaseGenerationRequest, TestSuiteResponse  # noqa: E402
 from app.services.ai.audit_metadata import build_ai_generation_audit_metadata  # noqa: E402
 from app.services.ai.workflows import _build_issue_fields, _get_field_mapping_record  # noqa: E402
 from app.services.jira.field_resolver import BugJiraPayloadResolver  # noqa: E402
@@ -329,5 +329,59 @@ def test_ai_generation_route_audit_helper_persists_metadata():
         assert row.event_metadata["success"] is False
         assert row.event_metadata["failure_reason"] == "AI returned no usable findings"
         assert row.event_metadata["output_hash"] is None
+    finally:
+        db.close()
+
+
+def test_test_case_generation_route_audit_helper_persists_prompt_metadata():
+    db = SessionLocal()
+    try:
+        user = User(email="audit-tests@example.com", custom_ai_model="openrouter/test-model")
+        user.default_workspace_id = 3
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        request_payload = TestCaseGenerationRequest(
+            selected_text="AC1: User can submit checkout.",
+            issue_context=IssueContext(issue_key="QA-888", summary="Checkout story"),
+            jira_connection_id=11,
+            project_key="QA",
+            issue_type_id="10002",
+            test_categories=["functional"],
+        )
+        response_payload = TestSuiteResponse(
+            test_cases=[
+                TestCase(
+                    title="Submit checkout",
+                    objective="Verify checkout submission",
+                    steps=["Open checkout", "Submit"],
+                    expected_result="Order is created",
+                    priority="High",
+                )
+            ],
+            coverage_score=100.0,
+        )
+
+        _audit_ai_generation(
+            action="ai.test_cases",
+            request=SimpleNamespace(url=SimpleNamespace(path="/api/v1/ai/test-cases")),
+            req=request_payload,
+            db=db,
+            current_user=user,
+            generation_source="test_cases",
+            start_time=0.0,
+            success=True,
+            response_payload=response_payload,
+            output_count=1,
+            extra={"generation_type": "test_cases"},
+        )
+
+        row = db.query(AuditLog).filter(AuditLog.action == "ai.test_cases").one()
+        assert row.workspace_id == 3
+        assert row.event_metadata["audit_schema_version"] == "ai_generation.v1"
+        assert row.event_metadata["prompt_template_id"] == "bugmind.findings.v1"
+        assert row.event_metadata["generation_source"] == "test_cases"
+        assert row.event_metadata["output_count"] == 1
+        assert row.event_metadata["output_hash"]
     finally:
         db.close()

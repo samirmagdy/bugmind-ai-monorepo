@@ -1,7 +1,9 @@
 from typing import Optional, cast
 
 from sqlalchemy.orm import Session
+from fastapi import HTTPException
 from app.models.workspace import WorkspaceMember, WorkspaceRole
+from app.models.user import User
 
 # Permission actions
 class Action:
@@ -57,3 +59,23 @@ def get_user_workspace_role(db: Session, user_id: int, workspace_id: int) -> Opt
         WorkspaceMember.user_id == user_id
     ).first()
     return cast(WorkspaceRole, member.role) if member else None
+
+
+def require_workspace_permission(
+    db: Session,
+    user: User,
+    action: str,
+    workspace_id: Optional[int] = None,
+) -> Optional[int]:
+    resolved_workspace_id = workspace_id or cast(Optional[int], user.default_workspace_id)
+    if resolved_workspace_id is None:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "WORKSPACE_REQUIRED",
+                "message": "Select or create a workspace before using this feature.",
+            },
+        )
+    if not check_permission(db, cast(int, user.id), resolved_workspace_id, action):
+        raise HTTPException(status_code=403, detail="Not enough workspace permissions")
+    return resolved_workspace_id

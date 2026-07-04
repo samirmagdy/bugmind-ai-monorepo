@@ -41,6 +41,7 @@ from app.core.audit import log_audit
 from app.core.idempotency import idempotency_store
 from app.core.rate_limit import rate_limiter
 from app.core.config import settings
+from app.core.rbac import Action, require_workspace_permission
 from app.services.jira.bulk_epic_service import fetch_epic_children
 from app.services.jira.bootstrap_service import (
     resolve_jira_bootstrap_context as resolve_jira_bootstrap_context_service,
@@ -847,6 +848,7 @@ def publish_xray_test_suite(
     current_user: User = Depends(deps.get_current_user)
 ):
     rate_limiter.check("jira.xray_publish", str(current_user.id), limit=5, window_seconds=60)
+    require_workspace_permission(db, current_user, Action.PUBLISH)
     idem_key = request.headers.get("Idempotency-Key")
     cached_response = idempotency_store.replay_or_reserve(
         "jira.xray_publish",
