@@ -74,7 +74,7 @@ To test if your Render database is reachable from your local machine (using the 
 
 ```bash
 # Export your external connection string from Render dashboard
-export DATABASE_URL="postgresql://user:password@hostname.render.com/bugmind"
+export DATABASE_URL="postgresql://<user>:<password>@hostname.render.com/bugmind"
 
 # Run a simple check
 python -c "from sqlalchemy import create_engine; engine = create_engine('${DATABASE_URL}'); print('Connection successful' if engine.connect() else 'Failed')"

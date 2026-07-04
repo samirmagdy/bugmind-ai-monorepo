@@ -4,6 +4,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
+from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -13,7 +14,7 @@ DB_FILE = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
 DB_FILE.close()
 os.environ.setdefault("DATABASE_URL", f"sqlite:///{DB_FILE.name}")
 os.environ.setdefault("SECRET_KEY", "test-secret-key-for-billing-readiness")
-os.environ.setdefault("ENCRYPTION_KEY", "test-encryption-key-for-billing-readiness")
+os.environ.setdefault("ENCRYPTION_KEY", Fernet.generate_key().decode())
 os.environ.setdefault("RATE_LIMITS_ENABLED", "false")
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -75,8 +76,8 @@ def _create_user(db, email="billing@example.com") -> User:
 
 def _configure_stripe(monkeypatch):
     monkeypatch.setattr(settings, "ENVIRONMENT", "production")
-    monkeypatch.setattr(settings, "STRIPE_SECRET_KEY", "sk_live_testbilling")
-    monkeypatch.setattr(settings, "STRIPE_WEBHOOK_SECRET", "whsec_testbilling")
+    monkeypatch.setattr(settings, "STRIPE_SECRET_KEY", "sk_live_")
+    monkeypatch.setattr(settings, "STRIPE_WEBHOOK_SECRET", "whsec_")
     monkeypatch.setattr(settings, "STRIPE_PRO_PRICE_ID", "price_test_pro")
     monkeypatch.setattr(settings, "STRIPE_BILLING_SUCCESS_URL", "https://app.example.com/billing/success")
     monkeypatch.setattr(settings, "STRIPE_BILLING_CANCEL_URL", "https://app.example.com/billing/cancel")
@@ -86,7 +87,7 @@ def _configure_stripe(monkeypatch):
 def _stripe_event(monkeypatch, event_type: str, event_object: dict):
     def construct_event(payload, sig_header, secret):
         assert sig_header == "signed"
-        assert secret == "whsec_testbilling"
+        assert secret == "whsec_"
         return {"id": f"evt_{event_type}", "type": event_type, "data": {"object": event_object}}
 
     monkeypatch.setattr("app.api.v1.stripe.stripe.Webhook.construct_event", construct_event)
@@ -107,7 +108,7 @@ def test_checkout_session_requires_live_mode_in_production(client, db, monkeypat
     user = _create_user(db)
     fastapi_app.dependency_overrides[deps.get_current_user] = lambda: user
     monkeypatch.setattr(settings, "ENVIRONMENT", "production")
-    monkeypatch.setattr(settings, "STRIPE_SECRET_KEY", "sk_test_not_live")
+    monkeypatch.setattr(settings, "STRIPE_SECRET_KEY", "sk_test_")
     monkeypatch.setattr(settings, "STRIPE_PRO_PRICE_ID", "price_test_pro")
     monkeypatch.setattr(settings, "STRIPE_BILLING_SUCCESS_URL", "https://app.example.com/billing/success")
     monkeypatch.setattr(settings, "STRIPE_BILLING_CANCEL_URL", "https://app.example.com/billing/cancel")

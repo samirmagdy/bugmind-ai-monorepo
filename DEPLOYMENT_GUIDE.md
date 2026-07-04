@@ -93,9 +93,9 @@ For local development, ensure `.env` file exists in root:
 ```env
 DATABASE_URL=sqlite:///./bugmind.db
 ENVIRONMENT=development
-SECRET_KEY=your-secret-key
-ENCRYPTION_KEY=your-encryption-key
-OPENROUTER_API_KEY=your-key
+SECRET_KEY=<generated-with-openssl-rand-hex-64>
+ENCRYPTION_KEY=<generated-fernet-key>
+OPENROUTER_API_KEY=<openrouter-api-key>
 ```
 
 ## Common Issues and Solutions

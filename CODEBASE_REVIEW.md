@@ -22,8 +22,8 @@ This is a well-structured, production-grade codebase with:
 **Location**: `backend/app/core/config.py`, `backend/app/core/security.py`
 ```python
 # config.py line 23-24
-SECRET_KEY: str = "CHANGE_THIS_IN_PRODUCTION_b8m9k2n3m4n5b6g7v8a9c0d1e2f3a4b"
-ENCRYPTION_KEY: str = "CHANGE_THIS_IN_PRODUCTION_MUST_BE_32_BYTES_!"
+SECRET_KEY: str = "<redacted-placeholder-secret>"
+ENCRYPTION_KEY: str = "<redacted-placeholder-encryption-key>"
 ```
 
 **Issue**: Default values in production code are a major security vulnerability. If someone deploys without setting proper environment variables, all encryption and JWT signing becomes predictable.
