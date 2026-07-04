@@ -1,5 +1,41 @@
 # BugMind AI — Release Checklist
 
+## Production Gate
+
+The release is not production-ready until this command exits `0` with no
+`FAIL` or `BLOCKED` lines:
+
+```bash
+python scripts/production_readiness_gate.py
+```
+
+This gate runs backend tests, extension lint/build/E2E smoke tests, dependency
+audits, secret scanning, Render Blueprint validation, live health checks, Render
+environment validation, Stripe live-mode validation, monitoring protection
+checks, custom-domain allowlist checks, and real Jira/Xray tenant contracts.
+
+Required external production values before the gate can pass:
+
+- Render API access: `RENDER_API_KEY` or `render login`
+- Production domain: `PRODUCTION_CUSTOM_DOMAIN`
+- Render web env vars: `SECRET_KEY`, `ENCRYPTION_KEY`, `DATABASE_URL`,
+  `DATABASE_EXTERNAL_URL`, `REDIS_URL`, `OPENROUTER_API_KEY`, `CORS_ORIGINS`,
+  `ALLOWED_HOSTS`, `EXTENSION_ORIGINS`, `MONITORING_SECRET_TOKEN`
+- Render worker env vars: `SECRET_KEY`, `ENCRYPTION_KEY`, `DATABASE_URL`,
+  `DATABASE_EXTERNAL_URL`, `REDIS_URL`, `OPENROUTER_API_KEY`
+- Stripe live billing: `STRIPE_SECRET_KEY=sk_live_*`,
+  `STRIPE_WEBHOOK_SECRET=whsec_*`, `STRIPE_PRO_PRICE_ID=price_*`, and HTTPS
+  billing success/cancel/portal URLs
+- Monitoring alerts: `ALERT_WEBHOOK_URL` or SMTP plus
+  `ALERT_EMAIL_RECIPIENTS`
+- Chrome Web Store extension origin in `EXTENSION_ORIGINS`
+- Real tenant contract env vars:
+  `RUN_REAL_TENANT_CONTRACTS=true`, `REAL_JIRA_CLOUD_URL`,
+  `REAL_JIRA_CLOUD_EMAIL`, `REAL_JIRA_CLOUD_API_TOKEN`,
+  `REAL_JIRA_SERVER_URL`, `REAL_JIRA_SERVER_USERNAME`,
+  `REAL_JIRA_SERVER_TOKEN`, `REAL_XRAY_CLOUD_CLIENT_ID`,
+  `REAL_XRAY_CLOUD_CLIENT_SECRET`
+
 ## Pre-Release Checklist
 
 Use this checklist before releasing a new version to production.

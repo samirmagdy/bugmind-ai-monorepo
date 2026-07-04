@@ -54,12 +54,20 @@ services:
         sync: false
       - key: ALLOWED_HOSTS
         sync: false
+      - key: EXTENSION_ORIGINS
+        sync: false
       - key: RATE_LIMITS_ENABLED
         value: "true"
       - key: ALLOW_PRIVATE_JIRA_HOSTS
         value: "false"
       - key: ALLOW_INSECURE_JIRA_SSL
         value: "false"
+      - key: MONITORING_SECRET_TOKEN
+        sync: false
+      - key: ALERT_WEBHOOK_URL
+        sync: false
+      - key: ALERT_EMAIL_RECIPIENTS
+        sync: false
       - key: STRIPE_SECRET_KEY
         sync: false
       - key: STRIPE_WEBHOOK_SECRET
