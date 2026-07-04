@@ -106,10 +106,28 @@ async def _run_startup_checks():
         import sys
         sys.exit(1)
 
-    # 2. Perform mandatory connection check
+    # 2. Perform mandatory connection check with retries
+    from sqlalchemy.exc import OperationalError
+    max_retries = 5
+    retry_delay = 3
+    connected = False
+    
+    for attempt in range(1, max_retries + 1):
+        try:
+            with engine.connect() as connection:
+                connection.execute(text("SELECT 1"))
+            connected = True
+            break
+        except (OperationalError, Exception) as e:
+            if attempt == max_retries:
+                logger.error("CRITICAL DATABASE CONNECTION FAILURE: %s", str(e))
+                logger.error("The application cannot start without a valid database connection.")
+                import sys
+                sys.exit(1)
+            logger.warning("Database connection attempt %d failed. Retrying in %ds... Error: %s", attempt, retry_delay, str(e))
+            time.sleep(retry_delay)
+
     try:
-        with engine.connect() as connection:
-            connection.execute(text("SELECT 1"))
         inspector = inspect(engine)
         tables = inspector.get_table_names()
         logger.info("DATABASE TABLES FOUND: %s", ", ".join(tables) if tables else "NONE")
@@ -136,8 +154,7 @@ async def _run_startup_checks():
                 import sys
                 sys.exit(1)
     except Exception as e:
-        logger.error("CRITICAL DATABASE CONNECTION FAILURE: %s", str(e))
-        logger.error("The application cannot start without a valid database connection.")
+        logger.error("CRITICAL DATABASE INSPECTION FAILURE: %s", str(e))
         import sys
         sys.exit(1)
 

@@ -60,13 +60,30 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
+    import time
+    from sqlalchemy.exc import OperationalError
+
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
 
-    with connectable.connect() as connection:
+    max_retries = 5
+    retry_delay = 3
+    connection = None
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            connection = connectable.connect()
+            break
+        except OperationalError as e:
+            if attempt == max_retries:
+                raise
+            print(f"Database connection attempt {attempt} failed ({e}). Retrying in {retry_delay}s...")
+            time.sleep(retry_delay)
+
+    with connection:
         context.configure(
             connection=connection, 
             target_metadata=target_metadata,
