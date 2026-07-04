@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     OPENROUTER_MAX_TOKENS: int = 1800
     STRIPE_SECRET_KEY: Optional[str] = None
     STRIPE_WEBHOOK_SECRET: Optional[str] = None
+    STRIPE_PRO_PRICE_ID: Optional[str] = None
+    STRIPE_BILLING_SUCCESS_URL: Optional[str] = None
+    STRIPE_BILLING_CANCEL_URL: Optional[str] = None
+    STRIPE_CUSTOMER_PORTAL_RETURN_URL: Optional[str] = None
     XRAY_CLOUD_CLIENT_ID: Optional[str] = None
     XRAY_CLOUD_CLIENT_SECRET: Optional[str] = None
     SMTP_HOST: Optional[str] = None

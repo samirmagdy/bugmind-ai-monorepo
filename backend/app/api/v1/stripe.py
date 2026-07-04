@@ -5,8 +5,25 @@ from app.api import deps
 from app.core.config import settings
 from app.core import stripe_service
 from app.core.audit import log_audit
+from app.models.user import User
 
 router = APIRouter()
+
+
+@router.post("/checkout-session")
+def create_checkout_session(
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    return stripe_service.create_checkout_session(current_user, db)
+
+
+@router.post("/customer-portal")
+def create_customer_portal_session(
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    return stripe_service.create_customer_portal_session(current_user, db)
 
 @router.post("/webhook")
 async def stripe_webhook(request: Request, db: Session = Depends(deps.get_db)):

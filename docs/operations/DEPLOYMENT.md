@@ -31,6 +31,10 @@
 | `RATE_LIMITS_ENABLED` | `false` | Set `true` when Redis is available |
 | `STRIPE_SECRET_KEY` | None | Required for billing |
 | `STRIPE_WEBHOOK_SECRET` | None | Required for Stripe webhooks |
+| `STRIPE_PRO_PRICE_ID` | None | Required for subscription checkout |
+| `STRIPE_BILLING_SUCCESS_URL` | None | Required for checkout redirects |
+| `STRIPE_BILLING_CANCEL_URL` | None | Required for checkout redirects |
+| `STRIPE_CUSTOMER_PORTAL_RETURN_URL` | None | Optional Customer Portal return URL |
 | `LOG_LEVEL` | `INFO` | Logging verbosity |
 
 ---

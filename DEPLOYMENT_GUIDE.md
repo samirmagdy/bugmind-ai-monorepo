@@ -55,6 +55,10 @@ The deployment was failing because:
 | `ALLOWED_HOSTS` | `bugmind-ai-monorepo.onrender.com` | Your render domain |
 | `STRIPE_SECRET_KEY` | `sk_live_...` | For production payments |
 | `STRIPE_WEBHOOK_SECRET` | `whsec_...` | From Stripe dashboard |
+| `STRIPE_PRO_PRICE_ID` | `price_...` | Live recurring Price ID for the Pro plan |
+| `STRIPE_BILLING_SUCCESS_URL` | `https://your-app.example.com/billing/success` | Checkout success redirect |
+| `STRIPE_BILLING_CANCEL_URL` | `https://your-app.example.com/billing/cancel` | Checkout cancel redirect |
+| `STRIPE_CUSTOMER_PORTAL_RETURN_URL` | `https://your-app.example.com/billing` | Customer Portal return URL |
 
 ### Step 2: Commit and Push Changes
 

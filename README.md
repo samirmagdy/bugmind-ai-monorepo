@@ -58,6 +58,10 @@ How to deploy:
    - `ALLOWED_HOSTS`
    - `STRIPE_SECRET_KEY`
    - `STRIPE_WEBHOOK_SECRET`
+   - `STRIPE_PRO_PRICE_ID`
+   - `STRIPE_BILLING_SUCCESS_URL`
+   - `STRIPE_BILLING_CANCEL_URL`
+   - `STRIPE_CUSTOMER_PORTAL_RETURN_URL`
 6. Deploy the Blueprint.
 
 Recommended Render setting:
@@ -75,7 +79,7 @@ Important:
 - If Render still logs `failed to resolve host 'dpg-...-a'`, set `DATABASE_EXTERNAL_URL` in the Render service environment to the database's official External Database URL. The startup script uses that value only when the internal hostname cannot resolve and forces `sslmode=require` for Render Postgres.
 - `/health` verifies database connectivity and is suitable for Render health checks.
 - In production, set `CORS_ORIGINS` to your real extension/web origins and `ALLOWED_HOSTS` to your Render hostname(s).
-- If you do not use Stripe yet, you can leave the Stripe secrets unset until you enable billing flows.
+- If you do not use Stripe yet, you can leave the Stripe variables unset until you enable billing flows. For production billing, use Stripe live-mode values: `sk_live_...`, `whsec_...`, and a live `price_...` recurring Price ID.
 
 ### 1.2 GitHub Actions -> Render
 The repo now includes a deployment workflow at `.github/workflows/render-deploy.yml`.

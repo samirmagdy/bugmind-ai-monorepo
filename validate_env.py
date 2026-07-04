@@ -24,6 +24,7 @@ SENSITIVE_VARS = {
     "OPENROUTER_API_KEY",
     "STRIPE_SECRET_KEY",
     "STRIPE_WEBHOOK_SECRET",
+    "STRIPE_PRO_PRICE_ID",
     "XRAY_CLOUD_CLIENT_SECRET",
     "SMTP_PASSWORD",
 }
@@ -95,7 +96,12 @@ def main():
         ("SECRET_KEY", True, r"^.{20,}$"),
         ("ENCRYPTION_KEY", True, r"^.{20,}$"),
         ("OPENROUTER_API_KEY", False, r"^sk-or-v1-"),
-        ("STRIPE_SECRET_KEY", False, r"^sk_(test|live)-"),
+        ("STRIPE_SECRET_KEY", False, r"^sk_(test|live)_"),
+        ("STRIPE_WEBHOOK_SECRET", False, r"^whsec_"),
+        ("STRIPE_PRO_PRICE_ID", False, r"^price_"),
+        ("STRIPE_BILLING_SUCCESS_URL", False, r"^https?://"),
+        ("STRIPE_BILLING_CANCEL_URL", False, r"^https?://"),
+        ("STRIPE_CUSTOMER_PORTAL_RETURN_URL", False, r"^https?://"),
         ("ALLOWED_HOSTS", False, r"^https?://"),
         ("CORS_ORIGINS", False, r"^https?://"),
     ]
@@ -103,6 +109,36 @@ def main():
     for var_name, required, pattern in checks:
         if not check_env(var_name, required=required, pattern=pattern):
             all_good = False
+    print()
+
+    print("--- Stripe Billing Readiness ---")
+    stripe_secret = settings.STRIPE_SECRET_KEY or ""
+    stripe_values = [
+        settings.STRIPE_SECRET_KEY,
+        settings.STRIPE_WEBHOOK_SECRET,
+        settings.STRIPE_PRO_PRICE_ID,
+        settings.STRIPE_BILLING_SUCCESS_URL,
+        settings.STRIPE_BILLING_CANCEL_URL,
+    ]
+    if any(stripe_values):
+        required_billing = {
+            "STRIPE_SECRET_KEY": settings.STRIPE_SECRET_KEY,
+            "STRIPE_WEBHOOK_SECRET": settings.STRIPE_WEBHOOK_SECRET,
+            "STRIPE_PRO_PRICE_ID": settings.STRIPE_PRO_PRICE_ID,
+            "STRIPE_BILLING_SUCCESS_URL": settings.STRIPE_BILLING_SUCCESS_URL,
+            "STRIPE_BILLING_CANCEL_URL": settings.STRIPE_BILLING_CANCEL_URL,
+        }
+        missing = [name for name, value in required_billing.items() if not value]
+        if missing:
+            print(f"✗ Stripe billing is partially configured; missing: {', '.join(missing)}")
+            all_good = False
+        elif settings.is_production and not stripe_secret.startswith("sk_live_"):
+            print("✗ Production billing must use a Stripe live-mode secret key (sk_live_...)")
+            all_good = False
+        else:
+            print("✓ Stripe billing configuration is complete")
+    else:
+        print("○ Stripe billing is not configured")
     print()
     
     # Check database connection if not SQLite
