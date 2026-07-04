@@ -22,6 +22,9 @@ Generate a fresh key: `python -c "from cryptography.fernet import Fernet; print(
 - Verify the database is reachable from the app (firewall, VPC rules)
 - Check Alembic migrations have been applied: `alembic upgrade head`
 
+### Render Postgres hostname does not resolve during Alembic
+If logs show `failed to resolve host 'dpg-...-a'`, the app is trying to use Render's internal Postgres hostname from a context where Render private DNS is unavailable. Verify the backend service and Postgres database are in the same Render workspace and region. The Blueprint pins `bugmind-backend`, `bugmind-db`, and `bugmind-redis` to `oregon` for new stacks; for existing resources, check the region in the Render dashboard because Render does not allow changing a service or database region after creation.
+
 ### Health check fails at `/health/ai`
 - Check `OPENROUTER_API_KEY` is set and valid
 - Test the key directly: `curl -H "Authorization: Bearer $OPENROUTER_API_KEY" https://openrouter.ai/api/v1/models`

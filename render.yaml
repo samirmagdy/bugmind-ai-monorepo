@@ -1,5 +1,6 @@
 databases:
   - name: bugmind-db
+    region: oregon
     plan: free
     databaseName: bugmind
     user: bugmind_admin
@@ -7,15 +8,16 @@ databases:
 services:
   - type: redis
     name: bugmind-redis
+    region: oregon
     plan: free
     ipAllowList: []
 
   - type: web
     name: bugmind-backend
     runtime: python
+    region: oregon
     rootDir: backend
     buildCommand: pip install -r requirements.txt
-    preDeployCommand: alembic upgrade head
     startCommand: bash ./start_render.sh
     healthCheckPath: /health
     autoDeployTrigger: commit

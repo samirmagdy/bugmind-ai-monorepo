@@ -38,6 +38,7 @@ This repo now includes a Render Blueprint at [render.yaml](./render.yaml) for th
 What it provisions:
 - one Python web service for FastAPI
 - one managed PostgreSQL database
+- one Render Key Value/Redis-compatible service
 
 How to deploy:
 1. Push the repo to GitHub/GitLab.
@@ -64,17 +65,15 @@ Recommended Render setting:
 
 Deployment behavior:
 - Render runs the service from `backend/`
-- migrations run through Alembic before startup
+- migrations run through Alembic in `start_render.sh` before the web server starts
 - the app binds to Render’s `PORT` environment variable
 - health checks use `/health`
-- the free-tier setup does not provision Redis; Redis-backed rate limiting, idempotency replay, and metadata caching degrade gracefully
 
 Important:
 - Alembic is now configured to use `DATABASE_URL` from the environment, provided automatically by the Render Blueprint.
-- The system now uses Render's managed Postgres, simplifying connectivity and security.
+- The system now uses Render's managed Postgres. The Blueprint pins the backend, database, and Redis-compatible service to the same Render region so Render's internal database hostname resolves correctly.
 - `/health` verifies database connectivity and is suitable for Render health checks.
 - In production, set `CORS_ORIGINS` to your real extension/web origins and `ALLOWED_HOSTS` to your Render hostname(s).
-- The free Render blueprint sets `REDIS_URL=redis://localhost:6379/0` and `RATE_LIMITS_ENABLED=false` so the app can run without a paid Redis service.
 - If you do not use Stripe yet, you can leave the Stripe secrets unset until you enable billing flows.
 
 ### 1.2 GitHub Actions -> Render
