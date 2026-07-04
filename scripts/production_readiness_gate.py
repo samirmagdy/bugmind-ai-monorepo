@@ -222,6 +222,7 @@ def check_render(gate: Gate, args: argparse.Namespace) -> None:
             "DATABASE_EXTERNAL_URL",
             "REDIS_URL",
             "OPENROUTER_API_KEY",
+            "GOOGLE_OAUTH_CLIENT_ID",
             "CORS_ORIGINS",
             "ALLOWED_HOSTS",
             "EXTENSION_ORIGINS",
@@ -255,6 +256,12 @@ def check_render(gate: Gate, args: argparse.Namespace) -> None:
             gate.pass_(f"Render {key}")
         else:
             gate.fail(f"Render {key}", f"expected {expected} on web and worker")
+
+    google_client_id = web.get("GOOGLE_OAUTH_CLIENT_ID", "")
+    if google_client_id.endswith(".apps.googleusercontent.com"):
+        gate.pass_("Google OAuth client ID")
+    else:
+        gate.block("Google OAuth client ID", "set GOOGLE_OAUTH_CLIENT_ID to the production Google OAuth client ID")
 
     stripe_checks = {
         "STRIPE_SECRET_KEY": lambda value: value.startswith("sk_live_"),
@@ -321,6 +328,20 @@ def check_live_health(gate: Gate, base_url: str) -> None:
                 gate.block("Live /health/ai", body[:300])
         else:
             gate.pass_(f"Live {path}")
+
+    google_config_url = f"{base_url.rstrip('/')}/api/v1/auth/google/config"
+    try:
+        with urllib.request.urlopen(google_config_url, timeout=20) as response:
+            payload = json.loads(response.read().decode("utf-8", errors="ignore"))
+    except Exception as exc:
+        gate.fail("Live Google auth config", str(exc))
+        return
+
+    client_id = str(payload.get("client_id") or "")
+    if payload.get("enabled") is True and client_id.endswith(".apps.googleusercontent.com"):
+        gate.pass_("Live Google auth config")
+    else:
+        gate.block("Live Google auth config", "Google sign-in is disabled or GOOGLE_OAUTH_CLIENT_ID is invalid")
 
 
 def check_secret_scan(gate: Gate) -> None:
@@ -396,6 +417,12 @@ def check_local_quality(gate: Gate) -> None:
         gate.pass_("Extension manifest production allowlist")
     else:
         gate.fail("Extension manifest production allowlist", "manifest must be MV3 and restrict host_permissions to Atlassian Cloud")
+
+    permissions = payload.get("permissions") or []
+    if "identity" in permissions:
+        gate.pass_("Extension Google identity permission")
+    else:
+        gate.fail("Extension Google identity permission", "manifest must include the Chrome identity permission for Google sign-in")
 
 
 def check_blueprint(gate: Gate) -> None:

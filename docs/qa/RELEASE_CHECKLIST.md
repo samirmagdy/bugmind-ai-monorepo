@@ -19,8 +19,9 @@ Required external production values before the gate can pass:
 - Render API access: `RENDER_API_KEY` or `render login`
 - Production domain: `PRODUCTION_CUSTOM_DOMAIN`
 - Render web env vars: `SECRET_KEY`, `ENCRYPTION_KEY`, `DATABASE_URL`,
-  `DATABASE_EXTERNAL_URL`, `REDIS_URL`, `OPENROUTER_API_KEY`, `CORS_ORIGINS`,
-  `ALLOWED_HOSTS`, `EXTENSION_ORIGINS`, `MONITORING_SECRET_TOKEN`
+  `DATABASE_EXTERNAL_URL`, `REDIS_URL`, `OPENROUTER_API_KEY`,
+  `GOOGLE_OAUTH_CLIENT_ID`, `CORS_ORIGINS`, `ALLOWED_HOSTS`,
+  `EXTENSION_ORIGINS`, `MONITORING_SECRET_TOKEN`
 - Render worker env vars: `SECRET_KEY`, `ENCRYPTION_KEY`, `DATABASE_URL`,
   `DATABASE_EXTERNAL_URL`, `REDIS_URL`, `OPENROUTER_API_KEY`
 - Stripe live billing: `STRIPE_SECRET_KEY=sk_live_*`,
@@ -29,6 +30,8 @@ Required external production values before the gate can pass:
 - Monitoring alerts: `ALERT_WEBHOOK_URL` or SMTP plus
   `ALERT_EMAIL_RECIPIENTS`
 - Chrome Web Store extension origin in `EXTENSION_ORIGINS`
+- Google OAuth production client ID configured for the Chrome extension redirect
+  URI returned by `chrome.identity.getRedirectURL('google')`
 - Real tenant contract env vars:
   `RUN_REAL_TENANT_CONTRACTS=true`, `REAL_JIRA_CLOUD_URL`,
   `REAL_JIRA_CLOUD_EMAIL`, `REAL_JIRA_CLOUD_API_TOKEN`,
