@@ -40,6 +40,33 @@ except OSError as exc:
 PY
 }
 
+derive_external_database_url() {
+    python - <<'PY'
+import os
+import sys
+from urllib.parse import urlparse, urlunparse
+
+url = os.environ.get("DATABASE_URL", "")
+suffix = os.environ.get("DATABASE_EXTERNAL_HOST_SUFFIX", "oregon-postgres.render.com").strip()
+parsed = urlparse(url)
+host = parsed.hostname
+
+if not host or not suffix or not parsed.scheme.startswith(("postgres", "postgresql")):
+    sys.exit(1)
+
+if "." in host:
+    sys.exit(1)
+
+external_host = f"{host}.{suffix}"
+if parsed.port:
+    netloc = parsed.netloc.replace(host, external_host, 1)
+else:
+    netloc = parsed.netloc.replace(host, external_host, 1)
+
+print(urlunparse(parsed._replace(netloc=netloc)))
+PY
+}
+
 # DATABASE_URL is MANDATORY for all environments. Fail fast if it is missing.
 if [ -z "${DATABASE_URL:-}" ]; then
     echo "ERROR: DATABASE_URL is not set. The application cannot start without a valid database connection."
@@ -58,6 +85,11 @@ if ! database_host_resolves; then
         echo "Render private database hostname is not resolvable here. Falling back to DATABASE_EXTERNAL_URL."
         export DATABASE_URL="${DATABASE_EXTERNAL_URL}"
         echo "Database target after fallback: $(describe_database_url)"
+        database_host_resolves
+    elif derived_database_url="$(derive_external_database_url)"; then
+        echo "Render private database hostname is not resolvable here. Deriving external Render Postgres URL."
+        export DATABASE_URL="${derived_database_url}"
+        echo "Database target after derived fallback: $(describe_database_url)"
         database_host_resolves
     else
         echo "ERROR: Render private database hostname is not resolvable from this service."

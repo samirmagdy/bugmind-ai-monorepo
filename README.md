@@ -72,7 +72,7 @@ Deployment behavior:
 Important:
 - Alembic is now configured to use `DATABASE_URL` from the environment, provided automatically by the Render Blueprint.
 - The system now uses Render's managed Postgres. The Blueprint pins the backend, database, and Redis-compatible service to the same Render region so Render's internal database hostname resolves correctly.
-- If Render still logs `failed to resolve host 'dpg-...-a'`, set `DATABASE_EXTERNAL_URL` in the Render service environment to the database's External Database URL. For existing Blueprint services, add this manually in the Render dashboard; adding `sync: false` to `render.yaml` only prompts during the initial Blueprint creation flow. The startup script uses it only when the internal hostname cannot resolve.
+- If Render still logs `failed to resolve host 'dpg-...-a'`, the startup script derives an external Render Postgres URL using `DATABASE_EXTERNAL_HOST_SUFFIX`. You can still set `DATABASE_EXTERNAL_URL` manually in the Render service environment to override that derived fallback.
 - `/health` verifies database connectivity and is suitable for Render health checks.
 - In production, set `CORS_ORIGINS` to your real extension/web origins and `ALLOWED_HOSTS` to your Render hostname(s).
 - If you do not use Stripe yet, you can leave the Stripe secrets unset until you enable billing flows.
