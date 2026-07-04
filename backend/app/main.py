@@ -164,19 +164,29 @@ def root_redirect():
 
 @app.get("/health", tags=["System"])
 def health_check():
+    from datetime import datetime, timezone
     return {
         "status": "ok", 
         "version": settings.VERSION, 
         "environment": settings.ENVIRONMENT,
+        "uptime_seconds": round(time.time() - APP_STARTED_AT, 3),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "trace_id": get_trace_id()
     }
 
 @app.get("/health/db", tags=["System"])
 def health_db():
     try:
+        start_time = time.perf_counter()
         with engine.connect() as connection:
             connection.execute(text("SELECT 1"))
-        return {"status": "ok", "service": "database", "trace_id": get_trace_id()}
+        latency_ms = round((time.perf_counter() - start_time) * 1000, 2)
+        return {
+            "status": "ok", 
+            "service": "database", 
+            "latency_ms": latency_ms,
+            "trace_id": get_trace_id()
+        }
     except Exception as e:
         logger.error("DB Health Check Failed: %s", str(e))
         raise HTTPException(status_code=503, detail="Database connection failed")

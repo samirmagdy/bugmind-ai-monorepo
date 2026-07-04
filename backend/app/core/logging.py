@@ -27,6 +27,11 @@ class RedactingFilter(logging.Filter):
 
 
 def configure_logging() -> None:
+    from pathlib import Path
+    log_dir = Path(__file__).resolve().parents[2] / "logs"
+    log_dir.mkdir(exist_ok=True)
+    log_file = log_dir / "errors.log"
+
     dictConfig(
         {
             "version": 1,
@@ -44,10 +49,19 @@ def configure_logging() -> None:
                     "class": "logging.StreamHandler",
                     "formatter": "standard",
                     "filters": ["redact"],
+                },
+                "error_file": {
+                    "class": "logging.handlers.RotatingFileHandler",
+                    "filename": str(log_file),
+                    "maxBytes": 10 * 1024 * 1024,  # 10MB
+                    "backupCount": 5,
+                    "formatter": "standard",
+                    "filters": ["redact"],
+                    "level": "ERROR",
                 }
             },
             "root": {
-                "handlers": ["default"],
+                "handlers": ["default", "error_file"],
                 "level": settings.LOG_LEVEL.upper(),
             },
         }

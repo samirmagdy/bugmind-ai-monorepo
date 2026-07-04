@@ -59,6 +59,11 @@ class Settings(BaseSettings):
     PASSWORD_RESET_CODE_EXPIRE_MINUTES: int = 15
     GOOGLE_OAUTH_CLIENT_ID: Optional[str] = None
 
+    # Monitoring & Alerting Configuration
+    ALERT_WEBHOOK_URL: Optional[str] = None
+    ALERT_EMAIL_RECIPIENTS: Optional[str] = None
+    MONITORING_SECRET_TOKEN: Optional[str] = None
+
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
     def normalize_db_url(cls, v: Any) -> Any:
