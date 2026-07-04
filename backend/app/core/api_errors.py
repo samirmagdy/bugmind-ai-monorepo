@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from fastapi import HTTPException, Request
-from fastapi.exceptions import RequestValidationError
+from fastapi import Request
 from fastapi.responses import JSONResponse
 
 from app.core.context import get_trace_id
@@ -129,4 +128,3 @@ async def validation_exception_handler(request: Request, exc: Any) -> JSONRespon
         content=error_body.model_dump(),
         headers={"X-Request-ID": error_body.trace_id}
     )
-

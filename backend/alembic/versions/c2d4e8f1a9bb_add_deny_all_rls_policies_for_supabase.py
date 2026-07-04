@@ -8,6 +8,7 @@ Create Date: 2026-04-20 15:10:00.000000
 from typing import Sequence, Union
 
 from alembic import op
+from sqlalchemy import text
 
 
 # revision identifiers, used by Alembic.
@@ -32,9 +33,6 @@ ROLES = ("anon", "authenticated")
 
 def _policy_name(table_name: str, role_name: str) -> str:
     return f"{table_name}_{role_name}_deny_all"
-
-
-from sqlalchemy import text
 
 def upgrade() -> None:
     bind = op.get_bind()

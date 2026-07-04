@@ -46,3 +46,27 @@ export const deobfuscate = (encoded: string): string => {
     return '';
   }
 };
+
+function containsControlCharacters(value: string): boolean {
+  return Array.from(value).some((char) => char.charCodeAt(0) <= 31);
+}
+
+export function decodeStoredToken(encoded: string | undefined): string {
+  if (!encoded) return '';
+
+  const decoded = deobfuscate(encoded);
+  if (decoded && decoded.split('.').length === 3 && !containsControlCharacters(decoded)) {
+    return decoded;
+  }
+
+  try {
+    const legacy = atob(encoded);
+    if (legacy && legacy.split('.').length === 3 && !containsControlCharacters(legacy)) {
+      return legacy;
+    }
+  } catch {
+    // Ignore legacy decode failure and fall through.
+  }
+
+  return decoded;
+}

@@ -4,7 +4,7 @@
  * Handles tab orchestration, context discovery, and sidepanel sync.
  */
 
-import { deobfuscate } from '../sidepanel/utils/StorageObfuscator';
+import { decodeStoredToken } from '../sidepanel/utils/StorageObfuscator';
 import { normalizeApiBase } from '../sidepanel/utils/url';
 
 // Deployment Metadata
@@ -90,27 +90,6 @@ function normalizeJiraUrl(url: string | null | undefined): string {
   } catch {
     return trimmed;
   }
-}
-
-function containsControlCharacters(value: string): boolean {
-  return Array.from(value).some((char) => char.charCodeAt(0) <= 31);
-}
-
-function decodeStoredToken(encoded: string | undefined): string {
-  if (!encoded) return '';
-  const decoded = deobfuscate(encoded);
-  if (decoded && decoded.split('.').length === 3 && !containsControlCharacters(decoded)) {
-    return decoded;
-  }
-  try {
-    const legacy = atob(encoded);
-    if (legacy && legacy.split('.').length === 3 && !containsControlCharacters(legacy)) {
-      return legacy;
-    }
-  } catch {
-    // Ignore legacy decode failure.
-  }
-  return decoded;
 }
 
 function storageLocalGet<T extends Record<string, unknown>>(keys: string[]): Promise<T> {

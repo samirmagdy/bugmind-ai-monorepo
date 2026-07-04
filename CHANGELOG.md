@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Product Planning
+- Positioned BugMind AI as **Advanced Beta / Pre-Production Hardening**.
+- Added a missing-parts requirements backlog focused on production release readiness, wider beta readiness, and enterprise readiness.
+- Reworked the roadmap around production gates: audit metadata, Jira/Xray contract tests, Xray Cloud hardening, persistent bulk queues, RBAC enforcement, billing enforcement, domain allowlisting, Playwright E2E smoke tests, and release readiness automation.
+
+### Production Hardening
+- Added AI generation audit metadata for bug/finding generation success and failure paths without storing raw sensitive input.
+- Hardened Xray Cloud folder behavior so folder lookup/create/add failures produce warnings instead of blocking test issue creation.
+- Added focused Xray publish contract coverage for Xray Cloud folder fallbacks and Xray Server/DC manual steps plus repository folder assignment.
+
 ## [1.0.0] - 2026-05-08
 
 ### Initial Release

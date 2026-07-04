@@ -27,11 +27,15 @@ export function normalizeApiBase(url: string | null | undefined): string {
     return `${trimmed}/v1`;
   }
 
-  if (!trimmed.endsWith('/api/v1')) {
-    trimmed = trimmed.replace(/\/api\/v1\/.*$/i, '/api/v1');
+  if (trimmed.endsWith('/api/v1')) {
+    return trimmed;
   }
 
-  return trimmed;
+  if (/\/api\/v1\/.+$/i.test(trimmed)) {
+    return trimmed.replace(/\/api\/v1\/.*$/i, '/api/v1');
+  }
+
+  return `${trimmed}/api/v1`;
 }
 
 // Re-export for consumers who import from utils/url

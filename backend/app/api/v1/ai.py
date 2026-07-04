@@ -1,4 +1,6 @@
 import time
+from typing import Any
+
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
@@ -33,12 +35,50 @@ from app.services.ai.workflows import (
     prepare_bug_preview_response,
     submit_bugs_response,
 )
+from app.services.ai.audit_metadata import build_ai_generation_audit_metadata
 from app.services.subscription.limit_checker import LimitChecker
 from app.services.ai.quality_scorer import score_bug_input
 from app.services.ai.story_analyzer import analyze_story_context
 
 
 router = APIRouter()
+
+
+def _audit_ai_generation(
+    *,
+    action: str,
+    request: Request,
+    req: Any,
+    db: Session,
+    current_user: User,
+    generation_source: str,
+    start_time: float,
+    success: bool,
+    response_payload: Any = None,
+    failure_reason: str | None = None,
+    output_count: int | None = None,
+    extra: dict[str, Any] | None = None,
+) -> None:
+    duration_ms = int((time.monotonic() - start_time) * 1000)
+    metadata = build_ai_generation_audit_metadata(
+        request_payload=req,
+        response_payload=response_payload,
+        current_user=current_user,
+        generation_source=generation_source,
+        request_path=str(request.url.path),
+        duration_ms=duration_ms,
+        success=success,
+        failure_reason=failure_reason,
+        output_count=output_count,
+        extra=extra,
+    )
+    log_audit(
+        action,
+        current_user.id,
+        workspace_id=current_user.default_workspace_id,
+        db=db,
+        **metadata,
+    )
 
 
 @router.get("/usage")
@@ -59,23 +99,47 @@ async def generate_bug_report(
     rate_limiter.check("ai.generate", str(current_user.id), limit=10, window_seconds=60)
     LimitChecker.check_allowed(db, current_user.id)
     start_time = time.monotonic()
-    response = await generate_findings_response(req, db, current_user, include_analysis_summary=True)
-    duration_ms = int((time.monotonic() - start_time) * 1000)
-    LimitChecker.record_usage(db, current_user.id, "/generate", 0)
-    log_audit(
-        "ai.generate",
-        current_user.id,
-        db=db,
-        jira_connection_id=req.jira_connection_id,
-        project_key=req.project_key,
-        issue_type_id=req.issue_type_id,
-        request_path=str(request.url.path),
-        generation_type="gap_analysis",
-        output_count=len(response.bugs),
-        duration_ms=duration_ms,
-        success=True,
-    )
-    return response
+    try:
+        response = await generate_findings_response(req, db, current_user, include_analysis_summary=True)
+        LimitChecker.record_usage(db, current_user.id, "/generate", 0)
+        _audit_ai_generation(
+            action="ai.generate",
+            request=request,
+            req=req,
+            db=db,
+            current_user=current_user,
+            generation_source="gap_analysis",
+            start_time=start_time,
+            success=True,
+            response_payload=response,
+            output_count=len(response.bugs),
+            extra={
+                "jira_connection_id": req.jira_connection_id,
+                "project_key": req.project_key,
+                "issue_type_id": req.issue_type_id,
+                "generation_type": "gap_analysis",
+            },
+        )
+        return response
+    except Exception as exc:
+        _audit_ai_generation(
+            action="ai.generate",
+            request=request,
+            req=req,
+            db=db,
+            current_user=current_user,
+            generation_source="gap_analysis",
+            start_time=start_time,
+            success=False,
+            failure_reason=str(getattr(exc, "detail", None) or exc),
+            extra={
+                "jira_connection_id": req.jira_connection_id,
+                "project_key": req.project_key,
+                "issue_type_id": req.issue_type_id,
+                "generation_type": "gap_analysis",
+            },
+        )
+        raise
 
 
 @router.post("/generate/manual", response_model=ManualBugGenerationResponse)
@@ -88,23 +152,47 @@ async def generate_manual_bug_report(
     rate_limiter.check("ai.generate", str(current_user.id), limit=10, window_seconds=60)
     LimitChecker.check_allowed(db, current_user.id)
     start_time = time.monotonic()
-    response = await generate_findings_response(req, db, current_user, include_analysis_summary=False)
-    duration_ms = int((time.monotonic() - start_time) * 1000)
-    LimitChecker.record_usage(db, current_user.id, "/generate", 0)
-    log_audit(
-        "ai.generate.manual",
-        current_user.id,
-        db=db,
-        jira_connection_id=req.jira_connection_id,
-        project_key=req.project_key,
-        issue_type_id=req.issue_type_id,
-        request_path=str(request.url.path),
-        generation_type="manual",
-        output_count=len(response.bugs),
-        duration_ms=duration_ms,
-        success=True,
-    )
-    return response
+    try:
+        response = await generate_findings_response(req, db, current_user, include_analysis_summary=False)
+        LimitChecker.record_usage(db, current_user.id, "/generate", 0)
+        _audit_ai_generation(
+            action="ai.generate.manual",
+            request=request,
+            req=req,
+            db=db,
+            current_user=current_user,
+            generation_source="manual_bug",
+            start_time=start_time,
+            success=True,
+            response_payload=response,
+            output_count=len(response.bugs),
+            extra={
+                "jira_connection_id": req.jira_connection_id,
+                "project_key": req.project_key,
+                "issue_type_id": req.issue_type_id,
+                "generation_type": "manual",
+            },
+        )
+        return response
+    except Exception as exc:
+        _audit_ai_generation(
+            action="ai.generate.manual",
+            request=request,
+            req=req,
+            db=db,
+            current_user=current_user,
+            generation_source="manual_bug",
+            start_time=start_time,
+            success=False,
+            failure_reason=str(getattr(exc, "detail", None) or exc),
+            extra={
+                "jira_connection_id": req.jira_connection_id,
+                "project_key": req.project_key,
+                "issue_type_id": req.issue_type_id,
+                "generation_type": "manual",
+            },
+        )
+        raise
 
 
 @router.post("/test-cases", response_model=TestSuiteResponse)
@@ -206,19 +294,50 @@ async def bulk_analyze_stories(
 ):
     rate_limiter.check("ai.bulk_analyze", str(current_user.id), limit=2, window_seconds=60)
     LimitChecker.check_allowed(db, current_user.id)
-    response = await bulk_analyze_stories_response(req, db, current_user)
-    LimitChecker.record_usage(db, current_user.id, "/bulk/analyze", 0)
-    log_audit(
-        "ai.bulk_analyze",
-        current_user.id,
-        db=db,
-        jira_connection_id=req.jira_connection_id,
-        project_key=req.project_key,
-        issue_type_id=req.issue_type_id,
-        request_path=str(request.url.path),
-        story_count=len(req.stories),
-    )
-    return response
+    start_time = time.monotonic()
+    try:
+        response = await bulk_analyze_stories_response(req, db, current_user)
+        LimitChecker.record_usage(db, current_user.id, "/bulk/analyze", 0)
+        _audit_ai_generation(
+            action="ai.bulk_analyze",
+            request=request,
+            req=req,
+            db=db,
+            current_user=current_user,
+            generation_source="bulk_job",
+            start_time=start_time,
+            success=True,
+            response_payload=response,
+            output_count=len(response.bugs),
+            extra={
+                "jira_connection_id": req.jira_connection_id,
+                "project_key": req.project_key,
+                "issue_type_id": req.issue_type_id,
+                "story_count": len(req.stories),
+                "generation_type": "bulk_analysis",
+            },
+        )
+        return response
+    except Exception as exc:
+        _audit_ai_generation(
+            action="ai.bulk_analyze",
+            request=request,
+            req=req,
+            db=db,
+            current_user=current_user,
+            generation_source="bulk_job",
+            start_time=start_time,
+            success=False,
+            failure_reason=str(getattr(exc, "detail", None) or exc),
+            extra={
+                "jira_connection_id": req.jira_connection_id,
+                "project_key": req.project_key,
+                "issue_type_id": req.issue_type_id,
+                "story_count": len(req.stories),
+                "generation_type": "bulk_analysis",
+            },
+        )
+        raise
 
 
 @router.post("/bulk/brd-compare", response_model=GapAnalysisResponse)
@@ -230,19 +349,50 @@ async def bulk_compare_brd(
 ):
     rate_limiter.check("ai.bulk_brd_compare", str(current_user.id), limit=2, window_seconds=60)
     LimitChecker.check_allowed(db, current_user.id)
-    response = await bulk_compare_brd_response(req, db, current_user)
-    LimitChecker.record_usage(db, current_user.id, "/bulk/brd-compare", 0)
-    log_audit(
-        "ai.bulk_brd_compare",
-        current_user.id,
-        db=db,
-        jira_connection_id=req.jira_connection_id,
-        project_key=req.project_key,
-        issue_type_id=req.issue_type_id,
-        request_path=str(request.url.path),
-        story_count=len(req.stories),
-    )
-    return response
+    start_time = time.monotonic()
+    try:
+        response = await bulk_compare_brd_response(req, db, current_user)
+        LimitChecker.record_usage(db, current_user.id, "/bulk/brd-compare", 0)
+        _audit_ai_generation(
+            action="ai.bulk_brd_compare",
+            request=request,
+            req=req,
+            db=db,
+            current_user=current_user,
+            generation_source="bulk_job",
+            start_time=start_time,
+            success=True,
+            response_payload=response,
+            output_count=len(response.bugs),
+            extra={
+                "jira_connection_id": req.jira_connection_id,
+                "project_key": req.project_key,
+                "issue_type_id": req.issue_type_id,
+                "story_count": len(req.stories),
+                "generation_type": "brd_comparison",
+            },
+        )
+        return response
+    except Exception as exc:
+        _audit_ai_generation(
+            action="ai.bulk_brd_compare",
+            request=request,
+            req=req,
+            db=db,
+            current_user=current_user,
+            generation_source="bulk_job",
+            start_time=start_time,
+            success=False,
+            failure_reason=str(getattr(exc, "detail", None) or exc),
+            extra={
+                "jira_connection_id": req.jira_connection_id,
+                "project_key": req.project_key,
+                "issue_type_id": req.issue_type_id,
+                "story_count": len(req.stories),
+                "generation_type": "brd_comparison",
+            },
+        )
+        raise
 
 
 @router.post("/preview", response_model=PreviewPreparationResponse)

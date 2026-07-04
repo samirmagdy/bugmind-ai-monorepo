@@ -1,3 +1,4 @@
+# ruff: noqa: E402,F401
 import pytest
 from typing import cast
 import os

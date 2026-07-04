@@ -1,6 +1,5 @@
 import logging
 import time
-import traceback
 from typing import Optional
 from urllib.parse import urlparse
 from uuid import uuid4
@@ -10,7 +9,7 @@ from fastapi.responses import JSONResponse
 
 from app.core.api_errors import build_error_response
 from app.core.config import settings
-from app.core.context import set_trace_id, get_trace_id
+from app.core.context import set_trace_id
 
 logger = logging.getLogger("bugmind.http")
 

@@ -1,5 +1,6 @@
-from typing import cast, Optional
+from typing import cast
 from fastapi import HTTPException
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.core import security
@@ -11,7 +12,6 @@ from app.schemas.jira import JiraConnectionCreate, JiraConnectionUpdate
 from app.services.jira.connection_service import verify_connection_credentials
 
 
-from sqlalchemy import or_, and_
 from app.models.workspace import WorkspaceMember
 
 def list_user_connections(db: Session, current_user: User) -> list[JiraConnection]:
@@ -21,8 +21,8 @@ def list_user_connections(db: Session, current_user: User) -> list[JiraConnectio
         or_(
             JiraConnection.user_id == cast(int, current_user.id),
             and_(
-                JiraConnection.workspace_id != None,
-                JiraConnection.is_shared == True,
+                JiraConnection.workspace_id.isnot(None),
+                JiraConnection.is_shared.is_(True),
                 JiraConnection.workspace_id.in_(
                     db.query(WorkspaceMember.workspace_id).filter(
                         WorkspaceMember.user_id == cast(int, current_user.id)

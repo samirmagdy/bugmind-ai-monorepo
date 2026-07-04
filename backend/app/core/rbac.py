@@ -1,4 +1,4 @@
-from typing import Optional, cast, List
+from typing import Optional, cast
 
 from sqlalchemy.orm import Session
 from app.models.workspace import WorkspaceMember, WorkspaceRole

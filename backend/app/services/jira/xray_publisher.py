@@ -253,6 +253,38 @@ def ensure_xray_folder(adapter: JiraServerAdapter, project_key: str, folder_path
     return parent_id
 
 
+def ensure_xray_cloud_folder(xray_client: Any, project_id: str, folder_path: str, warnings: list[str]) -> Optional[str]:
+    parent_id = "0"
+    current_folders: list[dict[str, Any]] = []
+    try:
+        current_folders = xray_client.get_folders(project_id)
+    except HTTPException as exc:
+        warnings.append(f"Xray Cloud folder lookup failed; tests will be created without folder assignment: {exc.detail}")
+        return None
+
+    for part in [segment for segment in folder_path.split("/") if segment.strip()]:
+        name = part.strip()
+        found = _find_xray_folder(current_folders, name=name, parent_id=parent_id)
+        if found:
+            found_id = _folder_id(found)
+            if found_id:
+                parent_id = found_id
+                children = found.get("folders") or found.get("children") or []
+                current_folders = children if isinstance(children, list) else []
+                continue
+
+        try:
+            parent_id = xray_client.create_folder(project_id, name, parent_id)
+            current_folders = []
+        except HTTPException as exc:
+            warnings.append(
+                f"Xray Cloud folder '{name}' could not be created; tests will be created without folder assignment: {exc.detail}"
+            )
+            return None
+
+    return parent_id if parent_id != "0" else None
+
+
 def add_xray_manual_steps(adapter: JiraServerAdapter, issue_key: str, test_case: dict) -> None:
     steps = [str(step).strip() for step in (test_case.get("steps") or []) if str(step).strip()]
     expected_result = str(test_case.get("expected_result") or "").strip()
@@ -564,37 +596,6 @@ class XrayCloudPublisher:
         from app.services.jira.xray_cloud import XrayCloudClient
         xray_client = XrayCloudClient(conn)
         
-        # 1. Ensure Folder exists via GraphQL
-        folder_id: Optional[str] = None
-        if folder_path and req.xray_project_id:
-            # Simple folder creation handling
-            parent_id = "0" # Or null
-            current_path_parts: list[str] = []
-            
-            folders_response = xray_client.get_folders(req.xray_project_id)
-            for part in [segment for segment in folder_path.split("/") if segment.strip()]:
-                name = part.strip()
-                current_path_parts.append(name)
-                
-                # A naive folder finding - ideally we search recursively in folders_response
-                # Since Xray GraphQL getFolders returns a tree, we need to traverse it.
-                def find_folder(nodes: list, target_name: str) -> Optional[dict]:
-                    for node in nodes:
-                        if node.get("name", "").lower() == target_name.lower():
-                            return node
-                    return None
-
-                # For simplicity in this iteration, we create if we can't easily find it at the top
-                found = find_folder(folders_response, name)
-                if found:
-                    parent_id = found["id"]
-                    folders_response = found.get("folders", [])
-                else:
-                    parent_id = xray_client.create_folder(req.xray_project_id, name, parent_id)
-                    folders_response = [] # New folder has no children
-
-            folder_id = parent_id
-
         available_link_types: list[str] = []
         try:
             available_link_types = adapter.get_issue_link_types()
@@ -606,6 +607,11 @@ class XrayCloudPublisher:
         transitioned_tests: list[str] = []
         warnings: list[str] = []
         link_type_used: Optional[str] = None
+
+        # 1. Try to ensure the folder exists via GraphQL. Folder failures must not block Jira test creation.
+        folder_id: Optional[str] = None
+        if folder_path and req.xray_project_id:
+            folder_id = ensure_xray_cloud_folder(xray_client, req.xray_project_id, folder_path, warnings)
 
         try:
             for test_case in req.test_cases:
@@ -640,9 +646,9 @@ class XrayCloudPublisher:
                 
                 # Add steps via GraphQL
                 steps_data = []
-                steps = [str(step).strip() for step in (test_case.get("steps") or []) if str(step).strip()]
-                expected_result = str(test_case.get("expected_result") or "").strip()
-                preconditions = str(test_case.get("preconditions") or "").strip()
+                steps = [str(step).strip() for step in (test_case_payload.get("steps") or []) if str(step).strip()]
+                expected_result = str(test_case_payload.get("expected_result") or "").strip()
+                preconditions = str(test_case_payload.get("preconditions") or "").strip()
                 
                 for index, step in enumerate(steps):
                     steps_data.append({
@@ -656,7 +662,10 @@ class XrayCloudPublisher:
                 
                 # Add to folder via GraphQL
                 if folder_id:
-                    xray_client.add_test_to_folder(req.xray_project_id, folder_id, issue_id)
+                    try:
+                        xray_client.add_test_to_folder(req.xray_project_id, folder_id, issue_id)
+                    except HTTPException as exc:
+                        warnings.append(f"Created {issue_key} but could not add it to Xray Cloud folder '{folder_path}': {exc.detail}")
 
                 # Link to Story
                 linked = False

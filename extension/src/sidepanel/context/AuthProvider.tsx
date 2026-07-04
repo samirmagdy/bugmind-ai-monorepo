@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { deobfuscate, obfuscate } from '../utils/StorageObfuscator';
+import { decodeStoredToken, obfuscate } from '../utils/StorageObfuscator';
 import { apiRequest, readJsonResponse, throwApiErrorResponse } from '../services/api';
 import { AuthRefreshRequestPayload, AuthTokenResponsePayload } from '../services/contracts';
 import { View } from '../types';
@@ -44,8 +44,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode, logDebug: (tag:
       chrome.storage.session.get(['bugmind_token', 'bugmind_refresh_token'], (session) => {
         const tokenValue = (session.bugmind_token as string || local.bugmind_token as string);
         const refreshTokenValue = (session.bugmind_refresh_token as string || local.bugmind_refresh_token as string);
-        const token = deobfuscate(tokenValue);
-        const refreshed = deobfuscate(refreshTokenValue);
+        const token = decodeStoredToken(tokenValue);
+        const refreshed = decodeStoredToken(refreshTokenValue);
         
         if (token) {
           setAuthToken(token);

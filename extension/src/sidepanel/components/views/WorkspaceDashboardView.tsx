@@ -21,6 +21,34 @@ interface WorkspaceUsage {
   audit_events_count: number;
 }
 
+function asAuditString(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+
+function renderAuditMetadata(log: WorkspaceAuditLog) {
+  const metadata = log.metadata || {};
+  if (asAuditString(metadata.audit_schema_version) !== 'ai_generation.v1') return null;
+  const success = metadata.success !== false;
+  const inputHash = asAuditString(metadata.input_hash);
+  const outputHash = asAuditString(metadata.output_hash);
+  const failureReason = asAuditString(metadata.failure_reason);
+  return (
+    <div className="mt-2 space-y-1 rounded-lg border border-[var(--border-soft)] bg-[var(--surface-soft)] p-2 text-[10px] text-[var(--text-secondary)]">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <StatusBadge tone={success ? 'success' : 'warning'}>{success ? 'Success' : 'Failed'}</StatusBadge>
+        <span>{asAuditString(metadata.generation_source) || 'generation'}</span>
+        <span>{asAuditString(metadata.ai_model_name) || 'model unknown'}</span>
+        <span>prompt {asAuditString(metadata.prompt_template_version) || 'n/a'}</span>
+      </div>
+      <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+        {inputHash && <div className="truncate">Input: {inputHash.slice(0, 12)}</div>}
+        {outputHash && <div className="truncate">Output: {outputHash.slice(0, 12)}</div>}
+      </div>
+      {failureReason && <div className="line-clamp-2 text-[var(--status-warning)]">{failureReason}</div>}
+    </div>
+  );
+}
+
 export const WorkspaceDashboardView: React.FC = () => {
   const { session, updateSession, auth: { apiBase, authToken, refreshSession } } = useBugMind();
   const [loading, setLoading] = useState(true);
@@ -655,6 +683,7 @@ export const WorkspaceDashboardView: React.FC = () => {
                   </div>
                   <div className="text-[9px] text-[var(--text-muted)]">{new Date(log.created_at).toLocaleString()}</div>
                 </div>
+                {renderAuditMetadata(log)}
               </SurfaceCard>
             )) : (
               <div className="text-center p-5 border border-dashed border-[var(--border-main)] rounded-xl text-[var(--text-muted)] text-xs">

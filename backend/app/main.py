@@ -2,15 +2,13 @@ import logging
 import traceback
 import time
 from contextlib import asynccontextmanager
-from urllib.parse import urlparse
-from typing import Optional
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import JSONResponse, RedirectResponse, Response
+from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy import text, inspect
 
 from app.core.api_errors import http_exception_handler, validation_exception_handler, build_error_response
@@ -18,7 +16,7 @@ from app.api.v1.api import api_router
 from app.core.config import settings
 from app.core.database import engine
 from app.core.logging import configure_logging
-from app.core.context import set_trace_id, get_trace_id
+from app.core.context import get_trace_id
 from app.core.middleware import limit_request_size_middleware, security_headers_middleware
 
 configure_logging()

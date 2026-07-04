@@ -6,7 +6,16 @@
   "extraPaths": [
     "./backend"
   ],
+  "venvPath": "./backend",
+  "venv": ".venv",
+  "pythonVersion": "3.14",
   "executionEnvironments": [
+    {
+      "root": "./backend",
+      "extraPaths": [
+        "./backend"
+      ]
+    },
     {
       "root": ".",
       "extraPaths": [
