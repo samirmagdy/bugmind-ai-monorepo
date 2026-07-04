@@ -12,10 +12,13 @@ import base64
 import json
 import os
 import re
+import struct
 import subprocess
 import sys
+import tempfile
 import urllib.error
 import urllib.request
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -47,6 +50,26 @@ SECRET_PATTERNS = [
     ("Postgres URL with password", re.compile(r"postgres(?:ql)?://[^:\s]+:[^@\s]+@")),
     ("Redis URL with password", re.compile(r"redis://[^:\s]+:[^@\s]+@")),
 ]
+
+STORE_ALLOWED_PERMISSIONS = {"sidePanel", "storage", "activeTab", "scripting", "identity"}
+STORE_FORBIDDEN_PACKAGE_SUFFIXES = {
+    ".crx",
+    ".pem",
+    ".key",
+    ".env",
+    ".map",
+    ".ts",
+    ".tsx",
+}
+STORE_FORBIDDEN_PACKAGE_NAMES = {
+    "node_modules",
+    "src",
+    ".git",
+    "package-lock.json",
+    "package.json",
+    "tsconfig.json",
+    "vite.config.ts",
+}
 
 
 @dataclass
@@ -381,6 +404,134 @@ def check_secret_scan(gate: Gate) -> None:
         gate.pass_("Secret scan")
 
 
+def png_dimensions(path: Path) -> tuple[int, int] | None:
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return None
+    if len(data) < 24 or data[:8] != b"\x89PNG\r\n\x1a\n":
+        return None
+    return struct.unpack(">II", data[16:24])
+
+
+def check_chrome_store_package(gate: Gate) -> None:
+    dist = ROOT / "extension" / "dist"
+    manifest_path = dist / "manifest.json"
+    if not manifest_path.exists():
+        gate.fail("Chrome Web Store manifest", "extension/dist/manifest.json was not created")
+        return
+
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        gate.fail("Chrome Web Store manifest", f"invalid JSON: {exc}")
+        return
+
+    if manifest.get("manifest_version") != 3:
+        gate.fail("Chrome Web Store manifest version", "manifest_version must be 3")
+    else:
+        gate.pass_("Chrome Web Store manifest version")
+
+    name = str(manifest.get("name") or "")
+    description = str(manifest.get("description") or "")
+    version = str(manifest.get("version") or "")
+    if 1 <= len(name) <= 45 and 1 <= len(description) <= 132 and re.fullmatch(r"\d+(?:\.\d+){0,3}", version):
+        gate.pass_("Chrome Web Store listing metadata")
+    else:
+        gate.fail("Chrome Web Store listing metadata", "name <=45 chars, description <=132 chars, version must be numeric dotted format")
+
+    if "key" in manifest or "oauth2" in manifest:
+        gate.fail("Chrome Web Store manifest secrets", "manifest must not contain a private extension key or embedded oauth2 secrets")
+    else:
+        gate.pass_("Chrome Web Store manifest secrets")
+
+    permissions = set(manifest.get("permissions") or [])
+    unexpected_permissions = sorted(permissions - STORE_ALLOWED_PERMISSIONS)
+    if unexpected_permissions:
+        gate.fail("Chrome Web Store permissions", f"unexpected permissions: {', '.join(unexpected_permissions)}")
+    else:
+        gate.pass_("Chrome Web Store permissions")
+
+    required_hosts = manifest.get("host_permissions") or []
+    if required_hosts == ["https://*.atlassian.net/*"]:
+        gate.pass_("Chrome Web Store required host permissions")
+    else:
+        gate.fail("Chrome Web Store required host permissions", "required host permissions must stay limited to Atlassian Cloud")
+
+    optional_hosts = manifest.get("optional_host_permissions") or []
+    if optional_hosts and all(host.startswith("*://*/") for host in optional_hosts):
+        gate.pass_("Chrome Web Store optional host permissions")
+    else:
+        gate.fail("Chrome Web Store optional host permissions", "server/self-hosted Jira access must remain optional")
+
+    csp = str((manifest.get("content_security_policy") or {}).get("extension_pages") or "")
+    if "unsafe-eval" in csp or "http:" in csp or "https:" in csp:
+        gate.fail("Chrome Web Store CSP", "extension_pages CSP must not allow remote script sources or unsafe-eval")
+    else:
+        gate.pass_("Chrome Web Store CSP")
+
+    icons = manifest.get("icons") or {}
+    bad_icons: list[str] = []
+    for size in (16, 48, 128):
+        icon_path = icons.get(str(size))
+        dimensions = png_dimensions(dist / icon_path) if icon_path else None
+        if dimensions != (size, size):
+            bad_icons.append(f"{size}px")
+    if bad_icons:
+        gate.fail("Chrome Web Store icons", f"missing or invalid PNG dimensions: {', '.join(bad_icons)}")
+    else:
+        gate.pass_("Chrome Web Store icons")
+
+    package_findings: list[str] = []
+    for path in dist.rglob("*"):
+        if not path.is_file():
+            continue
+        rel_parts = path.relative_to(dist).parts
+        if any(part in STORE_FORBIDDEN_PACKAGE_NAMES for part in rel_parts):
+            package_findings.append(str(path.relative_to(dist)))
+            continue
+        if path.suffix in STORE_FORBIDDEN_PACKAGE_SUFFIXES:
+            package_findings.append(str(path.relative_to(dist)))
+            continue
+        if path.suffix in {".html", ".css"}:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            if re.search(r"https?://", text):
+                package_findings.append(f"{path.relative_to(dist)} remote URL")
+    if package_findings:
+        gate.fail("Chrome Web Store package contents", "; ".join(package_findings[:20]))
+    else:
+        gate.pass_("Chrome Web Store package contents")
+
+    js_findings: list[str] = []
+    for path in (dist / "assets").glob("*.js"):
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if re.search(r"\b(importScripts|eval)\s*\(|new Function\s*\(|import\s*\(\s*['\"]https?://", text):
+            js_findings.append(str(path.relative_to(dist)))
+    if js_findings:
+        gate.fail("Chrome Web Store remote-code scan", "; ".join(js_findings))
+    else:
+        gate.pass_("Chrome Web Store remote-code scan")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        zip_path = Path(tmp) / "bugmind-extension-store.zip"
+        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for path in sorted(dist.rglob("*")):
+                if path.is_file():
+                    archive.write(path, path.relative_to(dist))
+        with zipfile.ZipFile(zip_path) as archive:
+            names = archive.namelist()
+    if "manifest.json" in names and all(not name.startswith("/") and ".." not in Path(name).parts for name in names):
+        gate.pass_("Chrome Web Store ZIP structure")
+    else:
+        gate.fail("Chrome Web Store ZIP structure", "ZIP must contain dist contents at root with manifest.json")
+
+    store_doc = ROOT / "docs" / "extension" / "CHROME_WEB_STORE_SUBMISSION.md"
+    if store_doc.exists():
+        gate.pass_("Chrome Web Store submission notes")
+    else:
+        gate.fail("Chrome Web Store submission notes", "docs/extension/CHROME_WEB_STORE_SUBMISSION.md is required")
+
+
 def check_audits(gate: Gate) -> None:
     python = str(BACKEND_PYTHON if BACKEND_PYTHON.exists() else sys.executable)
     run_command(
@@ -423,6 +574,8 @@ def check_local_quality(gate: Gate) -> None:
         gate.pass_("Extension Google identity permission")
     else:
         gate.fail("Extension Google identity permission", "manifest must include the Chrome identity permission for Google sign-in")
+
+    check_chrome_store_package(gate)
 
 
 def check_blueprint(gate: Gate) -> None:

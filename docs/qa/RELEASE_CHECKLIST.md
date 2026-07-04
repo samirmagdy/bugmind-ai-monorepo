@@ -12,7 +12,8 @@ python scripts/production_readiness_gate.py
 This gate runs backend tests, extension lint/build/E2E smoke tests, dependency
 audits, secret scanning, Render Blueprint validation, live health checks, Render
 environment validation, Stripe live-mode validation, monitoring protection
-checks, custom-domain allowlist checks, and real Jira/Xray tenant contracts.
+checks, Chrome Web Store package checks, custom-domain allowlist checks, and
+real Jira/Xray tenant contracts.
 
 Required external production values before the gate can pass:
 
@@ -32,6 +33,7 @@ Required external production values before the gate can pass:
 - Chrome Web Store extension origin in `EXTENSION_ORIGINS`
 - Google OAuth production client ID configured for the Chrome extension redirect
   URI returned by `chrome.identity.getRedirectURL('google')`
+- Chrome Web Store listing assets and privacy policy URL ready for submission
 - Real tenant contract env vars:
   `RUN_REAL_TENANT_CONTRACTS=true`, `REAL_JIRA_CLOUD_URL`,
   `REAL_JIRA_CLOUD_EMAIL`, `REAL_JIRA_CLOUD_API_TOKEN`,
