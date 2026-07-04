@@ -67,6 +67,24 @@ print(urlunparse(parsed._replace(netloc=netloc)))
 PY
 }
 
+ensure_postgres_sslmode() {
+    python - <<'PY'
+import os
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+
+url = os.environ.get("DATABASE_URL", "")
+parsed = urlparse(url)
+
+if not parsed.scheme.startswith(("postgres", "postgresql")):
+    print(url)
+    raise SystemExit(0)
+
+params = dict(parse_qsl(parsed.query, keep_blank_values=True))
+params.setdefault("sslmode", "require")
+print(urlunparse(parsed._replace(query=urlencode(params))))
+PY
+}
+
 # DATABASE_URL is MANDATORY for all environments. Fail fast if it is missing.
 if [ -z "${DATABASE_URL:-}" ]; then
     echo "ERROR: DATABASE_URL is not set. The application cannot start without a valid database connection."
@@ -78,22 +96,25 @@ if [ -z "${ENVIRONMENT:-}" ] && [ -n "${RENDER:-}" ]; then
     export ENVIRONMENT=production
 fi
 
+export DATABASE_URL="$(ensure_postgres_sslmode)"
 echo "Database target: $(describe_database_url)"
 
 if ! database_host_resolves; then
     if [ -n "${DATABASE_EXTERNAL_URL:-}" ]; then
         echo "Render private database hostname is not resolvable here. Falling back to DATABASE_EXTERNAL_URL."
         export DATABASE_URL="${DATABASE_EXTERNAL_URL}"
+        export DATABASE_URL="$(ensure_postgres_sslmode)"
         echo "Database target after fallback: $(describe_database_url)"
         database_host_resolves
-    elif derived_database_url="$(derive_external_database_url)"; then
+    elif [ "${ALLOW_DERIVED_DATABASE_EXTERNAL_URL:-false}" = "true" ] && derived_database_url="$(derive_external_database_url)"; then
         echo "Render private database hostname is not resolvable here. Deriving external Render Postgres URL."
         export DATABASE_URL="${derived_database_url}"
+        export DATABASE_URL="$(ensure_postgres_sslmode)"
         echo "Database target after derived fallback: $(describe_database_url)"
         database_host_resolves
     else
         echo "ERROR: Render private database hostname is not resolvable from this service."
-        echo "If the database and service are already in the same Render region/workspace, set DATABASE_EXTERNAL_URL to the database External Database URL from Render."
+        echo "Set DATABASE_EXTERNAL_URL to the database External Database URL from Render."
         exit 1
     fi
 fi
