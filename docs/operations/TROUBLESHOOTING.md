@@ -23,7 +23,7 @@ Generate a fresh key: `python -c "from cryptography.fernet import Fernet; print(
 - Check Alembic migrations have been applied: `alembic upgrade head`
 
 ### Render Postgres hostname does not resolve during Alembic
-If logs show `failed to resolve host 'dpg-...-a'`, the app is trying to use Render's internal Postgres hostname from a context where Render private DNS is unavailable. Verify the backend service and Postgres database are in the same Render workspace and region. The Blueprint pins `bugmind-backend`, `bugmind-db`, and `bugmind-redis` to `oregon` for new stacks; for existing resources, check the region in the Render dashboard because Render does not allow changing a service or database region after creation.
+If logs show `failed to resolve host 'dpg-...-a'`, the app is trying to use Render's internal Postgres hostname from a context where Render private DNS is unavailable. Verify the backend service and Postgres database are in the same Render workspace and region. The Blueprint pins `bugmind-ai-monorepo` and `bugmind-db` to `frankfurt`; for existing resources, check the region in the Render dashboard because Render does not allow changing a service or database region after creation.
 
 The startup script logs a masked `Database target` before running Alembic. If the internal hostname still cannot resolve, set `DATABASE_EXTERNAL_URL` on the Render web service to the database's official External Database URL from the Render dashboard. Keep `DATABASE_URL` linked to `bugmind-db`; the fallback is only used when private DNS lookup fails. The script forces `sslmode=require` for Render Postgres.
 

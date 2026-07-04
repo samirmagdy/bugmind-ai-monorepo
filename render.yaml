@@ -1,26 +1,20 @@
 databases:
   - name: bugmind-db
-    region: oregon
+    region: frankfurt
     plan: free
-    databaseName: bugmind
+    databaseName: bugmind_v98p
     user: bugmind_admin
 
 services:
-  - type: redis
-    name: bugmind-redis
-    region: oregon
-    plan: free
-    ipAllowList: []
-
   - type: web
-    name: bugmind-backend
+    name: bugmind-ai-monorepo
     runtime: python
-    region: oregon
+    region: frankfurt
     rootDir: backend
     buildCommand: pip install -r requirements.txt
     startCommand: bash ./start_render.sh
     healthCheckPath: /health
-    autoDeployTrigger: commit
+    autoDeployTrigger: off
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.3
@@ -36,11 +30,6 @@ services:
         value: production
       - key: LOG_LEVEL
         value: INFO
-      - key: REDIS_URL
-        fromService:
-          type: redis
-          name: bugmind-redis
-          property: connectionString
       - key: SECRET_KEY
         sync: true  # Changed from false to true
       - key: ENCRYPTION_KEY
