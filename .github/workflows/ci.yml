@@ -13,7 +13,7 @@ jobs:
   extension-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
@@ -43,7 +43,7 @@ jobs:
       ENVIRONMENT: development
       RATE_LIMITS_ENABLED: "false"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
